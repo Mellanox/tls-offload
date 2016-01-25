@@ -1,1 +1,1 @@
-obj-m		+= mlx_accel_core.o
+obj-$(CONFIG_MLX_ACCEL_CORE)		+= mlx_accel_core.o

@@ -1,0 +1,12 @@
+#
+# Mellanox accelerator core driver configuration
+#
+
+config MLX_ACCEL_CORE
+	tristate "Mellanox Technologies ConnectX-4 accelerator core driver"
+	depends on MLX5_INFINIBAND && MLX5_CORE_EN && MLX5_CORE
+	default n
+	---help---
+	  Core driver for low level functionality of the ConnectX-4 accelerator
+	  by Mellanox Technologies.
+
