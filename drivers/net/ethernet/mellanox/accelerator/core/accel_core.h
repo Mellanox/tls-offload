@@ -34,37 +34,19 @@
 #ifndef __MLX_ACCEL_CORE_H__
 #define __MLX_ACCEL_CORE_H__
 
-#include <rdma/ib_verbs.h>
-#include <linux/types.h>
-#include <linux/list.h>
-
 #include "accel_core_sdk.h"
 
-
-static LIST_HEAD(mlx_accel_core_ctx_list);
-static LIST_HEAD(mlx_accel_core_devices);
-static LIST_HEAD(mlx_accel_core_clients);
-static DEFINE_MUTEX(mlx_accel_core_mutex);
 
 #define MLX_RECV_SIZE 2048
 #define MLX_EXIT_WRID 1
 
-int mlx_accel_core_init_qp(struct mlx_accel_core_ctx *res);
-int mlx_accel_core_reset_qp(struct mlx_accel_core_ctx *res);
-int mlx_accel_core_rtr_qp(struct mlx_accel_core_ctx *res, int dqpn);
-int mlx_accel_core_rts_qp(struct mlx_accel_core_ctx *res);
-int mlx_accel_core_close_qp(struct mlx_accel_core_ctx *ctx);
+int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
+				  struct mlx_accel_core_dma_buf *buf);
 
-int sendmsg(struct mlx_accel_core_ctx *ctx, struct mlx_accel_core_dma_buf *buf);
+int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
+				   unsigned int tx_size, unsigned int rx_size);
+void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn);
 
-void mlx_accel_core_add_client_to_device(
-		struct ib_device *device, u8 port,
-		struct mlx_accel_core_client *client);
-
-void mlx_accel_core_release(struct mlx_accel_core_ctx *ctx);
-
-int post_recv(struct mlx_accel_core_ctx *ctx);
-
-void completion_handler(struct ib_cq *cq, void *arg);
+int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn);
 
 #endif /* __MLX_ACCEL_CORE_H__ */

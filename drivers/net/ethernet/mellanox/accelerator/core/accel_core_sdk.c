@@ -31,242 +31,147 @@
  *
  */
 
+#include <linux/errno.h>
+#include <linux/err.h>
+
 #include "accel_core.h"
 
 
-u8 mlx_accel_core_get_port_num(struct mlx_accel_core_ctx *ctx)
-{
-	return ctx->port_num;
-}
-EXPORT_SYMBOL(mlx_accel_core_get_port_num);
-
-struct ib_port {
-	struct kobject         kobj;
-	struct ib_device      *ibdev;
-	struct attribute_group gid_group;
-	struct attribute_group pkey_group;
-	u8                     port_num;
-};
-
-struct kobject *
-mlx_accel_core_get_kobject_parent(struct mlx_accel_core_ctx *ctx)
-{
-	u8 port_num = ctx->port_num;
-	struct kobject *p = NULL, *result = NULL;
-
-	list_for_each_entry(p, &ctx->ibdev->port_list, entry) {
-		struct ib_port *port = container_of(p, struct ib_port, kobj);
-			if (port->port_num == port_num) {
-				result = &port->kobj;
-				break;
-			}
-	}
-
-	return result;
-}
-EXPORT_SYMBOL(mlx_accel_core_get_kobject_parent);
-
-struct ib_device *mlx_accel_core_get_ibdev(struct mlx_accel_core_ctx *ctx)
-{
-	return ctx->ibdev;
-}
-EXPORT_SYMBOL(mlx_accel_core_get_ibdev);
+extern struct list_head mlx_accel_core_devices;
+extern struct list_head mlx_accel_core_clients;
+extern struct mutex mlx_accel_core_mutex;
 
 void mlx_accel_core_register_client(struct mlx_accel_core_client *client)
 {
-	u8 port = 0;
-	struct mlx_accel_core_accel_device *accel_device = NULL;
+	struct mlx_accel_core_device *accel_device;
 
-	pr_info("mlx_accel_core_register_client called\n");
+	pr_info("mlx_accel_core_register_client called for %s\n", client->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
-	list_add_tail(&client->list, &mlx_accel_core_clients);
 
 	list_for_each_entry(accel_device, &mlx_accel_core_devices, list) {
-		for (port = rdma_start_port(accel_device->device);
-		     port <= rdma_end_port(accel_device->device);
-		     port++) {
-			/* [BP]: TODO: Add a check of client properties
-			 * against the device properties and decide whether to
-			 * create a context for this combination of client and
-			 * device
-			 */
-			mlx_accel_core_add_client_to_device(
-					accel_device->device,
-					port, client);
-		}
+		/*
+		 * TODO: Add a check of client properties against the
+		 * device properties
+		 */
+		client->add(accel_device);
 	}
+	list_add_tail(&client->list, &mlx_accel_core_clients);
+
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 EXPORT_SYMBOL(mlx_accel_core_register_client);
 
 void mlx_accel_core_unregister_client(struct mlx_accel_core_client *client)
 {
-	struct mlx_accel_core_ctx *ctx = NULL, *tmp = NULL;
+	struct mlx_accel_core_client *curr_client, *tmp;
+	struct mlx_accel_core_device *accel_device;
 
-	pr_info("mlx_accel_core_unregister_client called\n");
+	pr_info("mlx_accel_core_unregister_client called for %s\n",
+			client->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
-	list_del(&client->list);
 
-	list_for_each_entry_safe(ctx, tmp, &mlx_accel_core_ctx_list, list) {
-		if (!strncmp(ctx->client->name, client->name,
-					IB_DEVICE_NAME_MAX))
-			client->remove(ctx);
-			mlx_accel_core_release(ctx);
+	list_for_each_entry_safe(curr_client, tmp,
+			&mlx_accel_core_clients, list) {
+		if (curr_client == client) {
+			list_del(&client->list);
+			break;
+		}
 	}
+	list_for_each_entry(accel_device, &mlx_accel_core_devices, list) {
+		/*
+		 * TODO: Add a check of client properties against the
+		 * device properties
+		 */
+		client->remove(accel_device);
+	}
+
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 EXPORT_SYMBOL(mlx_accel_core_unregister_client);
 
-int mlx_accel_core_create(struct mlx_accel_core_ctx *res,
-		int tx_size, int rx_size,
-		void (*recv_cb)(void *cb_arg,
-				struct mlx_accel_core_dma_buf *buf),
-		void *cb_arg)
+struct mlx_accel_core_conn *
+mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
+		struct mlx_accel_core_conn_init_attr *conn_init_attr)
 {
-	int ret = 0;
-	struct ib_cq_init_attr cq_attr = {};
-	struct ib_qp_init_attr init_attr = {};
+	struct mlx_accel_core_conn *conn = NULL;
+	void *rc;
 
-	if (recv_cb == NULL)
-		return -EINVAL;
+	pr_info("mlx_accel_core_conn_create called for %s\n",
+			accel_device->device->name);
 
-	res->recv_cb = recv_cb;
-	res->cb_arg = cb_arg;
-	spin_lock_init(&res->pending_lock);
-	INIT_LIST_HEAD(&res->pending_msgs);
-
-	atomic_set(&res->pending_sends, 0);
-	atomic_set(&res->pending_recvs, 0);
-
-/* the allocated size is actully larger than the requested size */
-	cq_attr.cqe = 4*tx_size + rx_size;
-	res->cq = ib_create_cq(res->ibdev, completion_handler, NULL, res,
-			&cq_attr);
-	if (IS_ERR(res->cq)) {
-		ret = PTR_ERR(res->cq);
-		pr_err("Failed to create recv CQ\n");
+	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
+	if (!conn) {
+		rc = ERR_PTR(-ENOMEM);
 		goto err;
 	}
 
-	ib_req_notify_cq(res->cq, IB_CQ_NEXT_COMP);
-
-	res->pd = ib_alloc_pd(res->ibdev);
-	if (IS_ERR(res->pd)) {
-		ret = PTR_ERR(res->pd);
-		pr_err("Failed to create PD\n");
-		goto err_create_cq;
+	if (!conn_init_attr->recv_cb) {
+		rc = ERR_PTR(-EINVAL);
+		goto err;
 	}
 
-	res->mr = ib_get_dma_mr(res->pd,
-				IB_ACCESS_LOCAL_WRITE |
-				IB_ACCESS_REMOTE_WRITE);
-	if (IS_ERR(res->mr)) {
-		ret = PTR_ERR(res->mr);
-		pr_err("Failed to create mr\n");
-		goto err_create_pd;
-	}
+	conn->accel_device = accel_device;
+	/*
+	 * [AY]: TODO, for now we support only port 1 since netwon is CX4 which
+	 * have rdma device per port. That mean simulator will need to run also
+	 * on CX4 and Liran approved.
+	 */
+	conn->port_num = 1;
 
+	atomic_set(&conn->pending_sends, 0);
+	atomic_set(&conn->pending_recvs, 0);
 
-	init_attr.cap.max_send_wr     = tx_size;
-	init_attr.cap.max_recv_wr     = rx_size;
-	init_attr.cap.max_recv_sge    = 1;
-	init_attr.cap.max_send_sge    = 1;
-	init_attr.sq_sig_type         = IB_SIGNAL_REQ_WR;
-	init_attr.qp_type             = IB_QPT_RC;
-	init_attr.send_cq             = res->cq;
-	init_attr.recv_cq             = res->cq;
+	INIT_LIST_HEAD(&conn->pending_msgs);
+	spin_lock_init(&conn->pending_lock);
 
-	res->qp = ib_create_qp(res->pd, &init_attr);
-	if (IS_ERR(res->qp)) {
-		ret = PTR_ERR(res->qp);
-		pr_err("Failed to create QP\n");
-		goto err_create_mr;
-	}
+	conn->recv_cb = conn_init_attr->recv_cb;
+	conn->cb_arg = conn_init_attr->cb_arg;
 
-	pr_info("created qp with %d send entries and %d recv entries\n",
-			init_attr.cap.max_send_wr, init_attr.cap.max_recv_wr);
+	rc = ERR_PTR(mlx_accel_core_rdma_create_res(conn,
+			conn_init_attr->tx_size, conn_init_attr->rx_size));
+	if (IS_ERR(rc))
+		goto err;
 
-	return ret;
-
-err_create_mr:
-	ib_dereg_mr(res->mr);
-err_create_pd:
-	ib_dealloc_pd(res->pd);
-err_create_cq:
-	ib_destroy_cq(res->cq);
+	return conn;
 err:
-	return ret;
+	kfree(conn);
+	return rc;
 }
-EXPORT_SYMBOL(mlx_accel_core_create);
+EXPORT_SYMBOL(mlx_accel_core_conn_create);
 
-/* Must hold mlx_accel_core_ctx_list_mutex */
-void mlx_accel_core_release(struct mlx_accel_core_ctx *ctx)
+void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn)
 {
-	struct mlx_accel_core_dma_buf *buf, *tmp;
+	pr_info("mlx_accel_core_conn_destroy called for %s-%d\n",
+			conn->accel_device->device->name, conn->port_num);
 
-	pr_info("mlx_accel_core_release called\n");
+	mlx_accel_core_rdma_destroy_res(conn);
 
-	list_del(&ctx->list);
-	if (ctx->qp) {
-		mlx_accel_core_close_qp(ctx);
-		list_for_each_entry_safe(buf, tmp, &ctx->pending_msgs, list) {
-			kfree(buf);
-		}
-		ib_destroy_cq(ctx->cq);
-		ib_dereg_mr(ctx->mr);
-		ib_dealloc_pd(ctx->pd);
-
-	}
-
-	kfree(ctx);
+	kfree(conn);
 }
-EXPORT_SYMBOL(mlx_accel_core_release);
+EXPORT_SYMBOL(mlx_accel_core_conn_destroy);
 
-int mlx_accel_core_connect(struct mlx_accel_core_ctx *ctx, int dqpn)
+int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 {
-	int ret = 0;
-	ret = mlx_accel_core_reset_qp(ctx);
-	if (ret) {
-		pr_err("Failed to change QP state to reset\n");
-		return ret;
-	}
+	pr_info("mlx_accel_core_connect called for %s-%d\n",
+			conn->accel_device->device->name, conn->port_num);
 
-	ret = mlx_accel_core_init_qp(ctx);
-	if (ret) {
-		pr_err("Failed to modify QP from RESET to INIT\n");
-		return ret;
-	}
-
-	while (!post_recv(ctx))
-		;
-
-	ret = mlx_accel_core_rtr_qp(ctx, dqpn);
-	if (ret) {
-		pr_err("Failed to change QP state from INIT to RTR\n");
-		return ret;
-	}
-
-	ret = mlx_accel_core_rts_qp(ctx);
-	if (ret) {
-		pr_err("Failed to change QP state from RTR to RTS\n");
-		return ret;
-	}
-
-	return ret;
+	return mlx_accel_core_rdma_connect(conn);
 }
 EXPORT_SYMBOL(mlx_accel_core_connect);
 
-void mlx_accel_core_sendmsg(struct mlx_accel_core_ctx *ctx,
+void mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
 		struct mlx_accel_core_dma_buf *buf)
 {
-/* [I.L] TODO: see if the list_empty without lock is safe here */
-	if (!list_empty(&ctx->pending_msgs) || sendmsg(ctx, buf)) {
-		unsigned long flags;
-		spin_lock_irqsave(&ctx->pending_lock, flags);
-		list_add_tail(&buf->list, &ctx->pending_msgs);
-		spin_unlock_irqrestore(&ctx->pending_lock, flags);
+	unsigned long flags;
+
+	/* TODO: see if the list_empty without lock is safe here */
+	if (!list_empty(&conn->pending_msgs) ||
+			mlx_accel_core_rdma_post_send(conn, buf)) {
+		spin_lock_irqsave(&conn->pending_lock, flags);
+		list_add_tail(&buf->list, &conn->pending_msgs);
+		spin_unlock_irqrestore(&conn->pending_lock, flags);
 	}
 }
 EXPORT_SYMBOL(mlx_accel_core_sendmsg);

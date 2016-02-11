@@ -35,104 +35,74 @@
 #include "accel_core.h"
 
 
+LIST_HEAD(mlx_accel_core_devices);
+LIST_HEAD(mlx_accel_core_clients);
+/* protects access between client un/registeration and device add/remove calls
+ */
+DEFINE_MUTEX(mlx_accel_core_mutex);
+
 /* [BP]: TODO - change these details */
 MODULE_AUTHOR("Jhon Snow <Jhon@WinterIsComing.com>");
 MODULE_DESCRIPTION("Mellanox FPGA Accelerator Core Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
-/* called with mlx_accel_core_mutex locked */
-void mlx_accel_core_add_client_to_device(
-		struct ib_device *device, u8 port,
-		struct mlx_accel_core_client *client)
-{
-	struct mlx_accel_core_ctx *ctx = NULL;
-
-	pr_info("mlx_accel_core_add_client_to_device called\n");
-	if (!client->add) {
-		pr_err("Client must have an add function\n");
-		return;
-	}
-
-	if (!client->remove) {
-		pr_err("Client must have an add function\n");
-		return;
-	}
-
-	ctx             = kzalloc(sizeof(*ctx), GFP_ATOMIC);
-	if (!ctx)
-		return;
-
-	ctx->ibdev      = device;
-	ctx->port_num   = port;
-	ctx->client = client;
-	list_add_tail(&ctx->list, &mlx_accel_core_ctx_list);
-	pr_info("mlx_accel_core_add_client_to_device add called\n");
-	client->add(ctx);
-}
-
 static void mlx_accel_core_add_one(struct ib_device *device)
 {
-	u8 port = 0;
-	struct mlx_accel_core_client *client = NULL;
-	struct mlx_accel_core_accel_device *accel_device =
-		kmalloc(sizeof(*accel_device), GFP_ATOMIC);
+	struct mlx_accel_core_device *accel_device = NULL;
+	struct mlx_accel_core_client *client;
 
-	pr_info("mlx_accel_core_add_one called\n");
+	pr_info("mlx_accel_core_add_one called for %s\n", device->name);
 
+	accel_device = kzalloc(sizeof(*accel_device), GFP_KERNEL);
 	if (!accel_device)
 		return;
 
 	accel_device->device = device;
-	/* [BP]: TODO: get the FPGA properties */
-	accel_device->properties = 0;
+	accel_device->properties = 0;	/* TODO: get the FPGA properties */
 
 	mutex_lock(&mlx_accel_core_mutex);
+
+	list_for_each_entry(client, &mlx_accel_core_clients, list) {
+		/*
+		 * TODO: Add a check of client properties against
+		 *  the device properties
+		 */
+		client->add(accel_device);
+	}
 	list_add_tail(&accel_device->list, &mlx_accel_core_devices);
 
-	for (port = rdma_start_port(device); port <= rdma_end_port(device);
-	     port++) {
-		list_for_each_entry(client, &mlx_accel_core_clients, list) {
-			/* [BP]: TODO: Add a check of client properties
-			 * against the device properties and decide whether to
-			 * create a context for this combination of client and
-			 * device
-			 */
-			mlx_accel_core_add_client_to_device(device, port,
-					client);
-		}
-	}
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 
 static void mlx_accel_core_remove_one(struct ib_device *device,
-		void *client_data)
+				      void *client_data)
 {
-	struct mlx_accel_core_ctx *ctx = NULL, *tmp = NULL;
-	struct mlx_accel_core_accel_device *accel_device;
+	struct mlx_accel_core_device *accel_device, *tmp;
+	struct mlx_accel_core_client *client;
 
 	pr_info("mlx_accel_core_remove_one called for %s\n", device->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
-	list_for_each_entry(accel_device, &mlx_accel_core_devices, list) {
-		if (strncmp(accel_device->device->name, device->name,
-					IB_DEVICE_NAME_MAX)) {
-			continue;
+
+	list_for_each_entry_safe(accel_device, tmp,
+				 &mlx_accel_core_devices, list) {
+		if (accel_device->device == device) {
+			list_del(&accel_device->list);
+			break;
 		}
-		list_del(&accel_device->list);
-		break;
+	}
+	list_for_each_entry(client, &mlx_accel_core_clients, list) {
+		/*
+		 * TODO: Add a check of client properties against
+		 *  the device properties
+		 */
+		client->remove(accel_device);
 	}
 
-	list_for_each_entry_safe(ctx, tmp, &mlx_accel_core_ctx_list, list) {
-		/* If it's not the device being removed continue */
-		if (strncmp(ctx->ibdev->name, device->name,
-					IB_DEVICE_NAME_MAX))
-			continue;
-		/* Remove the device from its clients */
-		ctx->client->remove(ctx);
-		mlx_accel_core_release(ctx);
-	}
 	mutex_unlock(&mlx_accel_core_mutex);
+
+	kfree(accel_device);
 }
 
 
