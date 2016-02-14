@@ -35,19 +35,23 @@
 #define __MLX_ACCEL_CORE_SDK_H__
 
 #include <rdma/ib_verbs.h>
+#include <linux/mlx5/driver.h>
 #include <linux/types.h>
 #include <linux/list.h>
 #include <linux/dma-direction.h>
 #include <linux/kobject.h>
 
 
-#define MLX_CLIENT_NAME_MAX 64
+#define MLX_CLIENT_NAME_MAX			64
+#define MLX_ACCEL_DEVICE_NAME_MAX	(MLX5_MAX_NAME_LEN + IB_DEVICE_NAME_MAX)
 
 struct mlx_accel_core_conn;
 
 /* represents an accelerated ib_device */
 struct mlx_accel_core_device {
-	struct ib_device *device;
+	struct mlx5_core_dev *hw_dev;
+	struct ib_device *ib_dev;
+	char name[MLX_ACCEL_DEVICE_NAME_MAX];
 	unsigned int properties; /* accelerator properties the device support */
 
 	struct list_head connections;
@@ -139,7 +143,7 @@ mlx_accel_core_get_kobject_parent(struct mlx_accel_core_conn *conn)
 {
 	struct kobject *p = NULL, *result = NULL;
 
-	list_for_each_entry(p, &conn->accel_device->device->port_list, entry) {
+	list_for_each_entry(p, &conn->accel_device->ib_dev->port_list, entry) {
 		struct ib_port *port = container_of(p, struct ib_port, kobj);
 		if (port->port_num == 0) {
 			result = &port->kobj;

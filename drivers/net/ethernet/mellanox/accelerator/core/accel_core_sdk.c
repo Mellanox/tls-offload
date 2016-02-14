@@ -98,8 +98,7 @@ mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
 	struct mlx_accel_core_conn *conn = NULL;
 	void *rc;
 
-	pr_info("mlx_accel_core_conn_create called for %s\n",
-			accel_device->device->name);
+	pr_info("mlx_accel_core_conn_create called for %s\n", accel_device->name);
 
 	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn) {
@@ -143,8 +142,8 @@ EXPORT_SYMBOL(mlx_accel_core_conn_create);
 
 void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn)
 {
-	pr_info("mlx_accel_core_conn_destroy called for %s-%d\n",
-			conn->accel_device->device->name, conn->port_num);
+	pr_info("mlx_accel_core_conn_destroy called for %s\n",
+			conn->accel_device->name);
 
 	mlx_accel_core_rdma_destroy_res(conn);
 
@@ -154,8 +153,8 @@ EXPORT_SYMBOL(mlx_accel_core_conn_destroy);
 
 int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 {
-	pr_info("mlx_accel_core_connect called for %s-%d\n",
-			conn->accel_device->device->name, conn->port_num);
+	pr_info("mlx_accel_core_connect called for %s\n",
+			conn->accel_device->name);
 
 	return mlx_accel_core_rdma_connect(conn);
 }

@@ -53,7 +53,7 @@ static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 					buf->data, sge.length,
 					DMA_FROM_DEVICE);
 
-	if (ib_dma_mapping_error(conn->accel_device->device, sge.addr)) {
+	if (ib_dma_mapping_error(conn->accel_device->ib_dev, sge.addr)) {
 		pr_err("post_recv: DMA mapping error on address %p\n",
 				buf->data);
 		return -ENOMEM;
@@ -77,7 +77,7 @@ static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 	if (rc == 0)
 		atomic_inc(&conn->pending_recvs);
 	else {
-		ib_dma_unmap_single(conn->accel_device->device, buf->dma_addr,
+		ib_dma_unmap_single(conn->accel_device->ib_dev, buf->dma_addr,
 				buf->data_size, DMA_FROM_DEVICE);
 		kfree(buf);
 	}
@@ -92,13 +92,13 @@ int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 	struct ib_send_wr *bad_wr;
 	int rc;
 
-	buf->dma_addr = ib_dma_map_single(conn->accel_device->device,
+	buf->dma_addr = ib_dma_map_single(conn->accel_device->ib_dev,
 							buf->data,
 							buf->data_size,
 							DMA_TO_DEVICE);
 	buf->dma_dir = DMA_TO_DEVICE;
 
-	if (ib_dma_mapping_error(conn->accel_device->device, buf->dma_addr)) {
+	if (ib_dma_mapping_error(conn->accel_device->ib_dev, buf->dma_addr)) {
 			pr_err("sendmsg: DMA mapping error on address %p\n",
 					buf->data);
 			return -ENOMEM;
@@ -169,7 +169,7 @@ static void mlx_accel_core_rdma_comp_handler(struct ib_cq *cq, void *arg)
 			buf = (struct mlx_accel_core_dma_buf *)wc.wr_id;
 			if (wc.status == IB_WC_SUCCESS) {
 				contine_polling = 1;
-				ib_dma_unmap_single(conn->accel_device->device,
+				ib_dma_unmap_single(conn->accel_device->ib_dev,
 						buf->dma_addr,
 						buf->data_size,
 						buf->dma_dir);
@@ -247,7 +247,7 @@ int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
 	/*
 	 * allocate PD
 	 */
-	conn->pd = ib_alloc_pd(conn->accel_device->device);
+	conn->pd = ib_alloc_pd(conn->accel_device->ib_dev);
 	if (IS_ERR(conn->pd)) {
 		rc = PTR_ERR(conn->pd);
 		pr_err("Failed to create PD\n");
@@ -275,7 +275,7 @@ int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
 	 */
 	cq_attr.cqe = 4 * tx_size + rx_size;
 	/* TODO: add event cb for cq */
-	conn->cq = ib_create_cq(conn->accel_device->device,
+	conn->cq = ib_create_cq(conn->accel_device->ib_dev,
 			mlx_accel_core_rdma_comp_handler, NULL, conn, &cq_attr);
 	if (IS_ERR(conn->cq)) {
 		rc = PTR_ERR(conn->cq);
@@ -328,7 +328,7 @@ static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn)
 	rc = ib_query_qp(conn->qp, &attr, IB_QP_STATE, &init_attr);
 	if (rc || (attr.qp_state == IB_QPS_RESET)) {
 		pr_info("mlx_accel_core_close_qp: no need to modify state for ibdev %s\n",
-				conn->accel_device->device->name);
+				conn->accel_device->ib_dev->name);
 		goto out;
 	}
 
@@ -339,7 +339,7 @@ static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn)
 	rc = ib_modify_qp(conn->qp, &attr, flags);
 	if (rc) {
 		pr_info("mlx_accel_core_close_qp: ib_modify_qp failed ibdev %s err:%d\n",
-				conn->accel_device->device->name, rc);
+				conn->accel_device->ib_dev->name, rc);
 		goto out;
 	}
 
