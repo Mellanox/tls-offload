@@ -174,7 +174,12 @@ void mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
 	if (!list_empty(&conn->pending_msgs) ||
 			mlx_accel_core_rdma_post_send(conn, buf)) {
 		spin_lock_irqsave(&conn->pending_lock, flags);
+		if (list_empty(&conn->pending_msgs)) {
+			mlx_accel_core_rdma_post_send(conn, buf);
+			goto unlock;
+		}
 		list_add_tail(&buf->list, &conn->pending_msgs);
+unlock:
 		spin_unlock_irqrestore(&conn->pending_lock, flags);
 	}
 }
