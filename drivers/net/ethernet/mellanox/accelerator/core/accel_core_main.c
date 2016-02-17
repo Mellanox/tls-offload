@@ -150,7 +150,7 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 
-static void mlx_accel_core_remove_one(struct ib_device *device,
+static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 					void *client_data)
 {
 	struct mlx_accel_core_device *accel_device;

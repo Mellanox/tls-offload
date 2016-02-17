@@ -49,7 +49,7 @@ static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 		return -ENOMEM;
 
 	buf->data_size = sge.length;
-	sge.addr = ib_dma_map_single(conn->accel_device->device,
+	sge.addr = ib_dma_map_single(conn->accel_device->ib_dev,
 					buf->data, sge.length,
 					DMA_FROM_DEVICE);
 
@@ -125,7 +125,7 @@ int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 		atomic_inc(&conn->pending_sends);
 	} else {
 		/* panalize slow path rather then fast path */
-		ib_dma_unmap_single(conn->accel_device->device, buf->dma_addr,
+		ib_dma_unmap_single(conn->accel_device->ib_dev, buf->dma_addr,
 					buf->data_size, DMA_TO_DEVICE);
 	}
 
@@ -202,7 +202,7 @@ static void mlx_accel_core_rdma_comp_handler(struct ib_cq *cq, void *arg)
 							wc.vendor_err, ib_wc_status_msg(wc.status));
 				}
 
-				ib_dma_unmap_single(conn->accel_device->device,
+				ib_dma_unmap_single(conn->accel_device->ib_dev,
 							buf->dma_addr,
 							buf->data_size,
 							buf->dma_dir);
@@ -237,7 +237,7 @@ int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
 	/*
 	 * query GID
 	 */
-	rc = ib_query_gid(conn->accel_device->device, conn->port_num,
+	rc = ib_query_gid(conn->accel_device->ib_dev, conn->port_num,
 			  0, &conn->gid, NULL);
 	if (rc) {
 		pr_err("Failed to query gid got error %d\n", rc);
