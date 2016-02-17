@@ -160,6 +160,11 @@ int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 }
 EXPORT_SYMBOL(mlx_accel_core_connect);
 
+/* [BP]: TODO - add a return value and another argument @retry.
+ * The return value will return failure only if the post_send call failed.
+ * The argument @retry, is a boolean telling whether the functing could return
+ * a failure. If @retry != 0 then the function should add a pending message if
+ * post_send fails. (@retry is required for the TLS module) */
 void mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
 		struct mlx_accel_core_dma_buf *buf)
 {

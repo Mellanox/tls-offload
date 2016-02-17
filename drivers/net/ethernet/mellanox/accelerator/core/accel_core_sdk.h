@@ -43,7 +43,11 @@
 
 
 #define MLX_CLIENT_NAME_MAX			64
+/* [BP]: This length is Ok if each part of the name is delimited correctly
+ * with NULL */
 #define MLX_ACCEL_DEVICE_NAME_MAX	(MLX5_MAX_NAME_LEN + IB_DEVICE_NAME_MAX)
+
+/* [BP]: TODO - this is a header exposed to all - document functions & variables properly */
 
 struct mlx_accel_core_conn;
 
@@ -54,7 +58,8 @@ struct mlx_accel_core_device {
 	char name[MLX_ACCEL_DEVICE_NAME_MAX];
 	unsigned int properties; /* accelerator properties the device support */
 
-	struct list_head connections;
+	struct list_head connections; /* [BP]: We assume only clients use this
+					 list */
 
 	struct list_head list;
 };
@@ -92,6 +97,7 @@ struct mlx_accel_core_conn {
 	atomic_t pending_sends;
 	atomic_t pending_recvs;
 
+	/* [BP]: TODO - Why not use RCU list? */
 	struct list_head pending_msgs;
 	spinlock_t pending_lock;
 

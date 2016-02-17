@@ -59,11 +59,15 @@ static inline struct mlx_accel_core_device *
 		if (!accel_device->hw_dev) {
 			if (!accel_device->ib_dev) {
 				/* [AY]: TODO: do we want to check this case */
+				/* [BP]: Yes, WARN_ON could be nice */
 				dump_stack();
 				pr_err("Found Invalid accel device\n");
 				continue;
 			}
 			if (accel_device->ib_dev->dma_device == &dev->pdev->dev) {
+				/* [BP]: Can you move this out of the
+				 * function? Currently, this isn't a "find"
+				 * function */
 				accel_device->hw_dev = dev;
 				goto found;
 			}
@@ -87,11 +91,15 @@ static inline struct mlx_accel_core_device *
 		if (!accel_device->ib_dev) {
 			if (!accel_device->hw_dev) {
 				/* [AY]: TODO: do we want to check this case */
+				/* [BP]: Yes, WARN_ON could be nice */
 				dump_stack();
 				pr_err("Found Invalid accel device\n");
 				continue;
 			}
 			if (&accel_device->hw_dev->pdev->dev == dev->dma_device) {
+				/* [BP]: Can you move this out of the
+				 * function? Currently, this isn't a "find"
+				 * function */
 				accel_device->ib_dev = dev;
 				goto found;
 			}
@@ -123,6 +131,8 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 		list_add_tail(&accel_device->list, &mlx_accel_core_devices);
 	}
 
+	/* [BP]: the ib_dev check is redundent, you should put a comment here
+	 * or remove it, since you've just assigned it a value */
 	if ((accel_device->ib_dev) && (accel_device->hw_dev)) {
 		list_for_each_entry(client, &mlx_accel_core_clients, list) {
 			/*
@@ -131,6 +141,8 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 			 */
 			client->add(accel_device);
 		}
+		/* [BP]: Use snprintf and write NULL to the last element of
+		 * the buffer */
 		sprintf(accel_device->name, "%s-%s", accel_device->ib_dev->name,
 				accel_device->hw_dev->priv.name);
 	}
@@ -193,6 +205,8 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 		list_add_tail(&accel_device->list, &mlx_accel_core_devices);
 	}
 
+	/* [BP]: the hw_dev check is redundent, you should put a comment here
+	 * or remove it, since you've just assigned it a value */
 	if ((accel_device->hw_dev) && (accel_device->ib_dev)) {
 		list_for_each_entry(client, &mlx_accel_core_clients, list) {
 			/*
@@ -201,6 +215,8 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 			 */
 			client->add(accel_device);
 		}
+		/* [BP]: Use snprintf and write NULL to the last element of
+		 * the buffer */
 		sprintf(accel_device->name, "%s-%s", accel_device->ib_dev->name,
 				accel_device->hw_dev->priv.name);
 	}
