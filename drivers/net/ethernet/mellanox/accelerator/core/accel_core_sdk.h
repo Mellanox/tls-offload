@@ -64,6 +64,8 @@ struct mlx_accel_core_device {
 					 list */
 
 	struct list_head list;
+	struct list_head client_data_list;
+
 };
 
 struct mlx_accel_core_client {
@@ -142,6 +144,11 @@ int mlx_accel_core_ddr_write(struct mlx_accel_core_device *dev,
 			     u8 size, u64 addr, void *buf,
 			     enum mlx_accel_core_ddr_access_type access_type);
 
+void mlx_accel_core_client_data_set(struct mlx_accel_core_device *accel_device,
+				    struct mlx_accel_core_client *client,
+				    void *data);
+void *mlx_accel_core_client_data_get(struct mlx_accel_core_device *accel_device,
+				     struct mlx_accel_core_client *client);
 
 struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *accel_device);
 

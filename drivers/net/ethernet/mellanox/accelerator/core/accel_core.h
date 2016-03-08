@@ -36,10 +36,19 @@
 
 #include "accel_core_sdk.h"
 
-
 #define MLX_RECV_SIZE 2048
 #define MLX_EXIT_WRID 1
 
+struct mlx_accel_client_data {
+	struct list_head  list;
+	struct mlx_accel_core_client *client;
+	void *data;
+};
+
+int mlx_add_accel_client_context(struct mlx_accel_core_device *device,
+				 struct mlx_accel_core_client *client);
+
+/* RDMA */
 int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 				  struct mlx_accel_core_dma_buf *buf);
 

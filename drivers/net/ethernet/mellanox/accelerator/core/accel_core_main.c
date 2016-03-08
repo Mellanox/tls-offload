@@ -47,6 +47,22 @@ MODULE_DESCRIPTION("Mellanox FPGA Accelerator Core Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
+int mlx_add_accel_client_context(struct mlx_accel_core_device *device,
+				 struct mlx_accel_core_client *client)
+{
+	struct mlx_accel_client_data *context;
+
+	context = kmalloc(sizeof(*context), GFP_KERNEL);
+	if (!context)
+		return -ENOMEM;
+
+	context->client = client;
+	context->data   = NULL;
+
+	list_add(&context->list, &device->client_data_list);
+	return 0;
+}
+
 static inline struct mlx_accel_core_device *
 	mlx_find_accel_dev_by_hw_dev_unlocked(struct mlx5_core_dev *dev)
 {
@@ -139,7 +155,8 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 			 * TODO: Add a check of client properties against
 			 *  the device properties
 			 */
-			client->add(accel_device);
+			if (!mlx_add_accel_client_context(accel_device, client))
+				client->add(accel_device);
 		}
 		/* [BP]: Use snprintf and write NULL to the last element of
 		 * the buffer */
@@ -154,7 +171,7 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 					void *client_data)
 {
 	struct mlx_accel_core_device *accel_device;
-	struct mlx_accel_core_client *client;
+	struct mlx_accel_client_data *client_context, *tmp;
 
 	pr_info("mlx_accel_core_remove_one called for %s\n", dev->name);
 
@@ -170,12 +187,12 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 
 	accel_device->ib_dev = NULL;
 	if (accel_device->hw_dev) {
-		list_for_each_entry(client, &mlx_accel_core_clients, list) {
-			/*
-			 * TODO: Add a check of client properties against
-			 *  the device properties
-			 */
-			client->remove(accel_device);
+		list_for_each_entry_safe(client_context, tmp,
+					 &accel_device->client_data_list,
+					 list) {
+			client_context->client->remove(accel_device);
+			list_del(&client_context->list);
+			kfree(client_context);
 		}
 	} else {
 		list_del(&accel_device->list);
@@ -202,6 +219,7 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 
 		accel_device->hw_dev = dev;
 		accel_device->properties = 0;	/* TODO: get the FPGA properties */
+		INIT_LIST_HEAD(&accel_device->client_data_list);
 		list_add_tail(&accel_device->list, &mlx_accel_core_devices);
 	}
 
@@ -213,7 +231,8 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 			 * TODO: Add a check of client properties against
 			 *  the device properties
 			 */
-			client->add(accel_device);
+			if (!mlx_add_accel_client_context(accel_device, client))
+				client->add(accel_device);
 		}
 		/* [BP]: Use snprintf and write NULL to the last element of
 		 * the buffer */
@@ -230,7 +249,7 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 {
 	struct mlx_accel_core_device *accel_device =
 			(struct mlx_accel_core_device *)context;
-	struct mlx_accel_core_client *client;
+	struct mlx_accel_client_data *client_context, *tmp;
 
 	pr_info("mlx_accel_hw_dev_remove_one called for %s\n", dev->priv.name);
 
@@ -238,12 +257,12 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 
 	accel_device->hw_dev = NULL;
 	if (accel_device->ib_dev) {
-		list_for_each_entry(client, &mlx_accel_core_clients, list) {
-			/*
-			 * TODO: Add a check of client properties against
-			 *  the device properties
-			 */
-			client->remove(accel_device);
+		list_for_each_entry_safe(client_context, tmp,
+					 &accel_device->client_data_list,
+					 list) {
+			client_context->client->remove(accel_device);
+			list_del(&client_context->list);
+			kfree(client_context);
 		}
 	} else {
 		list_del(&accel_device->list);

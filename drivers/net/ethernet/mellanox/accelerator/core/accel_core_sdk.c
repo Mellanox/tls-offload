@@ -45,7 +45,7 @@ void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 {
 	struct mlx_accel_core_device *accel_device;
 
-	pr_info("mlx_accel_core_register_client called for %s\n", client->name);
+	pr_info("mlx_accel_core_client_register called for %s\n", client->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
 
@@ -54,7 +54,8 @@ void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 		 * TODO: Add a check of client properties against the
 		 * device properties
 		 */
-		client->add(accel_device);
+		if (!mlx_add_accel_client_context(accel_device, client))
+			client->add(accel_device);
 	}
 	list_add_tail(&client->list, &mlx_accel_core_clients);
 
@@ -66,27 +67,37 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 {
 	struct mlx_accel_core_client *curr_client, *tmp;
 	struct mlx_accel_core_device *accel_device;
+	struct mlx_accel_client_data *context, *tmp_context;
 
-	pr_info("mlx_accel_core_unregister_client called for %s\n",
-			client->name);
+	pr_info("mlx_accel_core_client_unregister called for %s\n",
+		client->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
 
-	list_for_each_entry_safe(curr_client, tmp,
-			&mlx_accel_core_clients, list) {
-		if (curr_client == client) {
-			list_del(&client->list);
-			break;
-		}
-	}
 	list_for_each_entry(accel_device, &mlx_accel_core_devices, list) {
 		/*
 		 * TODO: Add a check of client properties against the
 		 * device properties
 		 */
-		client->remove(accel_device);
+		list_for_each_entry_safe(context, tmp_context,
+					 &accel_device->client_data_list,
+					 list) {
+			if (context->client == client) {
+				client->remove(accel_device);
+				list_del(&context->list);
+				kfree(context);
+				break;
+			}
+		}
 	}
 
+	list_for_each_entry_safe(curr_client, tmp,
+				 &mlx_accel_core_clients, list) {
+		if (curr_client == client) {
+			list_del(&client->list);
+			break;
+		}
+	}
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 EXPORT_SYMBOL(mlx_accel_core_client_unregister);
@@ -98,7 +109,8 @@ mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
 	struct mlx_accel_core_conn *conn = NULL;
 	void *rc;
 
-	pr_info("mlx_accel_core_conn_create called for %s\n", accel_device->name);
+	pr_info("mlx_accel_core_conn_create called for %s\n",
+		accel_device->name);
 
 	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn) {
@@ -212,6 +224,42 @@ int mlx_accel_core_ddr_write(struct mlx_accel_core_device *dev,
 	return size;
 }
 EXPORT_SYMBOL(mlx_accel_core_ddr_write);
+
+void mlx_accel_core_client_data_set(struct mlx_accel_core_device *accel_device,
+				    struct mlx_accel_core_client *client,
+				    void *data)
+{
+	struct mlx_accel_client_data *context;
+
+	list_for_each_entry(context, &accel_device->client_data_list, list)
+		if (context->client == client) {
+			context->data = data;
+			return;
+		}
+
+	pr_warn("No client context found for %s/%s\n",
+		accel_device->name, client->name);
+}
+EXPORT_SYMBOL(mlx_accel_core_client_data_set);
+
+void *mlx_accel_core_client_data_get(struct mlx_accel_core_device *accel_device,
+				     struct mlx_accel_core_client *client)
+{
+	struct mlx_accel_client_data *context;
+	void *ret = NULL;
+
+	list_for_each_entry(context, &accel_device->client_data_list, list)
+		if (context->client == client) {
+			ret = context->data;
+			goto out;
+		}
+	pr_warn("No client context found for %s/%s\n",
+		accel_device->name, client->name);
+
+out:
+	return ret;
+}
+EXPORT_SYMBOL(mlx_accel_core_client_data_get);
 
 struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *device)
 {
