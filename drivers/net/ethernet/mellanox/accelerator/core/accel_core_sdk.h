@@ -48,8 +48,10 @@
 #define MLX_ACCEL_DEVICE_NAME_MAX	(MLX5_MAX_NAME_LEN + IB_DEVICE_NAME_MAX)
 
 /* [BP]: TODO - this is a header exposed to all - document functions & variables properly */
-
-struct mlx_accel_core_conn;
+enum mlx_accel_core_ddr_access_type {
+	MLX_ACCEL_CORE_DDR_ACCESS_TYPE_I2C = 0x0,
+	MLX_ACCEL_CORE_DDR_ACCESS_TYPE_RDMA,
+};
 
 /* represents an accelerated ib_device */
 struct mlx_accel_core_device {
@@ -121,43 +123,26 @@ struct mlx_accel_core_conn {
 	struct list_head list;
 };
 
+void mlx_accel_core_client_register(struct mlx_accel_core_client *client);
+void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client);
 
-void mlx_accel_core_register_client(struct mlx_accel_core_client *client);
-void mlx_accel_core_unregister_client(struct mlx_accel_core_client *client);
-
-struct mlx_accel_core_conn *
-mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
-		struct mlx_accel_core_conn_init_attr *conn_init_attr);
+struct mlx_accel_core_conn *mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
+						       struct mlx_accel_core_conn_init_attr *conn_init_attr);
 void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn);
 
 int mlx_accel_core_connect(struct mlx_accel_core_conn *conn);
 
 void mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
-		struct mlx_accel_core_dma_buf *buf);
+			    struct mlx_accel_core_dma_buf *buf);
+
+int mlx_accel_core_ddr_read(struct mlx_accel_core_device *dev,
+			    u8 size, u64 addr, void *buf,
+			    enum mlx_accel_core_ddr_access_type access_type);
+int mlx_accel_core_ddr_write(struct mlx_accel_core_device *dev,
+			     u8 size, u64 addr, void *buf,
+			     enum mlx_accel_core_ddr_access_type access_type);
 
 
-struct ib_port {
-	struct kobject         kobj;
-	struct ib_device      *ibdev;
-	struct attribute_group gid_group;
-	struct attribute_group pkey_group;
-	u8                     port_num;
-};
-
-static inline struct kobject *
-mlx_accel_core_get_kobject_parent(struct mlx_accel_core_conn *conn)
-{
-	struct kobject *p = NULL, *result = NULL;
-
-	list_for_each_entry(p, &conn->accel_device->ib_dev->port_list, entry) {
-		struct ib_port *port = container_of(p, struct ib_port, kobj);
-		if (port->port_num == 0) {
-			result = &port->kobj;
-			break;
-		}
-	}
-
-	return result;
-}
+struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *accel_device);
 
 #endif /* __MLX_ACCEL_CORE_SDK_H__ */

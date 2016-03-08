@@ -33,15 +33,15 @@
 
 #include <linux/errno.h>
 #include <linux/err.h>
+#include <rdma/ib_verbs.h>
 
 #include "accel_core.h"
-
 
 extern struct list_head mlx_accel_core_devices;
 extern struct list_head mlx_accel_core_clients;
 extern struct mutex mlx_accel_core_mutex;
 
-void mlx_accel_core_register_client(struct mlx_accel_core_client *client)
+void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 {
 	struct mlx_accel_core_device *accel_device;
 
@@ -60,9 +60,9 @@ void mlx_accel_core_register_client(struct mlx_accel_core_client *client)
 
 	mutex_unlock(&mlx_accel_core_mutex);
 }
-EXPORT_SYMBOL(mlx_accel_core_register_client);
+EXPORT_SYMBOL(mlx_accel_core_client_register);
 
-void mlx_accel_core_unregister_client(struct mlx_accel_core_client *client)
+void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 {
 	struct mlx_accel_core_client *curr_client, *tmp;
 	struct mlx_accel_core_device *accel_device;
@@ -89,7 +89,7 @@ void mlx_accel_core_unregister_client(struct mlx_accel_core_client *client)
 
 	mutex_unlock(&mlx_accel_core_mutex);
 }
-EXPORT_SYMBOL(mlx_accel_core_unregister_client);
+EXPORT_SYMBOL(mlx_accel_core_client_unregister);
 
 struct mlx_accel_core_conn *
 mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
@@ -184,3 +184,38 @@ unlock:
 	}
 }
 EXPORT_SYMBOL(mlx_accel_core_sendmsg);
+
+int mlx_accel_core_ddr_read(struct mlx_accel_core_device *dev,
+			    u8 size, u64 addr, void *buf,
+			    enum mlx_accel_core_ddr_access_type access_type)
+{
+	/* [AY]: TODO: In future add RDMA DDR access */
+	if (access_type == MLX_ACCEL_CORE_DDR_ACCESS_TYPE_RDMA)
+		return -EACCES;
+
+	/* i2c access */
+	/* TODO: mlx5_accel_read_i2c(dev->hw_dev, size, addr, buf); */
+	return size;
+}
+EXPORT_SYMBOL(mlx_accel_core_ddr_read);
+
+int mlx_accel_core_ddr_write(struct mlx_accel_core_device *dev,
+			     u8 size, u64 addr, void *buf,
+			     enum mlx_accel_core_ddr_access_type access_type)
+{
+	/* [AY]: TODO: In future add RDMA DDR access */
+	if (access_type == MLX_ACCEL_CORE_DDR_ACCESS_TYPE_RDMA)
+		return -EACCES;
+
+	/* i2c access */
+	/* TODO: mlx5_accel_write_i2c(dev->hw_dev, size, addr, buf); */
+	return size;
+}
+EXPORT_SYMBOL(mlx_accel_core_ddr_write);
+
+struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *device)
+{
+	/* TODO: return port 0 as parent sysfs node, instead of "ports" node? */
+	return device->ib_dev->ports_parent;
+}
+EXPORT_SYMBOL(mlx_accel_core_kobj);
