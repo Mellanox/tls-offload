@@ -1,0 +1,11 @@
+#
+# Mellanox accelerator tools driver configuration
+#
+
+config MLX_ACCEL_TOOLS
+	tristate "Mellanox Technologies accelarator tools driver"
+	depends on MLX_ACCEL_CORE
+	default n
+	---help---
+	  Accelarator tools driver by Mellanox Technologies.
+
