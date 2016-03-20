@@ -197,6 +197,18 @@ unlock:
 }
 EXPORT_SYMBOL(mlx_accel_core_sendmsg);
 
+u64 mlx_accel_core_ddr_size_get(struct mlx_accel_core_device *dev)
+{
+	return 0x400000000ULL;
+}
+EXPORT_SYMBOL(mlx_accel_core_ddr_size_get);
+
+u64 mlx_accel_core_ddr_base_get(struct mlx_accel_core_device *dev)
+{
+	return 0x400000000ULL;
+}
+EXPORT_SYMBOL(mlx_accel_core_ddr_base_get);
+
 int mlx_accel_core_ddr_read(struct mlx_accel_core_device *dev,
 			    u8 size, u64 addr, void *buf,
 			    enum mlx_accel_core_ddr_access_type access_type)
