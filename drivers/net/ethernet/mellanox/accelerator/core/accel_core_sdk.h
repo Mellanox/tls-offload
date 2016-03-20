@@ -59,6 +59,7 @@ struct mlx_accel_core_device {
 	struct ib_device *ib_dev;
 	char name[MLX_ACCEL_DEVICE_NAME_MAX];
 	unsigned int properties; /* accelerator properties the device support */
+	unsigned int id;
 
 	struct list_head connections; /* [BP]: We assume only clients use this
 					 list */

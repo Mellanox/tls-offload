@@ -34,7 +34,7 @@
 
 #include "accel_core.h"
 
-
+atomic_t mlx_accel_device_id = ATOMIC_INIT(0);
 LIST_HEAD(mlx_accel_core_devices);
 LIST_HEAD(mlx_accel_core_clients);
 /* protects access between client un/registeration and device add/remove calls
@@ -127,6 +127,21 @@ found:
 	return accel_device;
 }
 
+static struct mlx_accel_core_device *mlx_accel_device_alloc(void)
+{
+	struct mlx_accel_core_device *accel_device = NULL;
+
+	accel_device = kzalloc(sizeof(*accel_device), GFP_KERNEL);
+	if (!accel_device)
+		return NULL;
+
+	accel_device->properties = 0;	/* TODO: get the FPGA properties */
+	accel_device->id = atomic_add_return(1, &mlx_accel_device_id);
+	INIT_LIST_HEAD(&accel_device->client_data_list);
+	list_add_tail(&accel_device->list, &mlx_accel_core_devices);
+	return accel_device;
+}
+
 static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 {
 	struct mlx_accel_core_device *accel_device = NULL;
@@ -138,13 +153,10 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 
 	accel_device = mlx_find_accel_dev_by_ib_dev_unlocked(dev);
 	if (!accel_device) {
-		accel_device = kzalloc(sizeof(*accel_device), GFP_KERNEL);
+		accel_device = mlx_accel_device_alloc();
 		if (!accel_device)
-			return;
-
+			goto out;
 		accel_device->ib_dev = dev;
-		accel_device->properties = 0;	/* TODO: get the FPGA properties */
-		list_add_tail(&accel_device->list, &mlx_accel_core_devices);
 	}
 
 	/* [BP]: the ib_dev check is redundent, you should put a comment here
@@ -164,6 +176,7 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 				accel_device->hw_dev->priv.name);
 	}
 
+out:
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 
@@ -173,7 +186,7 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 	struct mlx_accel_core_device *accel_device;
 	struct mlx_accel_client_data *client_context, *tmp;
 
-	pr_info("mlx_accel_core_remove_one called for %s\n", dev->name);
+	pr_info("mlx_accel_ib_dev_remove_one called for %s\n", dev->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
 
@@ -182,7 +195,7 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 		/* [AY]: TODO: do we want to check this case */
 		dump_stack();
 		pr_err("Not found valid accel device\n");
-		return;
+		goto out;
 	}
 
 	accel_device->ib_dev = NULL;
@@ -199,6 +212,7 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 		kfree(accel_device);
 	}
 
+out:
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 
@@ -213,14 +227,10 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 
 	accel_device = mlx_find_accel_dev_by_hw_dev_unlocked(dev);
 	if (!accel_device) {
-		accel_device = kzalloc(sizeof(*accel_device), GFP_KERNEL);
+		accel_device = mlx_accel_device_alloc();
 		if (!accel_device)
-			return NULL;
-
+			goto out;
 		accel_device->hw_dev = dev;
-		accel_device->properties = 0;	/* TODO: get the FPGA properties */
-		INIT_LIST_HEAD(&accel_device->client_data_list);
-		list_add_tail(&accel_device->list, &mlx_accel_core_devices);
 	}
 
 	/* [BP]: the hw_dev check is redundent, you should put a comment here
@@ -240,6 +250,7 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 				accel_device->hw_dev->priv.name);
 	}
 
+out:
 	mutex_unlock(&mlx_accel_core_mutex);
 	return accel_device;
 }
