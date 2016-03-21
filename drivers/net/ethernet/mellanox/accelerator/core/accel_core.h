@@ -58,4 +58,10 @@ void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn);
 
 int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn);
 
+/* I2C */
+int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
+		       size_t size, u64 addr, u8 *buf);
+int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
+			size_t size, u64 addr, u8 *buf);
+
 #endif /* __MLX_ACCEL_CORE_H__ */
