@@ -40,18 +40,12 @@
 #include <linux/list.h>
 #include <linux/dma-direction.h>
 #include <linux/kobject.h>
-
+#include <linux/mlx5/accel/sdk.h>
 
 #define MLX_CLIENT_NAME_MAX			64
 /* [BP]: This length is Ok if each part of the name is delimited correctly
  * with NULL */
 #define MLX_ACCEL_DEVICE_NAME_MAX	(MLX5_MAX_NAME_LEN + IB_DEVICE_NAME_MAX)
-
-/* [BP]: TODO - this is a header exposed to all - document functions & variables properly */
-enum mlx_accel_core_ddr_access_type {
-	MLX_ACCEL_CORE_DDR_ACCESS_TYPE_I2C = 0x0,
-	MLX_ACCEL_CORE_DDR_ACCESS_TYPE_RDMA,
-};
 
 /* represents an accelerated ib_device */
 struct mlx_accel_core_device {
@@ -142,10 +136,10 @@ u64 mlx_accel_core_ddr_size_get(struct mlx_accel_core_device *dev);
 u64 mlx_accel_core_ddr_base_get(struct mlx_accel_core_device *dev);
 int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 			    size_t size, u64 addr, void *buf,
-			    enum mlx_accel_core_ddr_access_type access_type);
+			    enum mlx_accel_access_type access_type);
 int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 			     size_t size, u64 addr, void *buf,
-			     enum mlx_accel_core_ddr_access_type access_type);
+			     enum mlx_accel_access_type access_type);
 
 void mlx_accel_core_client_data_set(struct mlx_accel_core_device *accel_device,
 				    struct mlx_accel_core_client *client,

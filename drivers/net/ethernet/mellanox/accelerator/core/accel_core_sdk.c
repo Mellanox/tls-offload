@@ -211,10 +211,10 @@ EXPORT_SYMBOL(mlx_accel_core_ddr_base_get);
 
 int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 			    size_t size, u64 addr, void *buf,
-			    enum mlx_accel_core_ddr_access_type access_type)
+			    enum mlx_accel_access_type access_type)
 {
 	/* [AY]: TODO: In future add RDMA DDR access */
-	if (access_type == MLX_ACCEL_CORE_DDR_ACCESS_TYPE_RDMA)
+	if (access_type == MLX_ACCEL_ACCESS_TYPE_RDMA)
 		return -EACCES;
 
 	pr_debug("Reading %lu bytes at 0x%llx using %d\n", size, addr,
@@ -227,10 +227,10 @@ EXPORT_SYMBOL(mlx_accel_core_mem_read);
 
 int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 			     size_t size, u64 addr, void *buf,
-			     enum mlx_accel_core_ddr_access_type access_type)
+			     enum mlx_accel_access_type access_type)
 {
 	/* [AY]: TODO: In future add RDMA DDR access */
-	if (access_type == MLX_ACCEL_CORE_DDR_ACCESS_TYPE_RDMA)
+	if (access_type == MLX_ACCEL_ACCESS_TYPE_RDMA)
 		return -EACCES;
 
 	pr_debug("Writing %lu bytes at 0x%llx using %d\n", size, addr,
