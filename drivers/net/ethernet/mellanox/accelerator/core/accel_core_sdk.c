@@ -213,6 +213,7 @@ int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 			    size_t size, u64 addr, void *buf,
 			    enum mlx_accel_access_type access_type)
 {
+	int ret;
 	/* [AY]: TODO: In future add RDMA DDR access */
 	if (access_type == MLX_ACCEL_ACCESS_TYPE_RDMA)
 		return -EACCES;
@@ -220,7 +221,9 @@ int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 	pr_debug("Reading %lu bytes at 0x%llx using %d\n", size, addr,
 		 access_type);
 	/* i2c access */
-	mlx_accel_read_i2c(dev->hw_dev, size, addr, buf);
+	ret = mlx_accel_read_i2c(dev->hw_dev, size, addr, buf);
+	if (ret)
+		return ret;
 	return size;
 }
 EXPORT_SYMBOL(mlx_accel_core_mem_read);
@@ -229,6 +232,7 @@ int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 			     size_t size, u64 addr, void *buf,
 			     enum mlx_accel_access_type access_type)
 {
+	int ret;
 	/* [AY]: TODO: In future add RDMA DDR access */
 	if (access_type == MLX_ACCEL_ACCESS_TYPE_RDMA)
 		return -EACCES;
@@ -236,7 +240,9 @@ int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 	pr_debug("Writing %lu bytes at 0x%llx using %d\n", size, addr,
 		 access_type);
 	/* i2c access */
-	mlx_accel_write_i2c(dev->hw_dev, size, addr, buf);
+	ret = mlx_accel_write_i2c(dev->hw_dev, size, addr, buf);
+	if (ret)
+		return ret;
 	return size;
 }
 EXPORT_SYMBOL(mlx_accel_core_mem_write);
