@@ -80,7 +80,7 @@ int mlx_accel_tools_mem_write(struct mlx_accel_tools_dev *sb_dev,
 	ret = mlx_accel_core_mem_write(sb_dev->accel_device, count, address,
 				       buf, access_type);
 	if (ret < 0) {
-		pr_err("mlx_accel_tools_mem_write: Failed to write %lu bytes at address %llu: %d\n",
+		pr_err("mlx_accel_tools_mem_write: Failed to write %lu bytes at address 0x%llx: %d\n",
 		       count, address, ret);
 		goto unlock;
 	}
@@ -105,7 +105,7 @@ int mlx_accel_tools_mem_read(struct mlx_accel_tools_dev *sb_dev, void *buf,
 	ret = mlx_accel_core_mem_read(sb_dev->accel_device, count, address, buf,
 				      access_type);
 	if (ret < 0) {
-		pr_err("mlx_accel_tools_mem_read: Failed to read %lu bytes at address %llu: %d\n",
+		pr_err("mlx_accel_tools_mem_read: Failed to read %lu bytes at address 0x%llx: %d\n",
 		       count, address, ret);
 		goto unlock;
 	}
