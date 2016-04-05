@@ -5,3 +5,6 @@
 obj-$(CONFIG_MLX4_CORE) += mlx4/
 obj-$(CONFIG_MLX5_CORE) += mlx5/core/
 obj-$(CONFIG_MLXSW_CORE) += mlxsw/
+# consider adding a .config option for ipsec,tls,etc.
+# obj-$(CONFIG_MLX5_ACCEL_CORE) += accelerator/
+obj-m += accelerator/
