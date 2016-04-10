@@ -170,6 +170,7 @@ long tools_char_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 }
 
 static const struct file_operations tools_fops = {
+		.owner = THIS_MODULE,
 		.open = tools_char_open,
 		.release = tools_char_release,
 		.read = tools_char_read,
