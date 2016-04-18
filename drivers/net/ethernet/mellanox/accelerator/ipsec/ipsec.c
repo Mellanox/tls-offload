@@ -205,6 +205,7 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 
 	sa_entry->status = ADD_SA_PENDING;
 	mlx_accel_core_sendmsg(dev->conn, buf);
+	/* After this point buf will be delete in mlx_accel_core */
 
 	/* wait for sa_add response and handle the response */
 	res = wait_event_killable(dev->wq, sa_entry->status != ADD_SA_PENDING);
@@ -227,15 +228,18 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 					flags);
 			synchronize_rcu();
 			kfree(sa_entry);
+			sa_entry = NULL;
 		}
 	}
 	goto out;
 
 err_sa_entry:
-		kfree(sa_entry);
+	kfree(sa_entry);
+	sa_entry = NULL;
 err_buf:
-		kfree(buf);
+	kfree(buf);
 out:
+	x->xso.offload_handle = (unsigned long)sa_entry;
 	return res;
 }
 
@@ -290,7 +294,12 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 {
 	pr_debug("mlx_ipsec_tx_handler started\n");
 
-	if (skb_dst(skb) && skb_dst(skb)->xfrm) {
+	/* [BP]: TODO - Verify invariant in the stack:
+	 * offload packets MUST have the last skb_dst(skb)->xfrm
+	 * with (offload_handle != NULL)
+	 */
+	if (skb_dst(skb) && skb_dst(skb)->xfrm &&
+	    skb_dst(skb)->xfrm->xso.offload_handle) {
 		if (insert_pet(skb)) {
 			pr_warn("insert_pet failed!!\n");
 			kfree_skb(skb);
