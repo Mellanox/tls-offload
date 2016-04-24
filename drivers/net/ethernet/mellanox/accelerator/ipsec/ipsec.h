@@ -66,6 +66,7 @@ struct mlx_ipsec_sa_entry {
 	struct hlist_node hlist;
 	struct xfrm_state *x;
 	enum fpga_add_sa_status status;
+	struct mlx_ipsec_dev *dev;
 };
 
 struct mlx_ipsec_dev {
@@ -95,5 +96,7 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device);
 
 int mlx_xfrm_offload_input(struct xfrm_state *x, struct sk_buff **skb);
 int mlx_xfrm_offload_output(struct xfrm_state *x, struct sk_buff **skb);
+
+struct mlx_ipsec_dev *mlx_ipsec_find_dev_by_netdev(struct net_device *netdev);
 
 #endif	/* __IPSEC_H__ */

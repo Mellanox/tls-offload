@@ -34,8 +34,8 @@
 #include "../core/accel_core_sdk.h"
 #include "ipsec.h"
 #include "ipsec_sysfs.h"
+#include "ipsec_hw.h"
 #include <linux/netdevice.h>
-
 
 static LIST_HEAD(mlx_ipsec_devs);
 static DEFINE_MUTEX(mlx_ipsec_mutex);
@@ -63,40 +63,14 @@ static struct mlx_ipsec_dev *find_mlx_ipsec_dev_by_netdev(
 	return NULL;
 }
 
-enum auth_identifier mlx_ipsec_get_auth_identifier(
-		struct xfrm_state *x)
+struct mlx_ipsec_dev *mlx_ipsec_find_dev_by_netdev(struct net_device *netdev)
 {
-	unsigned int key_len = (x->aead->alg_key_len + 7) / 8 - 4;
+	struct mlx_ipsec_dev *dev;
 
-	/* [BP]: TODO stop assuming it is AES GCM */
-	switch (key_len) {
-	case 16:
-		return IPSEC_OFFLOAD_AUTH_AES_GCM_128;
-	case 32:
-		return IPSEC_OFFLOAD_AUTH_AES_GCM_256;
-	default:
-		pr_warn("Bad key len: %d for alg %s\n", key_len,
-				x->aead->alg_name);
-		return -1;
-	}
-}
-
-enum crypto_identifier mlx_ipsec_get_crypto_identifier(
-		struct xfrm_state *x)
-{
-	unsigned int key_len = (x->aead->alg_key_len + 7) / 8 - 4;
-
-	/* [BP]: TODO stop assuming it is AES GCM */
-	switch (key_len) {
-	case 16:
-		return IPSEC_OFFLOAD_CRYPTO_AES_GCM_128;
-	case 32:
-		return IPSEC_OFFLOAD_CRYPTO_AES_GCM_256;
-	default:
-		pr_warn("Bad key len: %d for alg %s\n", key_len,
-				x->aead->alg_name);
-		return -1;
-	}
+	mutex_lock(&mlx_ipsec_mutex);
+	dev = find_mlx_ipsec_dev_by_netdev(netdev);
+	mutex_unlock(&mlx_ipsec_mutex);
+	return dev;
 }
 
 /*
@@ -107,91 +81,32 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 {
 	struct net_device *netdev = x->xso.dev;
 	struct mlx_ipsec_dev *dev;
-	struct sa_cmd_v4 *cmd;
 	struct mlx_ipsec_sa_entry *sa_entry = NULL;
 	unsigned long flags;
-	int fifo_full;
-	int len;
-	struct mlx_accel_core_dma_buf *buf = NULL;
-	__be32 crypto_data_len;
-	/* key_len for AES-GCM contains both key and
-	 * the 4 bytes of the salt at the end
-	 */
-	unsigned int key_len = (x->aead->alg_key_len + 7) / 8;
 	int res;
 
 	pr_debug("add_sa(): key_len %d\n",
 			(x->aead->alg_key_len + 7) / 8);
 
-	mutex_lock(&mlx_ipsec_mutex);
-	dev = find_mlx_ipsec_dev_by_netdev(netdev);
-	mutex_unlock(&mlx_ipsec_mutex);
+	dev = mlx_ipsec_find_dev_by_netdev(netdev);
 	if (!dev) {
 		res = -EINVAL;
-		goto out;
-	}
-
-	crypto_data_len = key_len - 4;
-
-	len = sizeof(struct sa_cmd_v4) + crypto_data_len;
-	buf = kzalloc(sizeof(struct mlx_accel_core_dma_buf) + len, GFP_ATOMIC);
-	if (!buf) {
-		res = -ENOMEM;
 		goto out;
 	}
 
 	sa_entry = kzalloc(sizeof(struct mlx_ipsec_sa_entry), GFP_ATOMIC);
 	if (!sa_entry) {
 		res = -ENOMEM;
-		goto err_buf;
+		goto out;
 	}
 
 	sa_entry->hw_sa_id = UNASSIGNED_SA_ID;
 	sa_entry->sw_sa_id = atomic_inc_return(&dev->next_sw_sa_id);
+	/* WA HW bug - sw sa ID isn't respected, and instead set to sa_index */
+	sa_entry->sw_sa_id = (ntohl(x->id.daddr.a4) ^ ntohl(x->id.spi)) &
+			     0xFFFFF;
 	sa_entry->x = x;
-
-	buf->data_size = len;
-	cmd = (struct sa_cmd_v4 *)buf->data;
-	cmd->cmd = htonl(CMD_ADD_SA);
-	cmd->sw_sa_id = htonl(sa_entry->sw_sa_id);
-
-	/* Is this the correct mask? */
-	cmd->sip = htonl(x->props.saddr.a4);
-	cmd->sip_mask = htonl(x->sel.prefixlen_s); /* TODO: not tested */
-	cmd->dip = htonl(x->id.daddr.a4);
-	cmd->dip_mask = htonl(x->sel.prefixlen_d); /* TODO: not tested */
-	cmd->ip_protocol = htons(x->id.proto);
-	cmd->sport = htons(x->sel.sport); /* TODO: not tested */
-	cmd->sport_mask = htons(x->sel.sport_mask); /* TODO: not tested */
-	cmd->dport = htons(x->sel.dport); /* TODO: not tested */
-	cmd->dport_mask = htons(x->sel.dport_mask); /* TODO: not tested */
-	cmd->is_tunnel = htons(x->props.mode);
-	cmd->direction = htonl((x->xso.flags & XFRM_OFFLOAD_INBOUND) ?
-			RX_DIRECTION : TX_DIRECTION);
-	cmd->udp_esp_enc_type = htonl(IPSEC_OFFLOAD_UDP_ESP_ENCAP_NONE);
-	cmd->sec_assoc.spi = x->id.spi;
-	cmd->sec_assoc.auth.identifier =
-		htonl(mlx_ipsec_get_auth_identifier(x));
-	cmd->sec_assoc.enc.identifier =
-		htonl(mlx_ipsec_get_crypto_identifier(x));
-	cmd->sec_assoc.enc.key_length = htonl(key_len - 4);
-	cmd->sec_assoc.enc.key_offset_bytes = 0;
-	cmd->sec_assoc.enc.additional_info =
-			htonl(*((__be32 *)(x->aead->alg_key + key_len - 4)));
-	cmd->crypto_data_len = htonl(crypto_data_len);
-	memcpy(cmd->crypto_data, x->aead->alg_key, crypto_data_len);
-
-	/* serialize fifo and mlx_accel_core_sendmsg */
-	spin_lock_irqsave(&dev->fifo_sa_cmds_lock, flags);
-	pr_debug("adding to fifo!\n");
-	fifo_full = kfifo_put(&dev->fifo_sa_cmds, sa_entry);
-	spin_unlock_irqrestore(&dev->fifo_sa_cmds_lock, flags);
-
-	if (!fifo_full) {
-		pr_warn("Fifo is full!\n");
-		res = -ENOMEM;
-		goto err_sa_entry;
-	}
+	sa_entry->dev = dev;
 
 	/* Add the SA to handle processed incoming packets before the add SA
 	 * completion was received
@@ -204,49 +119,60 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 	}
 
 	sa_entry->status = ADD_SA_PENDING;
-	mlx_accel_core_sendmsg(dev->conn, buf);
-	/* After this point buf will be delete in mlx_accel_core */
+	res = mlx_ipsec_hw_sadb_add(sa_entry, dev);
+	if (res)
+		goto err_hash_rcu;
 
-	/* wait for sa_add response and handle the response */
-	res = wait_event_killable(dev->wq, sa_entry->status != ADD_SA_PENDING);
-	if (res != 0) {
-		pr_warn("add_sa returned before receving response\n");
-		goto out;
-	}
-
-	res = sa_entry->status;
-	if (sa_entry->status != ADD_SA_SUCCESS) {
-		pr_warn("add_sa failed with erro %08x\n",
-				sa_entry->status);
-		if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
-			spin_lock_irqsave(
-					&dev->sw_sa_id2xfrm_state_lock,
-					flags);
-			hash_del_rcu(&sa_entry->hlist);
-			spin_unlock_irqrestore(
-					&dev->sw_sa_id2xfrm_state_lock,
-					flags);
-			synchronize_rcu();
-			kfree(sa_entry);
-			sa_entry = NULL;
-		}
-	}
+	x->xso.offload_handle = (unsigned long)sa_entry;
+	try_module_get(THIS_MODULE);
 	goto out;
 
-err_sa_entry:
+err_hash_rcu:
+	if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
+		spin_lock_irqsave(
+				&dev->sw_sa_id2xfrm_state_lock,
+				flags);
+		hash_del_rcu(&sa_entry->hlist);
+		spin_unlock_irqrestore(
+				&dev->sw_sa_id2xfrm_state_lock,
+				flags);
+		synchronize_rcu();
+	}
+
 	kfree(sa_entry);
 	sa_entry = NULL;
-err_buf:
-	kfree(buf);
 out:
-	x->xso.offload_handle = (unsigned long)sa_entry;
 	return res;
 }
 
 static void mlx_xfrm_del_state(struct xfrm_state *x)
 {
-	/*struct net_device *netdev = x->xso.dev;*/
+	struct mlx_ipsec_sa_entry *sa_entry;
+	int res;
+	unsigned long flags;
 
+	if (x->xso.offload_handle) {
+		sa_entry = (struct mlx_ipsec_sa_entry *)x->xso.offload_handle;
+
+		WARN_ON(sa_entry->x != x);
+		res = mlx_ipsec_hw_sadb_del(sa_entry);
+		if (res)
+			pr_warn("Delete SADB entry from HW failed %d\n", res);
+
+		if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
+			spin_lock_irqsave(
+				&sa_entry->dev->sw_sa_id2xfrm_state_lock,
+				flags);
+			hash_del_rcu(&sa_entry->hlist);
+			spin_unlock_irqrestore(
+				&sa_entry->dev->sw_sa_id2xfrm_state_lock,
+				flags);
+			synchronize_rcu();
+		}
+
+		kfree(sa_entry);
+		module_put(THIS_MODULE);
+	}
 }
 
 static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
@@ -262,7 +188,7 @@ static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
 		}
 	}
 	rcu_read_unlock();
-	pr_warn("mlx_sw_sa_id_to_xfrm_state(): didn't find id for %x\n",
+	pr_warn("mlx_sw_sa_id_to_xfrm_state(): didn't find SA entry for %x\n",
 		sw_sa_id);
 	return NULL;
 }
@@ -400,47 +326,6 @@ out:
 	return skb;
 }
 
-static void mlx_ipsec_handle_add_sa(struct mlx_ipsec_dev *dev,
-				struct mlx_ipsec_sa_entry *sa_entry,
-				struct fpga_reply_add_sa *add_sa_reply)
-{
-	sa_entry->status = ntohl(add_sa_reply->status);
-	wake_up_all(&dev->wq);
-}
-
-static void mlx_ipsec_qp_recv_cb(void *cb_arg,
-		struct mlx_accel_core_dma_buf *buf)
-{
-	struct mlx_ipsec_dev *dev = cb_arg;
-	struct fpga_reply_generic *reply =
-		(struct fpga_reply_generic *)buf->data;
-	struct mlx_ipsec_sa_entry *sa_entry;
-
-	pr_debug("mlx_ipsec_qp_recv_cb() opcode %08x\n", ntohl(reply->opcode));
-
-	/* [BP]: This should never fail - consider reset if it does */
-	if (!kfifo_get(&dev->fifo_sa_cmds, &sa_entry)) {
-		pr_warn("sa_hw2sw_id FIFO empty on recv callback\n");
-		return;
-	}
-
-	if (sa_entry->sw_sa_id != ntohl(reply->sw_sa_id)) {
-		pr_warn("mismatch sw_sa_id in FIFO %d vs %d\n",
-				sa_entry->sw_sa_id, reply->sw_sa_id);
-	}
-
-	switch (ntohl(reply->opcode)) {
-	case EVENT_ADD_SA_RESPONSE:
-		mlx_ipsec_handle_add_sa(dev, sa_entry,
-			(struct fpga_reply_add_sa *)buf->data);
-
-		break;
-	default:
-		pr_warn("Unknown opcode from FPGA %08x\n",
-				ntohl(reply->opcode));
-	}
-}
-
 /* Must hold mlx_ipsec_mutex to call this function.
  * Assumes that dev->core_ctx is destroyed be the caller
  */
@@ -527,7 +412,7 @@ void mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	/* [BP]: TODO: Move these constants to a header */
 	init_attr.rx_size = 128;
 	init_attr.tx_size = 32;
-	init_attr.recv_cb = mlx_ipsec_qp_recv_cb;
+	init_attr.recv_cb = mlx_ipsec_hw_qp_recv_cb;
 	init_attr.cb_arg = dev;
 	/* [AY]: TODO: fix port 1 issue */
 	dev->conn = mlx_accel_core_conn_create(accel_device, &init_attr);
@@ -627,4 +512,3 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 		rtnl_unlock();
 	}
 }
-

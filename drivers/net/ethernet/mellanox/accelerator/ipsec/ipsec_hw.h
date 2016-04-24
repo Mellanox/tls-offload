@@ -31,66 +31,17 @@
  *
  */
 
-#include <linux/module.h>
+#ifndef __IPSEC_HW_H__
+#define __IPSEC_HW_H__
 
 #include "ipsec.h"
-#include "ipsec_hw.h"
 
+int mlx_ipsec_hw_init(void);
+void mlx_ipsec_hw_deinit(void);
 
-/* [BP]: TODO - change these details */
-MODULE_AUTHOR("Boris Pismenny <borisp@mellanox.com>");
-MODULE_DESCRIPTION("Mellanox IPsec FPGA Accelerator Driver");
-MODULE_LICENSE("Dual BSD/GPL");
-MODULE_VERSION(DRIVER_VERSION);
+int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
+			  struct mlx_ipsec_dev *dev);
+int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa);
+void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf);
 
-/* [BP] TODO: add capabilities */
-static struct mlx_accel_core_client mlx_ipsec_client = {
-	.name   = "mlx_ipsec",
-	.add    = mlx_ipsec_add_one,
-	.remove = mlx_ipsec_remove_one,
-};
-
-static struct notifier_block mlx_ipsec_netdev_notifier = {
-	.notifier_call = mlx_ipsec_netdev_event,
-};
-
-static int __init mlx_ipsec_init(void)
-{
-	int err = 0;
-
-	err = mlx_ipsec_hw_init();
-	if (err) {
-		pr_warn("mlx_ipsec_init error in mlx_ipsec_wq_init %d\n", err);
-		goto out;
-	}
-
-	err = register_netdevice_notifier(&mlx_ipsec_netdev_notifier);
-	if (err) {
-		pr_warn("mlx_ipsec_init error in register_netdevice_notifier %d\n",
-				err);
-		goto out_wq;
-	}
-
-	mlx_accel_core_client_register(&mlx_ipsec_client);
-	goto out;
-
-out_wq:
-	mlx_ipsec_hw_deinit();
-out:
-	return err;
-}
-
-static void __exit mlx_ipsec_exit(void)
-{
-	/* [BP]: TODO - delete all SA entries. Verify that no inflight packets
-	 * are going to be offloaded while we are unloading
-	 */
-	mlx_accel_core_client_unregister(&mlx_ipsec_client);
-	unregister_netdevice_notifier(&mlx_ipsec_netdev_notifier);
-	mlx_ipsec_hw_deinit();
-}
-
-module_init(mlx_ipsec_init);
-module_exit(mlx_ipsec_exit);
-
-
+#endif	/* __IPSEC_HW_H__ */
