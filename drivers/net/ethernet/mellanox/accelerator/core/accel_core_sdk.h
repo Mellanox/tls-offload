@@ -40,7 +40,7 @@
 #include <linux/list.h>
 #include <linux/dma-direction.h>
 #include <linux/kobject.h>
-#include <linux/mlx5/accel/sdk.h>
+#include <linux/mlx5/accel/accel_sdk.h>
 
 #define MLX_CLIENT_NAME_MAX			64
 /* [BP]: This length is Ok if each part of the name is delimited correctly

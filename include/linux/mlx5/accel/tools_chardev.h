@@ -35,7 +35,7 @@
 #define TOOLS_CHARDEV_H
 
 #include <linux/ioctl.h>
-#include "sdk.h"
+#include "accel_sdk.h"
 
 #define MLX_ACCEL_TOOLS_NAME_PREFIX "mlx5_"
 #define MLX_ACCEL_TOOLS_NAME_SUFFIX "_accel_tools"
