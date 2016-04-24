@@ -267,6 +267,23 @@ static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
 	return NULL;
 }
 
+static void remove_pet(struct sk_buff *skb, struct pet *pet)
+{
+	struct ethhdr *old_eth;
+	struct ethhdr *new_eth;
+
+	pr_debug("remove_pet started\n");
+
+	memcpy(pet, skb->data, sizeof(*pet));
+	old_eth = (struct ethhdr *)(skb->data - sizeof(struct ethhdr));
+	new_eth = (struct ethhdr *)(skb_pull_inline(skb, sizeof(pet)) -
+		sizeof(struct ethhdr));
+	skb->mac_header += sizeof(struct pet);
+
+	memmove(new_eth, old_eth, 2 * ETH_ALEN);
+	/* Ethertype is already in its new place */
+}
+
 static int insert_pet(struct sk_buff *skb)
 {
 	struct ethhdr *eth;
@@ -312,7 +329,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 
 static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 {
-	struct pet *pet;
+	struct pet pet;
 	struct xfrm_offload_state *xos;
 	struct mlx_ipsec_dev *dev;
 	struct xfrm_state *xs;
@@ -324,21 +341,18 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 	}
 	pr_debug("mlx_ipsec_rx_handler: processing PET\n");
 
-	pet = (struct pet *)skb->data;
-	skb_pull_inline(skb, sizeof(pet));
-	pr_debug("size %lu, etherType %04X, syndrome %hhd, sw_sa_id %x\n",
-			sizeof(*pet), be16_to_cpu(pet->ethertype),
-			pet->syndrome,
-			be32_to_cpu(pet->content.rcv.sa_id));
+	remove_pet(skb, &pet);
+	pr_debug("size %lu, etherType %04X, syndrome %02x, sw_sa_id %x\n",
+		 sizeof(pet), be16_to_cpu(pet.ethertype), pet.syndrome,
+		 be32_to_cpu(pet.content.rcv.sa_id));
 
 	/* At least on this development phase, we expect IP header
 	 * right after the PET
 	 */
-	if (be16_to_cpu(pet->ethertype) != ETH_P_IP)
+	if (be16_to_cpu(pet.ethertype) != ETH_P_IP)
 		pr_warn("expected ETH_P_IP but received %04x\n",
-				be16_to_cpu(pet->ethertype));
-	/*[IL] TODO: Maybe we should also update the actual header */
-	skb->protocol = pet->ethertype;
+				be16_to_cpu(pet.ethertype));
+	skb->protocol = pet.ethertype;
 
 	WARN_ON(skb->sp != NULL);
 	skb->sp = secpath_dup(skb->sp);
@@ -352,7 +366,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 	 */
 	dev = find_mlx_ipsec_dev_by_netdev(skb->dev);
 	xs = mlx_sw_sa_id_to_xfrm_state(dev,
-			be32_to_cpu(pet->content.rcv.sa_id));
+			be32_to_cpu(pet.content.rcv.sa_id));
 
 	if (!xs) {
 		pr_warn("No xfrm_state found for processed packet\n");
@@ -365,7 +379,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 
 	xos = xfrm_offload_input(skb);
 	xos->flags = CRYPTO_DONE;
-	switch (pet->syndrome) {
+	switch (pet.syndrome) {
 	case PET_SYNDROME_DECRYPTED:
 		xos->status = CRYPTO_SUCCESS;
 		break;
