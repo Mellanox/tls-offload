@@ -220,6 +220,8 @@ struct my_work {
 	struct work_struct work;
 	unsigned long sa_index;
 	struct net_device *netdev;
+	struct mlx_ipsec_sa_entry *sa;
+	u8 xso_flags;
 };
 
 static void mlx_xfrm_del_state_work(struct work_struct *work)
@@ -229,25 +231,40 @@ static void mlx_xfrm_del_state_work(struct work_struct *work)
 	struct mlx_ipsec_dev *dev;
 	struct sadb_entry hw_entry;
 	int res = 0;
+	unsigned long flags;
 
 	dev = mlx_ipsec_find_dev_by_netdev(mywork->netdev);
-	if (!dev)
-		goto out;
+	if (dev) {
+		sa_addr = mlx_accel_core_ddr_base_get(dev->accel_device) +
+			  (mywork->sa_index * 4);
+		pr_debug("del_sa Index %lu Address %llx\n", mywork->sa_index,
+			 sa_addr);
 
-	sa_addr = mlx_accel_core_ddr_base_get(dev->accel_device) +
-		  (mywork->sa_index * 4);
-	pr_debug("del_sa Index %lu Address %llx\n", mywork->sa_index, sa_addr);
+		memset(&hw_entry, 0, sizeof(hw_entry));
 
-	memset(&hw_entry, 0, sizeof(hw_entry));
+		res = mlx_accel_core_mem_write(dev->accel_device,
+					       sizeof(hw_entry), sa_addr,
+					       &hw_entry,
+					       MLX_ACCEL_ACCESS_TYPE_I2C);
+		if (res != sizeof(hw_entry))
+			pr_warn("Deleting SA in HW memory failed %d\n", res);
+		mlx_ipsec_flush_cache(dev);
+	}
 
-	res = mlx_accel_core_mem_write(dev->accel_device, sizeof(hw_entry),
-				       sa_addr, &hw_entry,
-				       MLX_ACCEL_ACCESS_TYPE_I2C);
-	if (res != sizeof(hw_entry))
-		pr_warn("Deleting SA in HW memory failed %d\n", res);
-	mlx_ipsec_flush_cache(dev);
+	if (mywork->xso_flags & XFRM_OFFLOAD_INBOUND) {
+		spin_lock_irqsave(
+			&dev->sw_sa_id2xfrm_state_lock,
+			flags);
+		hash_del_rcu(&mywork->sa->hlist);
+		spin_unlock_irqrestore(
+			&dev->sw_sa_id2xfrm_state_lock,
+			flags);
+		synchronize_rcu();
+	}
 
-out:
+	kfree(mywork->sa);
+	module_put(THIS_MODULE);
+
 	kfree(work);
 }
 
@@ -269,6 +286,8 @@ int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
 	INIT_WORK(&work->work, mlx_xfrm_del_state_work);
 	work->netdev = netdev;
 	work->sa_index = sa_index;
+	work->xso_flags = sa->x->xso.flags;
+	work->sa = sa;
 
 	queue_work(mlx_ipsec_workq, &work->work);
 out:

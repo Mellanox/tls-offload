@@ -149,7 +149,6 @@ static void mlx_xfrm_del_state(struct xfrm_state *x)
 {
 	struct mlx_ipsec_sa_entry *sa_entry;
 	int res;
-	unsigned long flags;
 
 	if (x->xso.offload_handle) {
 		sa_entry = (struct mlx_ipsec_sa_entry *)x->xso.offload_handle;
@@ -159,19 +158,10 @@ static void mlx_xfrm_del_state(struct xfrm_state *x)
 		if (res)
 			pr_warn("Delete SADB entry from HW failed %d\n", res);
 
-		if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
-			spin_lock_irqsave(
-				&sa_entry->dev->sw_sa_id2xfrm_state_lock,
-				flags);
-			hash_del_rcu(&sa_entry->hlist);
-			spin_unlock_irqrestore(
-				&sa_entry->dev->sw_sa_id2xfrm_state_lock,
-				flags);
-			synchronize_rcu();
-		}
-
-		kfree(sa_entry);
-		module_put(THIS_MODULE);
+		/* Todo: Need to delete from rcu hashtable, kfree and
+		 * module_put. But synch_rcu might sleep, and this is atomic
+		 * context
+		 */
 	}
 }
 
