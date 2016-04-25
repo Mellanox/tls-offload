@@ -34,13 +34,32 @@
 #include "ipsec_hw.h"
 #include <linux/inetdevice.h>
 
+#ifndef SADB_RDMA
+/* [IT]: TODO get rid of this work queue:
+ * Use async add/del SA operations over RDMA/RC-QP
+ * Get rid of mutex lock in add/del sa flows
+ * all add/del SA should work in atomic context
+ */
+static struct workqueue_struct *mlx_ipsec_workq;
+#endif
+
 int mlx_ipsec_hw_init(void)
 {
+#ifndef SADB_RDMA
+	mlx_ipsec_workq = create_workqueue("mlx_ipsec");
+	if (!mlx_ipsec_workq)
+		return -ENOMEM;
+#endif
 	return 0;
 }
 
 void mlx_ipsec_hw_deinit(void)
 {
+#ifndef SADB_RDMA
+	flush_workqueue(mlx_ipsec_workq);
+	destroy_workqueue(mlx_ipsec_workq);
+	mlx_ipsec_workq = NULL;
+#endif
 }
 
 static enum auth_identifier
@@ -78,6 +97,190 @@ mlx_ipsec_get_crypto_identifier(struct xfrm_state *x)
 		return -1;
 	}
 }
+
+#ifndef SADB_RDMA
+
+#define IPSEC_FLUSH_CACHE_ADDR 0x144
+#define IPSEC_FLUSH_CACHE_BIT 0x100
+static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
+{
+	int res;
+	u32 dw;
+
+	res = mlx_accel_core_mem_read(dev->accel_device, 4,
+				      IPSEC_FLUSH_CACHE_ADDR, &dw,
+				      MLX_ACCEL_ACCESS_TYPE_I2C);
+	if (res != 4) {
+		pr_warn("IPSec cache flush failed on read\n");
+		return;
+	}
+
+	dw ^= htonl(IPSEC_FLUSH_CACHE_BIT);
+	res = mlx_accel_core_mem_write(dev->accel_device, 4,
+				       IPSEC_FLUSH_CACHE_ADDR, &dw,
+				       MLX_ACCEL_ACCESS_TYPE_I2C);
+	if (res != 4) {
+		pr_warn("IPSec cache flush failed on write\n");
+		return;
+	}
+}
+
+struct __attribute__((__packed__)) sadb_entry {
+	u8 key[32];
+	__be32 sip;
+	__be32 sip_mask;
+	__be32 dip;
+	__be32 dip_mask;
+	__be32 spi;
+	__be32 salt;
+	__be32 sw_sa_handle;
+	__be16 sport;
+	__be16 dport;
+	u8 ip_proto;
+	u8 enc_auth_mode;
+	u8 enable;
+	u8 pad;
+};
+
+#define SADB_DIR_SX      BIT(0)
+#define SADB_SA_VALID    BIT(1)
+#define SADB_SPI_EN      BIT(2)
+#define SADB_IP_PROTO_EN BIT(3)
+#define SADB_SPORT_EN    BIT(4)
+#define SADB_DPORT_EN    BIT(5)
+#define SADB_TUNNEL      BIT(6)
+#define SADB_TUNNEL_EN   BIT(7)
+#define SADB_SLOT_SIZE   0x40 /* MAS bug, should be 0x80 */
+
+static void copy_key_to_hw(void *dst, void *src, unsigned int bytes)
+{
+	u32 *dst_w = dst, *src_w = src;
+	unsigned int i, words = bytes / 4;
+
+	WARN_ON(bytes & 3);
+	for (i = 0; i < words; i++)
+		dst_w[words - i - 1] = src_w[i];
+}
+
+int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
+			  struct mlx_ipsec_dev *dev)
+{
+	unsigned int key_len = (sa->x->aead->alg_key_len + 7) / 8;
+	unsigned int crypto_data_len = key_len - 4; /* 4 bytes salt at end */
+	struct sadb_entry hw_entry;
+	unsigned long sa_index;
+	u64 sa_addr;
+	int res;
+
+	pr_debug("sa IP %08x SPI %08x\n", sa->x->id.daddr.a4, sa->x->id.spi);
+	sa_index = (ntohl(sa->x->id.daddr.a4) ^ ntohl(sa->x->id.spi)) & 0xFFFFF;
+	sa_addr = mlx_accel_core_ddr_base_get(dev->accel_device) +
+		  (sa_index * SADB_SLOT_SIZE);
+	pr_debug("sa Index %lu Address %llx\n", sa_index, sa_addr);
+
+	memset(&hw_entry, 0, sizeof(hw_entry));
+	copy_key_to_hw(&hw_entry.key, sa->x->aead->alg_key, crypto_data_len);
+	hw_entry.enable |= SADB_SA_VALID | SADB_SPI_EN;
+	hw_entry.sip = sa->x->props.saddr.a4;
+	hw_entry.sip_mask = inet_make_mask(sa->x->sel.prefixlen_s);
+	hw_entry.dip = sa->x->id.daddr.a4;
+	hw_entry.dip_mask = inet_make_mask(sa->x->sel.prefixlen_d);
+	hw_entry.spi = sa->x->id.spi;
+	hw_entry.salt = *((__be32 *)(sa->x->aead->alg_key + crypto_data_len));
+	hw_entry.sw_sa_handle = htonl(sa->sw_sa_id);
+	hw_entry.sport = htons(sa->x->sel.sport);
+	hw_entry.enable |= sa->x->sel.sport_mask ? SADB_SPORT_EN : 0;
+	hw_entry.dport = htons(sa->x->sel.dport);
+	hw_entry.enable |= sa->x->sel.dport_mask ? SADB_DPORT_EN : 0;
+	hw_entry.ip_proto = sa->x->id.proto;
+	if (hw_entry.ip_proto)
+		hw_entry.enable |= SADB_IP_PROTO_EN;
+	hw_entry.enc_auth_mode = mlx_ipsec_get_auth_identifier(sa->x) << 4;
+	hw_entry.enc_auth_mode |= mlx_ipsec_get_crypto_identifier(sa->x);
+	if (!(sa->x->xso.flags & XFRM_OFFLOAD_INBOUND))
+		hw_entry.enable |= SADB_DIR_SX;
+	if (sa->x->props.mode)
+		hw_entry.enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
+
+	res = mlx_accel_core_mem_write(dev->accel_device, sizeof(hw_entry),
+				       sa_addr, &hw_entry,
+				       MLX_ACCEL_ACCESS_TYPE_I2C);
+	if (res != sizeof(hw_entry)) {
+		pr_warn("Writing SA to HW memory failed %d\n", res);
+		goto out;
+	}
+	res = 0;
+	mlx_ipsec_flush_cache(dev);
+
+out:
+	return res;
+}
+
+struct my_work {
+	struct work_struct work;
+	unsigned long sa_index;
+	struct net_device *netdev;
+};
+
+static void mlx_xfrm_del_state_work(struct work_struct *work)
+{
+	struct my_work *mywork = container_of(work, struct my_work, work);
+	u64 sa_addr;
+	struct mlx_ipsec_dev *dev;
+	struct sadb_entry hw_entry;
+	int res = 0;
+
+	dev = mlx_ipsec_find_dev_by_netdev(mywork->netdev);
+	if (!dev)
+		goto out;
+
+	sa_addr = mlx_accel_core_ddr_base_get(dev->accel_device) +
+		  (mywork->sa_index * 4);
+	pr_debug("del_sa Index %lu Address %llx\n", mywork->sa_index, sa_addr);
+
+	memset(&hw_entry, 0, sizeof(hw_entry));
+
+	res = mlx_accel_core_mem_write(dev->accel_device, sizeof(hw_entry),
+				       sa_addr, &hw_entry,
+				       MLX_ACCEL_ACCESS_TYPE_I2C);
+	if (res != sizeof(hw_entry))
+		pr_warn("Deleting SA in HW memory failed %d\n", res);
+	mlx_ipsec_flush_cache(dev);
+
+out:
+	kfree(work);
+}
+
+int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
+{
+	struct net_device *netdev = sa->x->xso.dev;
+	unsigned long sa_index;
+	struct my_work *work;
+	int res = 0;
+
+	sa_index = (sa->x->id.daddr.a4 ^ sa->x->id.spi) & 0xFFFFF;
+
+	work = kzalloc(sizeof(*work), GFP_ATOMIC);
+	if (!work) {
+		res = -ENOMEM;
+		goto out;
+	}
+
+	INIT_WORK(&work->work, mlx_xfrm_del_state_work);
+	work->netdev = netdev;
+	work->sa_index = sa_index;
+
+	queue_work(mlx_ipsec_workq, &work->work);
+out:
+	return res;
+}
+
+void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
+{
+	WARN_ON(buf);
+}
+
+#else /* SADB_RDMA */
 
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 			  struct mlx_ipsec_dev *dev)
@@ -207,3 +410,5 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 			ntohl(reply->opcode));
 	}
 }
+
+#endif /* SADB_RDMA */
