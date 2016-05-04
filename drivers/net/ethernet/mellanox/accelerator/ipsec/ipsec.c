@@ -86,7 +86,7 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 	int res;
 
 	pr_debug("add_sa(): key_len %d\n",
-			(x->aead->alg_key_len + 7) / 8);
+			(x->aead->alg_key_len + 7) / 8 - 4);
 
 	dev = mlx_ipsec_find_dev_by_netdev(netdev);
 	if (!dev) {

@@ -82,6 +82,11 @@ enum fpga_cmds {
 	CMD_DEL_SA			= 3
 };
 
+enum fpga_del_sa_status {
+	DEL_SA_SUCCESS			= 0x80,
+	DEL_SA_FAIL_NOT_FOUND		= 0x81
+};
+
 /* [BP]: TODO - Test all return codes in mlx_xfrm_add_state */
 enum fpga_add_sa_status {
 	ADD_SA_PENDING			= -1,
@@ -100,8 +105,8 @@ enum fpga_response {
 };
 
 enum direction {
-	RX_DIRECTION = 1,
-	TX_DIRECTION = 2
+	RX_DIRECTION = 0,
+	TX_DIRECTION = 1
 };
 
 enum crypto_identifier {
@@ -116,53 +121,33 @@ enum auth_identifier {
 	IPSEC_OFFLOAD_AUTH_AES_GCM_256 = 2,
 };
 
-enum udp_esp_encap {
-	IPSEC_OFFLOAD_UDP_ESP_ENCAP_NONE		= 1,
-	IPSEC_OFFLOAD_UDP_ESP_ENCAP_TRANSPORT	= 2,
-	IPSEC_OFFLOAD_UDP_ESP_ENCAP_TUNNEL		= 3,
-};
-
-/* [BP]: TODO - this struct should have fields for ESN */
-struct crypto_alg_info {
-	__be32 identifier;
-	__be32 key_length;
-	 /* The offset of the key in bytes into the key_data buffer */
-	__be32 key_offset_bytes;
-	 /*
-	  * Additional info that could be different for each identifier.
-	  * Contains the salt for AES-GCM
-	  */
-	__be32 additional_info;
-};
-
-/* [BP]: TODO - should add ESN high bytes here */
-struct security_association {
-	__be32 spi;
-	struct crypto_alg_info auth;
-	struct crypto_alg_info enc;
-};
-
 /* [BP]: TODO - There should be another command for IPv6 */
 struct sa_cmd_v4 {
 	__be32 cmd;
-	__be32 sw_sa_id;
+	u8 key[32];
 	__be32 sip;
-	__be32 sip_mask;
+	__be32 sip_mask; /* must be 255.255.255.255 */
 	__be32 dip;
-	__be32 dip_mask;
-	__be16 ip_protocol;
-	__be16 sport;
-	__be16 sport_mask;
-	__be16 dport;
-	__be16 dport_mask;
-	__be16 is_tunnel; /* XFRM_MODE_TUNNEL/XFROM_MODE_TRANSPORT */
-	__be32 direction; /* DIRECTION_RX/ DIRECTION_TX (enum direction) */
-	__be32 udp_esp_enc_type; /* see enum udp_esp_encap */
-	/* [BP]: Future versions may contain more than sec_assoc for AH+ESP */
-	struct security_association sec_assoc;
-	__be32 crypto_data_len;
-	char crypto_data[];
+	__be32 dip_mask; /* must be 255.255.255.255 */
+	__be32 spi;
+	__be32 salt;
+	__be32 sw_sa_handle;
+	__be16 sport; /* unused */
+	__be16 dport; /* unused */
+	u8 ip_proto;
+	u8 enc_auth_mode;
+	u8 enable;
+	u8 pad;
 };
+
+#define SADB_DIR_SX      BIT(0)
+#define SADB_SA_VALID    BIT(1)
+#define SADB_SPI_EN      BIT(2)
+#define SADB_IP_PROTO_EN BIT(3)
+#define SADB_SPORT_EN    BIT(4)
+#define SADB_DPORT_EN    BIT(5)
+#define SADB_TUNNEL      BIT(6)
+#define SADB_TUNNEL_EN   BIT(7)
 
 struct fpga_reply_generic {
 	__be32 opcode;

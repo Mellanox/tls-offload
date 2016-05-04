@@ -142,16 +142,6 @@ struct __attribute__((__packed__)) sadb_entry {
 	u8 ip_proto;
 };
 
-#define SADB_DIR_SX      BIT(0)
-#define SADB_SA_VALID    BIT(1)
-#define SADB_SPI_EN      BIT(2)
-#define SADB_IP_PROTO_EN BIT(3)
-#define SADB_SPORT_EN    BIT(4)
-#define SADB_DPORT_EN    BIT(5)
-#define SADB_TUNNEL      BIT(6)
-#define SADB_TUNNEL_EN   BIT(7)
-#define SADB_SLOT_SIZE   0x40 /* MAS bug, should be 0x80 */
-
 static void copy_key_to_hw(void *dst, void *src, unsigned int bytes)
 {
 	u32 *dst_w = dst, *src_w = src;
@@ -162,6 +152,7 @@ static void copy_key_to_hw(void *dst, void *src, unsigned int bytes)
 		dst_w[words - i - 1] = src_w[i];
 }
 
+#define SADB_SLOT_SIZE   0x40 /* MAS bug, should be 0x80 */
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 			  struct mlx_ipsec_dev *dev)
 {
@@ -304,53 +295,46 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 			  struct mlx_ipsec_dev *dev)
 {
-	unsigned int key_len = (sa->x->aead->alg_key_len + 7) / 8;
-	unsigned int crypto_data_len = key_len - 4; /* 4 bytes salt at end */
+	unsigned int key_len = (sa->x->aead->alg_key_len + 7) / 8 - 4;
 	struct mlx_accel_core_dma_buf *buf = NULL;
 	struct sa_cmd_v4 *cmd;
 	int fifo_full;
 	int res = 0;
-	int len, buf_len;
 	unsigned long flags;
 
-	len = sizeof(struct sa_cmd_v4) + crypto_data_len;
-	buf_len = sizeof(struct mlx_accel_core_dma_buf) + len;
-	buf = kzalloc(buf_len, GFP_ATOMIC);
+	buf = kzalloc(sizeof(*buf) +
+			sizeof(*cmd), GFP_ATOMIC);
 	if (!buf) {
 		res = -ENOMEM;
 		goto out;
 	}
 
-	buf->data_size = len;
+	buf->data_size = sizeof(*cmd);
 	cmd = (struct sa_cmd_v4 *)buf->data;
 	cmd->cmd = htonl(CMD_ADD_SA);
-	cmd->sw_sa_id = htonl(sa->sw_sa_id);
 
-	/* Is this the correct mask? */
+	cmd->enable |= SADB_SA_VALID | SADB_SPI_EN;
 	cmd->sip = htonl(sa->x->props.saddr.a4);
-	cmd->sip_mask = htonl(sa->x->sel.prefixlen_s); /* TODO: not tested */
+	cmd->sip_mask = inet_make_mask(32);
 	cmd->dip = htonl(sa->x->id.daddr.a4);
-	cmd->dip_mask = htonl(sa->x->sel.prefixlen_d); /* TODO: not tested */
-	cmd->ip_protocol = htons(sa->x->id.proto);
-	cmd->sport = htons(sa->x->sel.sport); /* TODO: not tested */
-	cmd->sport_mask = htons(sa->x->sel.sport_mask); /* TODO: not tested */
-	cmd->dport = htons(sa->x->sel.dport); /* TODO: not tested */
-	cmd->dport_mask = htons(sa->x->sel.dport_mask); /* TODO: not tested */
-	cmd->is_tunnel = htons(sa->x->props.mode);
-	cmd->direction = htonl((sa->x->xso.flags & XFRM_OFFLOAD_INBOUND) ?
-			RX_DIRECTION : TX_DIRECTION);
-	cmd->udp_esp_enc_type = htonl(IPSEC_OFFLOAD_UDP_ESP_ENCAP_NONE);
-	cmd->sec_assoc.spi = sa->x->id.spi;
-	cmd->sec_assoc.auth.identifier =
-		htonl(mlx_ipsec_get_auth_identifier(sa->x));
-	cmd->sec_assoc.enc.identifier =
-		htonl(mlx_ipsec_get_crypto_identifier(sa->x));
-	cmd->sec_assoc.enc.key_length = htonl(key_len - 4);
-	cmd->sec_assoc.enc.key_offset_bytes = 0;
-	cmd->sec_assoc.enc.additional_info =
-		htonl(*((__be32 *)(sa->x->aead->alg_key + key_len - 4)));
-	cmd->crypto_data_len = htonl(crypto_data_len);
-	memcpy(cmd->crypto_data, sa->x->aead->alg_key, crypto_data_len);
+	cmd->dip_mask = inet_make_mask(32);
+	cmd->spi = sa->x->id.spi;
+	cmd->salt = *((__be32 *)(sa->x->aead->alg_key + key_len));
+	cmd->sw_sa_handle = htonl(sa->sw_sa_id);
+	/* TODO: implement UDP encapsulation support to enable port selection */
+	cmd->ip_proto = sa->x->id.proto;
+	if (cmd->ip_proto)
+		cmd->enable |= SADB_IP_PROTO_EN;
+	cmd->enc_auth_mode = mlx_ipsec_get_auth_identifier(sa->x) << 4;
+	cmd->enc_auth_mode |= mlx_ipsec_get_crypto_identifier(sa->x);
+	if (!(sa->x->xso.flags & XFRM_OFFLOAD_INBOUND))
+		cmd->enable |= SADB_DIR_SX;
+	if (sa->x->props.mode)
+		cmd->enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
+	memcpy(cmd->key, sa->x->aead->alg_key, key_len);
+	/* Duplicate 128 bit key twice according to HW layout */
+	if (key_len == 16)
+		memcpy(cmd->key + 16, sa->x->aead->alg_key, key_len);
 
 	/* serialize fifo and mlx_accel_core_sendmsg */
 	spin_lock_irqsave(&dev->fifo_sa_cmds_lock, flags);
@@ -358,11 +342,8 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 	fifo_full = kfifo_put(&dev->fifo_sa_cmds, sa);
 	spin_unlock_irqrestore(&dev->fifo_sa_cmds_lock, flags);
 
-	if (!fifo_full) {
-		pr_warn("Fifo is full!\n");
-		res = -ENOMEM;
+	if (!fifo_full)
 		goto err_buf;
-	}
 
 	mlx_accel_core_sendmsg(dev->conn, buf);
 	/* After this point buf will be delete in mlx_accel_core */
