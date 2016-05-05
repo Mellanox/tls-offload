@@ -136,10 +136,10 @@ struct __attribute__((__packed__)) sadb_entry {
 	__be32 sw_sa_handle;
 	__be16 sport;
 	__be16 dport;
-	u8 ip_proto;
-	u8 enc_auth_mode;
-	u8 enable;
 	u8 pad;
+	u8 enable;
+	u8 enc_auth_mode;
+	u8 ip_proto;
 };
 
 #define SADB_DIR_SX      BIT(0)
