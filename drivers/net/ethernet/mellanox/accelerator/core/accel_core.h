@@ -35,7 +35,9 @@
 #define __MLX_ACCEL_CORE_H__
 
 #include "accel_core_sdk.h"
+#include <linux/in6.h>
 
+/*#define WORKAROUND_I2C*/
 #define MLX_RECV_SIZE 2048
 #define MLX_EXIT_WRID 1
 
@@ -45,23 +47,34 @@ struct mlx_accel_client_data {
 	void *data;
 };
 
-int mlx_add_accel_client_context(struct mlx_accel_core_device *device,
-				 struct mlx_accel_core_client *client);
+void mlx_accel_client_context_add(struct mlx_accel_core_device *device,
+				  struct mlx_accel_core_client *client);
+void mlx_accel_client_context_del(struct mlx_accel_client_data *context);
 
 /* RDMA */
+struct mlx_accel_core_conn *
+mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
+				struct mlx_accel_core_conn_init_attr
+				*conn_init_attr);
+void mlx_accel_core_rdma_conn_destroy(struct mlx_accel_core_conn *conn);
+
 int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 				  struct mlx_accel_core_dma_buf *buf);
 
-int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
-				   unsigned int tx_size, unsigned int rx_size);
-void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn);
-
-int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn);
+int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn,
+				int gid_index);
 
 /* I2C */
 int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
 		       size_t size, u64 addr, u8 *buf);
 int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 			size_t size, u64 addr, u8 *buf);
+
+/* fpga QP */
+#ifdef WORKAROUND_I2C
+int mlx_accel_fpga_qp_device_init(struct mlx_accel_core_device *accel_device);
+#else
+#define mlx_accel_fpga_qp_device_init(accel_device) 0
+#endif
 
 #endif /* __MLX_ACCEL_CORE_H__ */

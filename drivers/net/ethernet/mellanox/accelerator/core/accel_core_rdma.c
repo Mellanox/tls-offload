@@ -33,7 +33,6 @@
 
 #include "accel_core.h"
 
-
 static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 {
 	struct ib_sge sge;
@@ -42,93 +41,131 @@ static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 	struct mlx_accel_core_dma_buf *buf;
 	int rc;
 
-	memset(&sge, 0, sizeof(sge));
-	sge.length = MLX_RECV_SIZE;
-	buf = kmalloc(sizeof(*buf) + sge.length, 0);
+	buf = kmalloc(sizeof(*buf) + MLX_RECV_SIZE, 0);
 	if (!buf)
 		return -ENOMEM;
 
-	buf->data_size = sge.length;
-	sge.addr = ib_dma_map_single(conn->accel_device->ib_dev,
-					buf->data, sge.length,
-					DMA_FROM_DEVICE);
+	memset(buf, 0, sizeof(*buf));
+	buf->data = ((u8 *)buf + sizeof(*buf));
+	buf->data_size = MLX_RECV_SIZE;
+	buf->data_dma_addr = ib_dma_map_single(conn->accel_device->ib_dev,
+					       buf->data, buf->data_size,
+					       DMA_FROM_DEVICE);
 
-	if (ib_dma_mapping_error(conn->accel_device->ib_dev, sge.addr)) {
-		pr_err("post_recv: DMA mapping error on address %p\n",
-				buf->data);
+	if (ib_dma_mapping_error(conn->accel_device->ib_dev,
+				 buf->data_dma_addr)) {
+		pr_warn("post_recv: DMA mapping error on address %p\n",
+			buf->data);
 		return -ENOMEM;
 	}
 
-	buf->dma_addr = sge.addr;
 	buf->dma_dir = DMA_FROM_DEVICE;
 
-	sge.lkey = conn->mr->lkey;
+	memset(&sge, 0, sizeof(sge));
+	sge.addr = buf->data_dma_addr;
+	sge.length = buf->data_size;
+	sge.lkey = conn->accel_device->pd->local_dma_lkey;
 
 	/* prepare the send work request (SR) */
 	memset(&wr, 0, sizeof(wr));
-
 	wr.next		= NULL;
-	wr.wr_id	= 0;
 	wr.sg_list	= &sge;
 	wr.num_sge	= 1;
 	wr.wr_id	= (uint64_t)buf;
 
+	atomic_inc(&conn->pending_recvs);
 	rc = ib_post_recv(conn->qp, &wr, &bad_wr);
-	if (rc == 0)
-		atomic_inc(&conn->pending_recvs);
-	else {
-		ib_dma_unmap_single(conn->accel_device->ib_dev, buf->dma_addr,
-				buf->data_size, DMA_FROM_DEVICE);
+	if (rc) {
+		atomic_dec(&conn->pending_recvs);
+		ib_dma_unmap_single(conn->accel_device->ib_dev,
+				    buf->data_dma_addr, buf->data_size,
+				    DMA_FROM_DEVICE);
 		kfree(buf);
+		goto out;
 	}
+	pr_debug("Posted RECV buf %p\n", buf);
+
+out:
 	return rc;
 }
 
 int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
-		struct mlx_accel_core_dma_buf *buf)
+				  struct mlx_accel_core_dma_buf *buf)
 {
-	struct ib_sge sge;
+	struct ib_device *ib_dev = conn->accel_device->ib_dev;
+	struct ib_sge sge[2];
 	struct ib_send_wr wr;
 	struct ib_send_wr *bad_wr;
 	int rc;
+	int sge_count = 1;
 
-	buf->dma_addr = ib_dma_map_single(conn->accel_device->ib_dev,
-							buf->data,
-							buf->data_size,
-							DMA_TO_DEVICE);
 	buf->dma_dir = DMA_TO_DEVICE;
 
-	if (ib_dma_mapping_error(conn->accel_device->ib_dev, buf->dma_addr)) {
-			pr_err("sendmsg: DMA mapping error on address %p\n",
-					buf->data);
-			return -ENOMEM;
+	if (buf->more) {
+		buf->more_dma_addr = ib_dma_map_single(ib_dev, buf->more,
+						       buf->more_size,
+						       DMA_TO_DEVICE);
+		if (ib_dma_mapping_error(ib_dev, buf->more_dma_addr)) {
+			pr_warn("sendmsg: DMA mapping error on header address %p\n",
+				buf->more);
+			rc = -ENOMEM;
+			goto out;
+		}
+	}
+	buf->data_dma_addr = ib_dma_map_single(ib_dev, buf->data,
+					       buf->data_size, DMA_TO_DEVICE);
+	if (ib_dma_mapping_error(ib_dev, buf->data_dma_addr)) {
+		pr_warn("sendmsg: DMA mapping error on address %p\n",
+			buf->data);
+		rc = -ENOMEM;
+		goto out_header_dma;
 	}
 
 	memset(&sge, 0, sizeof(sge));
-	sge.addr = buf->dma_addr;
-	sge.length = buf->data_size;
-	sge.lkey = conn->mr->lkey;
-
+	sge[0].addr = buf->data_dma_addr;
+	sge[0].length = buf->data_size;
+	sge[0].lkey = conn->accel_device->pd->local_dma_lkey;
+	if (buf->more) {
+		sge[sge_count].addr = buf->more_dma_addr;
+		sge[sge_count].length = buf->more_size;
+		sge[sge_count].lkey = conn->accel_device->pd->local_dma_lkey;
+		sge_count++;
+	}
 
 	/* prepare the send work request (SR) */
 	memset(&wr, 0, sizeof(wr));
 	wr.next		= NULL;
-	wr.wr_id	= 0;
-	wr.sg_list	= &sge;
-	wr.num_sge	= 1;
+	wr.sg_list	= sge;
+	wr.num_sge	= sge_count;
 	wr.wr_id	= (uint64_t)buf;
 	wr.opcode	= IB_WR_SEND;
 	wr.send_flags	= IB_SEND_SIGNALED;
 
-	rc = ib_post_send(conn->qp, &wr, &bad_wr);
-	if (!rc) {
-		atomic_inc(&conn->pending_sends);
-	} else {
-		/* panalize slow path rather then fast path */
-		ib_dma_unmap_single(conn->accel_device->ib_dev, buf->dma_addr,
-					buf->data_size, DMA_TO_DEVICE);
-	}
+	atomic_inc(&conn->inflight_sends);
+	pr_debug("Posting SEND buf %p\n", buf);
+#ifdef DEBUG
+	if (buf->more)
+		print_hex_dump_bytes("SEND Header ", DUMP_PREFIX_OFFSET,
+				     buf->more, buf->more_size);
+	print_hex_dump_bytes("SEND Payload ", DUMP_PREFIX_OFFSET,
+			     buf->data, buf->data_size);
+#endif
 
+	rc = ib_post_send(conn->qp, &wr, &bad_wr);
+	if (rc) {
+		pr_debug("SEND buf %p post failed: %d\n", buf, rc);
+		atomic_dec(&conn->inflight_sends);
+		goto out_dma;
+	}
+	goto out;
+
+out_dma:
+	ib_dma_unmap_single(ib_dev, buf->data_dma_addr, buf->data_size,
+			    DMA_TO_DEVICE);
+out_header_dma:
+	ib_dma_unmap_single(ib_dev, buf->more_dma_addr, buf->more_size,
+			    DMA_TO_DEVICE);
+out:
 	return rc;
 }
 
@@ -140,8 +177,8 @@ static void mlx_accel_core_rdma_handle_pending(struct mlx_accel_core_conn *conn)
 	spin_lock(&conn->pending_lock);
 	while (1) {
 		buf = list_first_entry_or_null(&conn->pending_msgs,
-						struct mlx_accel_core_dma_buf,
-						list);
+					       struct mlx_accel_core_dma_buf,
+					       list);
 		spin_unlock(&conn->pending_lock);
 		if (!buf)
 			break;
@@ -155,63 +192,89 @@ static void mlx_accel_core_rdma_handle_pending(struct mlx_accel_core_conn *conn)
 	}
 }
 
+static void mlx_accel_complete(struct mlx_accel_core_conn *conn,
+			       struct ib_wc *wc)
+{
+	struct mlx_accel_core_dma_buf *buf;
+
+	if ((wc->status != IB_WC_SUCCESS) &&
+	    (conn->exiting) && (wc->wr_id == MLX_EXIT_WRID)) {
+		pr_debug("QP exiting %u; wr_id is %llx\n",
+			 conn->exiting, wc->wr_id);
+		if (++conn->exiting >= 3)
+			complete(&conn->exit_completion);
+		return;
+	}
+	buf = (struct mlx_accel_core_dma_buf *)wc->wr_id;
+	if (wc->status != IB_WC_SUCCESS)
+		pr_warn("QP returned buf %p with vendor error %d status msg: %s\n",
+			buf, wc->vendor_err, ib_wc_status_msg(wc->status));
+	else
+		pr_debug("Successful completion of buf %p opcode %u\n", buf,
+			 wc->opcode);
+
+	ib_dma_unmap_single(conn->accel_device->ib_dev,
+			    buf->data_dma_addr,
+			    buf->data_size,
+			    buf->dma_dir);
+	if (buf->more) {
+		ib_dma_unmap_single(conn->accel_device->ib_dev,
+				    buf->more_dma_addr,
+				    buf->more_size,
+				    buf->dma_dir);
+	}
+	if (wc->status == IB_WC_SUCCESS) {
+		switch (wc->opcode) {
+		case IB_WC_RECV:
+			atomic_dec(&conn->pending_recvs);
+			buf->data_size = wc->byte_len;
+#ifdef DEBUG
+			if (buf->more)
+				print_hex_dump_bytes("RECV header ",
+						     DUMP_PREFIX_OFFSET,
+						     buf->more, buf->more_size);
+			print_hex_dump_bytes("RECV payload ",
+					     DUMP_PREFIX_OFFSET, buf->data,
+					     buf->data_size);
+#endif
+			conn->recv_cb(conn->cb_arg, buf);
+			pr_debug("Msg with %u bytes received successfully %d buffs are posted\n",
+				 wc->byte_len,
+				 atomic_read(&conn->pending_recvs));
+			break;
+		case IB_WC_SEND:
+			atomic_dec(&conn->inflight_sends);
+			pr_debug("Msg sent successfully; %d send msgs inflight\n",
+				 atomic_read(&conn->inflight_sends));
+			break;
+		default:
+			pr_warn("Unknown wc opcode %d\n", wc->opcode);
+		}
+	}
+
+	if (buf->complete)
+		buf->complete(conn, buf, wc);
+	if (wc->opcode == IB_WC_RECV)
+		kfree(buf);
+}
+
 static void mlx_accel_core_rdma_comp_handler(struct ib_cq *cq, void *arg)
 {
-	struct mlx_accel_core_dma_buf *buf = NULL;
 	struct mlx_accel_core_conn *conn = (struct mlx_accel_core_conn *)arg;
 	struct ib_wc wc;
 	int ret;
-	int contine_polling = 1;
+	bool continue_polling = true;
 
-	while (contine_polling) {
-		contine_polling = 0;
+	pr_debug("-> Polling completions...\n");
+	while (continue_polling) {
+		continue_polling = false;
 		while (ib_poll_cq(cq, 1, &wc) == 1) {
-			buf = (struct mlx_accel_core_dma_buf *)wc.wr_id;
-			if (wc.status == IB_WC_SUCCESS) {
-				contine_polling = 1;
-				ib_dma_unmap_single(conn->accel_device->ib_dev,
-						buf->dma_addr,
-						buf->data_size,
-						buf->dma_dir);
-				if (wc.opcode == IB_WC_RECV) {
-					atomic_dec(&conn->pending_recvs);
-					buf->data_size = wc.byte_len;
-					conn->recv_cb(conn->cb_arg, buf);
-					pr_debug("Msg with %u bytes received successfully %d buffs are posted\n",
-							wc.byte_len, atomic_read(&conn->pending_recvs));
-				} else if (wc.opcode == IB_WC_SEND) {
-					kfree(buf);
-					atomic_dec(&conn->pending_sends);
-					pr_debug("Msg sent successfully %d msgs pending\n",
-							atomic_read(&conn->pending_sends));
-				} else {
-					pr_err("Unknown wc opcode %d\n",
-							wc.opcode);
-				}
-
-			} else {
-				contine_polling = 0;
-				if (conn->exiting) {
-					if (wc.wr_id == MLX_EXIT_WRID) {
-						if (++conn->exiting >= 3)
-							complete(&conn->exit_completion);
-						continue;
-					}
-				} else {
-					pr_err("QP returned with vendor error %d status msg is-%s\n",
-							wc.vendor_err, ib_wc_status_msg(wc.status));
-				}
-
-				ib_dma_unmap_single(conn->accel_device->ib_dev,
-							buf->dma_addr,
-							buf->data_size,
-							buf->dma_dir);
-				kfree(buf);
-			}
+			if (wc.status == IB_WC_SUCCESS)
+				continue_polling = true;
+			mlx_accel_complete(conn, &wc);
 		}
 
-
-		if (contine_polling) {
+		if (continue_polling && !conn->exiting) {
 			/* fill receive queue */
 			while (!mlx_accel_core_rdma_post_recv(conn))
 				;
@@ -220,67 +283,29 @@ static void mlx_accel_core_rdma_comp_handler(struct ib_cq *cq, void *arg)
 		}
 	}
 
+	pr_debug("<- Requesting next completions\n");
 	ret = ib_req_notify_cq(cq, IB_CQ_NEXT_COMP);
 	if (ret)
-		pr_info("completion_handler: ib_req_notify_cq failed with error=%d\n",
-				ret);
+		pr_warn("completion_handler: ib_req_notify_cq failed with error=%d\n",
+			ret);
 }
 
-int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
-					unsigned int tx_size,
-					unsigned int rx_size)
+static int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
+					  unsigned int tx_size,
+					  unsigned int rx_size)
 {
 	struct ib_cq_init_attr cq_attr = {0};
 	struct ib_qp_init_attr qp_init_attr = {0};
-	int rc;
+	int rc = 0;
 
-	/*
-	 * query GID
-	 */
-	rc = ib_query_gid(conn->accel_device->ib_dev, conn->port_num,
-			  0, &conn->gid, NULL);
-	if (rc) {
-		pr_err("Failed to query gid got error %d\n", rc);
-		return rc;
-	}
-
-	/*
-	 * allocate PD
-	 */
-	conn->pd = ib_alloc_pd(conn->accel_device->ib_dev);
-	if (IS_ERR(conn->pd)) {
-		rc = PTR_ERR(conn->pd);
-		pr_err("Failed to create PD\n");
-		goto err;
-	}
-
-	/*
-	 * allocate MR
-	 */
-	conn->mr = ib_get_dma_mr(conn->pd,
-				IB_ACCESS_LOCAL_WRITE |
-				IB_ACCESS_REMOTE_WRITE);
-	if (IS_ERR(conn->mr)) {
-		rc = PTR_ERR(conn->mr);
-		pr_err("Failed to create mr\n");
-		goto err_create_pd;
-	}
-
-	/*
-	 * allocate CQ
-	 */
-	/*
-	 * TODO: the allocated size is actually larger than
-	 *  the requested size
-	 */
-	cq_attr.cqe = 4 * tx_size + rx_size;
+	cq_attr.cqe = 2 * (tx_size + rx_size);
 	/* TODO: add event cb for cq */
 	conn->cq = ib_create_cq(conn->accel_device->ib_dev,
 			mlx_accel_core_rdma_comp_handler, NULL, conn, &cq_attr);
 	if (IS_ERR(conn->cq)) {
 		rc = PTR_ERR(conn->cq);
-		pr_err("Failed to create recv CQ\n");
-		goto err_create_mr;
+		pr_warn("Failed to create recv CQ\n");
+		goto out;
 	}
 
 	ib_req_notify_cq(conn->cq, IB_CQ_NEXT_COMP);
@@ -291,28 +316,70 @@ int mlx_accel_core_rdma_create_res(struct mlx_accel_core_conn *conn,
 	qp_init_attr.cap.max_send_wr	= tx_size;
 	qp_init_attr.cap.max_recv_wr	= rx_size;
 	qp_init_attr.cap.max_recv_sge	= 1;
-	qp_init_attr.cap.max_send_sge	= 1;
+	qp_init_attr.cap.max_send_sge	= 2;
 	qp_init_attr.sq_sig_type	= IB_SIGNAL_REQ_WR;
 	qp_init_attr.qp_type		= IB_QPT_RC;
 	qp_init_attr.send_cq		= conn->cq;
 	qp_init_attr.recv_cq		= conn->cq;
 
-	conn->qp = ib_create_qp(conn->pd, &qp_init_attr);
+	conn->qp = ib_create_qp(conn->accel_device->pd, &qp_init_attr);
 	if (IS_ERR(conn->qp)) {
 		rc = PTR_ERR(conn->qp);
-		pr_err("Failed to create QP\n");
+		pr_warn("Failed to create QP\n");
 		goto err_create_cq;
 	}
 
-	return rc;
+	goto out;
+
 err_create_cq:
 	ib_destroy_cq(conn->cq);
-err_create_mr:
-	ib_dereg_mr(conn->mr);
-err_create_pd:
-	ib_dealloc_pd(conn->pd);
+out:
+	return rc;
+}
+
+struct mlx_accel_core_conn *
+mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
+				struct mlx_accel_core_conn_init_attr *
+				conn_init_attr)
+{
+	struct mlx_accel_core_conn *ret = NULL;
+	struct mlx_accel_core_conn *conn = NULL;
+
+	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
+	if (!conn) {
+		ret = ERR_PTR(-ENOMEM);
+		goto err;
+	}
+
+	if (!conn_init_attr->recv_cb) {
+		ret = ERR_PTR(-EINVAL);
+		goto err;
+	}
+
+	conn->accel_device = accel_device;
+	conn->port_num = accel_device->port;
+
+	atomic_set(&conn->inflight_sends, 0);
+	atomic_set(&conn->pending_recvs, 0);
+
+	INIT_LIST_HEAD(&conn->pending_msgs);
+	spin_lock_init(&conn->pending_lock);
+
+	conn->recv_cb = conn_init_attr->recv_cb;
+	conn->cb_arg = conn_init_attr->cb_arg;
+
+	ret = ERR_PTR(mlx_accel_core_rdma_create_res(conn,
+						     conn_init_attr->tx_size,
+						     conn_init_attr->rx_size));
+	if (IS_ERR(ret))
+		goto err;
+
+	ret = conn;
+	goto out;
 err:
-	return 0;
+	kfree(conn);
+out:
+	return ret;
 }
 
 static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn)
@@ -332,14 +399,14 @@ static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn)
 		goto out;
 	}
 
-	pr_info("mlx_accel_core_close_qp: curr qp state: %d", attr.qp_state);
+	pr_debug("mlx_accel_core_close_qp: curr qp state: %d", attr.qp_state);
 	memset(&attr, 0, sizeof(attr));
 	attr.qp_state = IB_QPS_ERR;
 	flags = IB_QP_STATE;
 	rc = ib_modify_qp(conn->qp, &attr, flags);
 	if (rc) {
-		pr_info("mlx_accel_core_close_qp: ib_modify_qp failed ibdev %s err:%d\n",
-				conn->accel_device->ib_dev->name, rc);
+		pr_warn("mlx_accel_core_close_qp: ib_modify_qp failed ibdev %s err:%d\n",
+			conn->accel_device->ib_dev->name, rc);
 		goto out;
 	}
 
@@ -348,14 +415,14 @@ static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn)
 	while ((rc = ib_post_recv(conn->qp, &recv_wr, &bad_recv_wr)) == -ENOMEM)
 		;
 	if (rc) {
-		pr_info("mlx_accel_core_close_qp: posting recv failed\n");
+		pr_warn("mlx_accel_core_close_qp: posting recv failed\n");
 		goto out;
 	}
 	send_wr.wr_id = MLX_EXIT_WRID;
 	while ((rc = ib_post_send(conn->qp, &send_wr, &bad_send_wr)) == -ENOMEM)
 		;
 	if (rc) {
-		pr_info("mlx_accel_core_close_qp: posting send failed\n");
+		pr_warn("mlx_accel_core_close_qp: posting send failed\n");
 		goto out;
 	}
 	wait_for_completion(&conn->exit_completion);
@@ -365,12 +432,19 @@ out:
 	return rc;
 }
 
-void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn)
+static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn)
 {
+	int err = 0;
 	mlx_accel_core_rdma_close_qp(conn);
-	ib_destroy_cq(conn->cq);
-	ib_dereg_mr(conn->mr);
-	ib_dealloc_pd(conn->pd);
+	err = ib_destroy_cq(conn->cq);
+	if (err)
+		pr_warn("Failed to destroy CQ: %d\n", err);
+}
+
+void mlx_accel_core_rdma_conn_destroy(struct mlx_accel_core_conn *conn)
+{
+	mlx_accel_core_rdma_destroy_res(conn);
+	kfree(conn);
 }
 
 static inline int mlx_accel_core_rdma_init_qp(struct mlx_accel_core_conn *conn)
@@ -379,11 +453,9 @@ static inline int mlx_accel_core_rdma_init_qp(struct mlx_accel_core_conn *conn)
 	int rc = 0;
 
 	attr.qp_state = IB_QPS_INIT;
-	/* TODO: do we need RDMA write? */
-	attr.qp_access_flags = IB_ACCESS_REMOTE_WRITE;
+	attr.qp_access_flags = 0;
 	attr.port_num = conn->port_num;
-	/* TODO: Can we assume it will always be 0? */
-	attr.pkey_index = 0;
+	attr.pkey_index = conn->accel_device->pkey_index;
 
 	rc = ib_modify_qp(conn->qp, &attr,
 				IB_QP_STATE		|
@@ -406,7 +478,8 @@ static inline int mlx_accel_core_rdma_reset_qp(struct mlx_accel_core_conn *conn)
 	return rc;
 }
 
-static inline int mlx_accel_core_rdma_rtr_qp(struct mlx_accel_core_conn *conn)
+static inline int mlx_accel_core_rdma_rtr_qp(struct mlx_accel_core_conn *conn,
+					     int gid_index)
 {
 	struct ib_qp_attr attr = {0};
 	int rc = 0;
@@ -414,13 +487,14 @@ static inline int mlx_accel_core_rdma_rtr_qp(struct mlx_accel_core_conn *conn)
 	attr.qp_state = IB_QPS_RTR;
 	attr.path_mtu = IB_MTU_1024;
 	attr.dest_qp_num = conn->dqpn;
-	attr.rq_psn = 1;
-	attr.max_rd_atomic = 0;
+	attr.rq_psn = 0;
+	attr.max_dest_rd_atomic = 0;
 	attr.min_rnr_timer = 0x12;
 	attr.ah_attr.port_num = conn->port_num;
-	attr.ah_attr.sl = conn->sl;
+	attr.ah_attr.sl = conn->accel_device->sl;
 	attr.ah_attr.ah_flags = IB_AH_GRH;
 	attr.ah_attr.grh.dgid = conn->dgid;
+	attr.ah_attr.grh.sgid_index = gid_index;
 
 	rc = ib_modify_qp(conn->qp, &attr,
 				IB_QP_STATE			|
@@ -441,9 +515,9 @@ static inline int mlx_accel_core_rdma_rts_qp(struct mlx_accel_core_conn *conn)
 
 	attr.qp_state		= IB_QPS_RTS;
 	attr.timeout		= 0x12;
-	attr.retry_cnt		= 6;
+	attr.retry_cnt		= 7;
 	attr.rnr_retry		= 7;
-	attr.sq_psn		= 1;
+	attr.sq_psn		= 0;
 	attr.max_rd_atomic	= 0;
 
 	flags = IB_QP_STATE | IB_QP_TIMEOUT | IB_QP_RETRY_CNT |
@@ -454,33 +528,33 @@ static inline int mlx_accel_core_rdma_rts_qp(struct mlx_accel_core_conn *conn)
 	return rc;
 }
 
-int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn)
+int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn, int gid_index)
 {
 	int rc = 0;
 	rc = mlx_accel_core_rdma_reset_qp(conn);
 	if (rc) {
-		pr_err("Failed to change QP state to reset\n");
+		pr_warn("Failed to change QP state to reset\n");
 		return rc;
 	}
 
 	rc = mlx_accel_core_rdma_init_qp(conn);
 	if (rc) {
-		pr_err("Failed to modify QP from RESET to INIT\n");
+		pr_warn("Failed to modify QP from RESET to INIT\n");
 		return rc;
 	}
 
 	while (!mlx_accel_core_rdma_post_recv(conn))
 		;
 
-	rc = mlx_accel_core_rdma_rtr_qp(conn);
+	rc = mlx_accel_core_rdma_rtr_qp(conn, gid_index);
 	if (rc) {
-		pr_err("Failed to change QP state from INIT to RTR\n");
+		pr_warn("Failed to change QP state from INIT to RTR\n");
 		return rc;
 	}
 
 	rc = mlx_accel_core_rdma_rts_qp(conn);
 	if (rc) {
-		pr_err("Failed to change QP state from RTR to RTS\n");
+		pr_warn("Failed to change QP state from RTR to RTS\n");
 		return rc;
 	}
 

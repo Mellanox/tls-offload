@@ -33,9 +33,11 @@
 
 #include <linux/errno.h>
 #include <linux/err.h>
+#include <linux/completion.h>
 #include <rdma/ib_verbs.h>
 
 #include "accel_core.h"
+#include "accel_core_trans.h"
 
 extern struct list_head mlx_accel_core_devices;
 extern struct list_head mlx_accel_core_clients;
@@ -49,14 +51,9 @@ void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 
 	mutex_lock(&mlx_accel_core_mutex);
 
-	list_for_each_entry(accel_device, &mlx_accel_core_devices, list) {
-		/*
-		 * TODO: Add a check of client properties against the
-		 * device properties
-		 */
-		if (!mlx_add_accel_client_context(accel_device, client))
-			client->add(accel_device);
-	}
+	list_for_each_entry(accel_device, &mlx_accel_core_devices, list)
+		mlx_accel_client_context_add(accel_device, client);
+
 	list_add_tail(&client->list, &mlx_accel_core_clients);
 
 	mutex_unlock(&mlx_accel_core_mutex);
@@ -75,17 +72,15 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 	mutex_lock(&mlx_accel_core_mutex);
 
 	list_for_each_entry(accel_device, &mlx_accel_core_devices, list) {
-		/*
-		 * TODO: Add a check of client properties against the
-		 * device properties
-		 */
 		list_for_each_entry_safe(context, tmp_context,
 					 &accel_device->client_data_list,
 					 list) {
+			pr_debug("Unregister client %p. context %p device %p client %p\n",
+				 client, context, accel_device,
+				 context->client);
 			if (context->client == client) {
 				client->remove(accel_device);
-				list_del(&context->list);
-				kfree(context);
+				mlx_accel_client_context_del(context);
 				break;
 			}
 		}
@@ -106,49 +101,10 @@ struct mlx_accel_core_conn *
 mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
 		struct mlx_accel_core_conn_init_attr *conn_init_attr)
 {
-	struct mlx_accel_core_conn *conn = NULL;
-	void *rc;
-
 	pr_info("mlx_accel_core_conn_create called for %s\n",
 		accel_device->name);
 
-	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
-	if (!conn) {
-		rc = ERR_PTR(-ENOMEM);
-		goto err;
-	}
-
-	if (!conn_init_attr->recv_cb) {
-		rc = ERR_PTR(-EINVAL);
-		goto err;
-	}
-
-	conn->accel_device = accel_device;
-	/*
-	 * [AY]: TODO, for now we support only port 1 since netwon is CX4 which
-	 * have rdma device per port. That mean simulator will need to run also
-	 * on CX4 and Liran approved.
-	 */
-	conn->port_num = 1;
-
-	atomic_set(&conn->pending_sends, 0);
-	atomic_set(&conn->pending_recvs, 0);
-
-	INIT_LIST_HEAD(&conn->pending_msgs);
-	spin_lock_init(&conn->pending_lock);
-
-	conn->recv_cb = conn_init_attr->recv_cb;
-	conn->cb_arg = conn_init_attr->cb_arg;
-
-	rc = ERR_PTR(mlx_accel_core_rdma_create_res(conn,
-			conn_init_attr->tx_size, conn_init_attr->rx_size));
-	if (IS_ERR(rc))
-		goto err;
-
-	return conn;
-err:
-	kfree(conn);
-	return rc;
+	return mlx_accel_core_rdma_conn_create(accel_device, conn_init_attr);
 }
 EXPORT_SYMBOL(mlx_accel_core_conn_create);
 
@@ -157,9 +113,7 @@ void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn)
 	pr_info("mlx_accel_core_conn_destroy called for %s\n",
 			conn->accel_device->name);
 
-	mlx_accel_core_rdma_destroy_res(conn);
-
-	kfree(conn);
+	mlx_accel_core_rdma_conn_destroy(conn);
 }
 EXPORT_SYMBOL(mlx_accel_core_conn_destroy);
 
@@ -168,7 +122,7 @@ int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 	pr_info("mlx_accel_core_connect called for %s\n",
 			conn->accel_device->name);
 
-	return mlx_accel_core_rdma_connect(conn);
+	return mlx_accel_core_rdma_connect(conn, 0);
 }
 EXPORT_SYMBOL(mlx_accel_core_connect);
 
@@ -209,21 +163,90 @@ u64 mlx_accel_core_ddr_base_get(struct mlx_accel_core_device *dev)
 }
 EXPORT_SYMBOL(mlx_accel_core_ddr_base_get);
 
+struct mem_transfer {
+	struct mlx_accel_transaction t;
+	struct completion comp;
+	enum ib_wc_status status;
+};
+
+static void
+mlx_accel_core_mem_complete(const struct mlx_accel_transaction *complete,
+			    enum ib_wc_status status)
+{
+	struct mem_transfer *xfer;
+
+	pr_debug("Memory transaction %p is complete with status %u\n",
+		 complete, status);
+
+	xfer = container_of(complete, struct mem_transfer, t);
+	xfer->status = status;
+	complete_all(&xfer->comp);
+}
+
+int mlx_accel_core_mem_transaction(struct mlx_accel_core_device *dev,
+				   size_t size, u64 addr, void *buf,
+				   enum mlx_accel_direction direction)
+{
+	int ret;
+	struct mem_transfer xfer;
+
+	if (!dev->core_conn) {
+		ret = -ENOTCONN;
+		goto out;
+	}
+
+	xfer.t.data = buf;
+	xfer.t.size = size;
+	xfer.t.addr = addr;
+	xfer.t.conn = dev->core_conn;
+	xfer.t.direction = direction;
+	xfer.t.complete = mlx_accel_core_mem_complete;
+	init_completion(&xfer.comp);
+	ret = mlx_accel_xfer_exec(&xfer.t);
+	if (ret) {
+		pr_debug("Transaction returned value %d\n", ret);
+		goto out;
+	}
+	ret = wait_for_completion_interruptible(&xfer.comp);
+	if (ret) {
+		pr_debug("Wait completed with value %d\n", ret);
+		/* TODO: Cancel the transfer! */
+		goto out;
+	}
+	if (xfer.status != 0)
+		ret = -EIO;
+out:
+	return ret;
+}
+
 int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 			    size_t size, u64 addr, void *buf,
 			    enum mlx_accel_access_type access_type)
 {
 	int ret;
-	/* [AY]: TODO: In future add RDMA DDR access */
-	if (access_type == MLX_ACCEL_ACCESS_TYPE_RDMA)
-		return -EACCES;
 
-	pr_debug("Reading %lu bytes at 0x%llx using %d\n", size, addr,
-		 access_type);
-	/* i2c access */
-	ret = mlx_accel_read_i2c(dev->hw_dev, size, addr, buf);
-	if (ret)
-		return ret;
+	pr_debug("**** Reading %lu bytes at 0x%llx using %s\n", size, addr,
+		 access_type ? "RDMA" : "I2C");
+
+	switch (access_type) {
+	case MLX_ACCEL_ACCESS_TYPE_RDMA:
+		ret = mlx_accel_core_mem_transaction(dev, size, addr, buf,
+						     MLX_ACCEL_READ);
+		if (ret)
+			return ret;
+		break;
+	case MLX_ACCEL_ACCESS_TYPE_I2C:
+		if (!dev->hw_dev)
+			return -ENOTCONN;
+		ret = mlx_accel_read_i2c(dev->hw_dev, size, addr, buf);
+		if (ret)
+			return ret;
+		break;
+	default:
+		pr_warn("Unexpected read access_type %u\n", access_type);
+		return -EACCES;
+	}
+
 	return size;
 }
 EXPORT_SYMBOL(mlx_accel_core_mem_read);
@@ -233,16 +256,29 @@ int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 			     enum mlx_accel_access_type access_type)
 {
 	int ret;
-	/* [AY]: TODO: In future add RDMA DDR access */
-	if (access_type == MLX_ACCEL_ACCESS_TYPE_RDMA)
-		return -EACCES;
 
-	pr_debug("Writing %lu bytes at 0x%llx using %d\n", size, addr,
-		 access_type);
-	/* i2c access */
-	ret = mlx_accel_write_i2c(dev->hw_dev, size, addr, buf);
-	if (ret)
-		return ret;
+	pr_debug("**** Writing %lu bytes at 0x%llx using %s\n", size, addr,
+		 access_type ? "RDMA" : "I2C");
+
+	switch (access_type) {
+	case MLX_ACCEL_ACCESS_TYPE_RDMA:
+		ret = mlx_accel_core_mem_transaction(dev, size, addr, buf,
+						     MLX_ACCEL_WRITE);
+		if (ret)
+			return ret;
+		break;
+	case MLX_ACCEL_ACCESS_TYPE_I2C:
+		if (!dev->hw_dev)
+			return -ENOTCONN;
+		ret = mlx_accel_write_i2c(dev->hw_dev, size, addr, buf);
+		if (ret)
+			return ret;
+		break;
+	default:
+		pr_warn("Unexpected write access_type %u\n", access_type);
+		return -EACCES;
+	}
+
 	return size;
 }
 EXPORT_SYMBOL(mlx_accel_core_mem_write);

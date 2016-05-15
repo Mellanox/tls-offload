@@ -30,37 +30,56 @@
  * SOFTWARE.
  *
  */
+
 #include <linux/module.h>
+#include <rdma/ib_mad.h>
 
 #include "accel_core.h"
+#include "accel_core_trans.h"
 
 atomic_t mlx_accel_device_id = ATOMIC_INIT(0);
 LIST_HEAD(mlx_accel_core_devices);
 LIST_HEAD(mlx_accel_core_clients);
-/* protects access between client un/registeration and device add/remove calls
- */
+/* protects access between client un/registration and device add/remove calls */
 DEFINE_MUTEX(mlx_accel_core_mutex);
 
-/* [BP]: TODO - change these details */
-MODULE_AUTHOR("Jhon Snow <Jhon@WinterIsComing.com>");
+MODULE_AUTHOR("Ilan Tayari <ilant@mellanox.com>");
 MODULE_DESCRIPTION("Mellanox FPGA Accelerator Core Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
-int mlx_add_accel_client_context(struct mlx_accel_core_device *device,
-				 struct mlx_accel_core_client *client)
+void mlx_accel_client_context_del(struct mlx_accel_client_data *context)
+{
+	pr_debug("Deleting client context %p of client %p\n",
+		 context, context->client);
+	list_del(&context->list);
+	kfree(context);
+}
+
+void mlx_accel_client_context_add(struct mlx_accel_core_device *device,
+				  struct mlx_accel_core_client *client)
 {
 	struct mlx_accel_client_data *context;
 
+	/* TODO: If device caps do not match client driver, then
+	 * do nothing and return
+	 */
+
 	context = kmalloc(sizeof(*context), GFP_KERNEL);
-	if (!context)
-		return -ENOMEM;
+	if (!context) {
+		pr_err("Failed to allocate accel device client context\n");
+		return;
+	}
 
 	context->client = client;
 	context->data   = NULL;
-
 	list_add(&context->list, &device->client_data_list);
-	return 0;
+
+	pr_debug("Adding client context %p device %p client %p\n",
+		 context, device, client);
+
+	if (client->add(device))
+		mlx_accel_client_context_del(context);
 }
 
 static inline struct mlx_accel_core_device *
@@ -139,13 +158,205 @@ static struct mlx_accel_core_device *mlx_accel_device_alloc(void)
 	accel_device->id = atomic_add_return(1, &mlx_accel_device_id);
 	INIT_LIST_HEAD(&accel_device->client_data_list);
 	list_add_tail(&accel_device->list, &mlx_accel_core_devices);
+	accel_device->port = 1;
 	return accel_device;
+}
+
+static int build_core_conn_fpga_qpc(struct mlx_accel_core_device *accel_device,
+				    struct mlx5_fpga_qpc *qpc)
+{
+	struct net_device *netdev;
+	u8 port_num;
+
+	memset(qpc, 0, sizeof(*qpc));
+	qpc->state = MLX5_FPGA_QP_STATE_INIT;
+	qpc->qp_type = MLX5_FPGA_QP_TYPE_SHELL;
+	qpc->st = MLX5_FPGA_QP_SERVICE_TYPE_RC;
+	qpc->ether_type = ETH_P_8021Q;
+	qpc->pkey = IB_DEFAULT_PKEY_FULL;
+	qpc->remote_qpn = accel_device->core_conn->qp->qp_num;
+	qpc->rnr_retry = 7;
+	qpc->retry_count = 7;
+
+	port_num = accel_device->core_conn->port_num;
+	netdev = accel_device->ib_dev->get_netdev(accel_device->ib_dev,
+						  port_num);
+	if (!netdev) {
+		pr_warn("Failed to query device %s netdev\n",
+			accel_device->name);
+		return -ENOENT;
+	}
+
+	memcpy(&qpc->remote_mac, &netdev->dev_addr, sizeof(qpc->remote_mac));
+	dev_put(netdev);
+
+	memcpy(&qpc->remote_ip, &accel_device->gid, sizeof(accel_device->gid));
+	return 0;
+}
+
+static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
+{
+	struct mlx_accel_core_conn_init_attr core_conn_attr;
+	struct mlx_accel_core_client *client;
+	int err = 0;
+	int sgid_index = 5;
+	u16 pkey_index = 0;
+	struct mlx5_fpga_qpc qpc;
+
+	snprintf(accel_device->name, sizeof(accel_device->name), "%s-%s",
+		 accel_device->ib_dev->name,
+		 accel_device->hw_dev->priv.name);
+
+	err = mlx_accel_fpga_qp_device_init(accel_device);
+	if (err) {
+		pr_err("Failed to initialize FPGA QP CrSpace: %d\n", err);
+		goto out;
+	}
+
+	err = ib_find_pkey(accel_device->ib_dev, accel_device->port,
+			   IB_DEFAULT_PKEY_FULL, &pkey_index);
+	if (err) {
+		pr_err("Failed to query pkey: %d\n", err);
+		goto out;
+	}
+
+	err = ib_query_gid(accel_device->ib_dev, accel_device->port, sgid_index,
+			   &accel_device->gid, NULL);
+	if (err) {
+		pr_err("Failed to query gid: %d\n", err);
+		goto out;
+	}
+	pr_debug("Accel device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+		 ntohs(((__be16 *)&accel_device->gid)[0]),
+		 ntohs(((__be16 *)&accel_device->gid)[1]),
+		 ntohs(((__be16 *)&accel_device->gid)[2]),
+		 ntohs(((__be16 *)&accel_device->gid)[3]),
+		 ntohs(((__be16 *)&accel_device->gid)[4]),
+		 ntohs(((__be16 *)&accel_device->gid)[5]),
+		 ntohs(((__be16 *)&accel_device->gid)[6]),
+		 ntohs(((__be16 *)&accel_device->gid)[7]));
+
+	err = mlx_accel_trans_device_init(accel_device);
+	if (err) {
+		pr_err("Failed to initialize transaction machine: %d\n", err);
+		goto out;
+	}
+
+	accel_device->pd = ib_alloc_pd(accel_device->ib_dev);
+	if (IS_ERR(accel_device->pd)) {
+		err = PTR_ERR(accel_device->pd);
+		pr_err("Failed to create PD: %d\n", err);
+		goto err_trans;
+	}
+
+	accel_device->mr = ib_get_dma_mr(accel_device->pd,
+					 IB_ACCESS_LOCAL_WRITE |
+					 IB_ACCESS_REMOTE_WRITE);
+	if (IS_ERR(accel_device->mr)) {
+		err = PTR_ERR(accel_device->mr);
+		pr_err("Failed to create MR: %d\n", err);
+		goto err_pd;
+	}
+
+	memset(&core_conn_attr, 0, sizeof(core_conn_attr));
+	core_conn_attr.tx_size = MLX_ACCEL_TID_COUNT;
+	core_conn_attr.rx_size = MLX_ACCEL_TID_COUNT;
+	core_conn_attr.recv_cb = mlx_accel_trans_recv;
+	core_conn_attr.cb_arg = accel_device;
+	accel_device->core_conn = mlx_accel_core_rdma_conn_create(accel_device,
+							     &core_conn_attr);
+	if (IS_ERR(accel_device->core_conn)) {
+		err = PTR_ERR(accel_device->core_conn);
+		pr_err("Failed to create core RC QP: %d\n", err);
+		goto err_mr;
+	}
+
+	err = build_core_conn_fpga_qpc(accel_device, &qpc);
+	if (err) {
+		pr_err("Failed to build FPGA QPC for core: %d\n", err);
+		goto err_core_conn;
+	}
+
+	err = mlx5_fpga_create_qp(accel_device->hw_dev, &qpc,
+				  &accel_device->core_conn->dqpn);
+	if (err) {
+		pr_err("Failed to create FPGA RC QP: %d\n", err);
+		goto err_core_conn;
+	}
+	memcpy(&accel_device->core_conn->dgid, &qpc.fpga_ip,
+	       sizeof(accel_device->core_conn->dgid));
+
+	pr_debug("FPGA QPN is %u\n", accel_device->core_conn->dqpn);
+	pr_debug("FPGA device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[0]),
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[1]),
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[2]),
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[3]),
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[4]),
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[5]),
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[6]),
+		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[7]));
+
+	qpc.state = MLX5_FPGA_QP_STATE_ACTIVE;
+	err = mlx5_fpga_modify_qp(accel_device->hw_dev,
+				  accel_device->core_conn->dqpn,
+				  MLX5_FPGA_QPC_STATE, &qpc);
+	if (err) {
+		pr_err("Failed to create FPGA RC QP: %d\n", err);
+		goto err_fpga_qp;
+	}
+
+	err = mlx_accel_core_rdma_connect(accel_device->core_conn, sgid_index);
+	if (err) {
+		pr_err("Failed to connect core RC QP to FPGA QP: %d\n", err);
+		goto err_fpga_qp;
+	}
+
+	list_for_each_entry(client, &mlx_accel_core_clients, list)
+		mlx_accel_client_context_add(accel_device, client);
+
+	goto out;
+
+err_fpga_qp:
+	mlx5_fpga_destroy_qp(accel_device->hw_dev,
+			     accel_device->core_conn->dqpn);
+err_core_conn:
+	mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
+err_mr:
+	ib_dereg_mr(accel_device->mr);
+err_pd:
+	ib_dealloc_pd(accel_device->pd);
+err_trans:
+	mlx_accel_trans_device_deinit(accel_device);
+out:
+	return err;
+}
+
+static void mlx_accel_device_deinit(struct mlx_accel_core_device *accel_device)
+{
+	int err = 0;
+	struct mlx_accel_client_data *client_context, *tmp;
+
+	list_for_each_entry_safe(client_context, tmp,
+				 &accel_device->client_data_list,
+				 list) {
+		client_context->client->remove(accel_device);
+		mlx_accel_client_context_del(client_context);
+	}
+
+	mlx5_fpga_destroy_qp(accel_device->hw_dev,
+			     accel_device->core_conn->qp->qp_num);
+	mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
+	err = ib_dereg_mr(accel_device->mr);
+	if (err)
+		pr_err("Unexpected error deregistering MR: %d\n", err);
+	ib_dealloc_pd(accel_device->pd);
+	mlx_accel_trans_device_deinit(accel_device);
 }
 
 static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 {
 	struct mlx_accel_core_device *accel_device = NULL;
-	struct mlx_accel_core_client *client;
 
 	pr_info("mlx_accel_ib_dev_add_one called for %s\n", dev->name);
 
@@ -159,22 +370,9 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 		accel_device->ib_dev = dev;
 	}
 
-	/* [BP]: the ib_dev check is redundent, you should put a comment here
-	 * or remove it, since you've just assigned it a value */
-	if ((accel_device->ib_dev) && (accel_device->hw_dev)) {
-		list_for_each_entry(client, &mlx_accel_core_clients, list) {
-			/*
-			 * TODO: Add a check of client properties against
-			 *  the device properties
-			 */
-			if (!mlx_add_accel_client_context(accel_device, client))
-				client->add(accel_device);
-		}
-		/* [BP]: Use snprintf and write NULL to the last element of
-		 * the buffer */
-		sprintf(accel_device->name, "%s-%s", accel_device->ib_dev->name,
-				accel_device->hw_dev->priv.name);
-	}
+	/* An accel device is ready once it has both IB and HW devices */
+	if ((accel_device->ib_dev) && (accel_device->hw_dev))
+		mlx_accel_device_init(accel_device);
 
 out:
 	mutex_unlock(&mlx_accel_core_mutex);
@@ -184,7 +382,6 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 					void *client_data)
 {
 	struct mlx_accel_core_device *accel_device;
-	struct mlx_accel_client_data *client_context, *tmp;
 
 	pr_info("mlx_accel_ib_dev_remove_one called for %s\n", dev->name);
 
@@ -192,21 +389,13 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 
 	accel_device = mlx_find_accel_dev_by_ib_dev_unlocked(dev);
 	if (!accel_device) {
-		/* [AY]: TODO: do we want to check this case */
-		dump_stack();
 		pr_err("Not found valid accel device\n");
 		goto out;
 	}
 
-	accel_device->ib_dev = NULL;
 	if (accel_device->hw_dev) {
-		list_for_each_entry_safe(client_context, tmp,
-					 &accel_device->client_data_list,
-					 list) {
-			client_context->client->remove(accel_device);
-			list_del(&client_context->list);
-			kfree(client_context);
-		}
+		mlx_accel_device_deinit(accel_device);
+		accel_device->ib_dev = NULL;
 	} else {
 		list_del(&accel_device->list);
 		kfree(accel_device);
@@ -219,10 +408,8 @@ out:
 static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 {
 	struct mlx_accel_core_device *accel_device = NULL;
-	struct mlx_accel_core_client *client;
 
 	pr_info("mlx_accel_hw_dev_add_one called for %s\n", dev->priv.name);
-
 	mutex_lock(&mlx_accel_core_mutex);
 
 	accel_device = mlx_find_accel_dev_by_hw_dev_unlocked(dev);
@@ -233,22 +420,9 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 		accel_device->hw_dev = dev;
 	}
 
-	/* [BP]: the hw_dev check is redundent, you should put a comment here
-	 * or remove it, since you've just assigned it a value */
-	if ((accel_device->hw_dev) && (accel_device->ib_dev)) {
-		list_for_each_entry(client, &mlx_accel_core_clients, list) {
-			/*
-			 * TODO: Add a check of client properties against
-			 *  the device properties
-			 */
-			if (!mlx_add_accel_client_context(accel_device, client))
-				client->add(accel_device);
-		}
-		/* [BP]: Use snprintf and write NULL to the last element of
-		 * the buffer */
-		sprintf(accel_device->name, "%s-%s", accel_device->ib_dev->name,
-				accel_device->hw_dev->priv.name);
-	}
+	/* An accel device is ready once it has both IB and HW devices */
+	if ((accel_device->hw_dev) && (accel_device->ib_dev))
+		mlx_accel_device_init(accel_device);
 
 out:
 	mutex_unlock(&mlx_accel_core_mutex);
@@ -260,21 +434,14 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 {
 	struct mlx_accel_core_device *accel_device =
 			(struct mlx_accel_core_device *)context;
-	struct mlx_accel_client_data *client_context, *tmp;
 
 	pr_info("mlx_accel_hw_dev_remove_one called for %s\n", dev->priv.name);
 
 	mutex_lock(&mlx_accel_core_mutex);
 
-	accel_device->hw_dev = NULL;
 	if (accel_device->ib_dev) {
-		list_for_each_entry_safe(client_context, tmp,
-					 &accel_device->client_data_list,
-					 list) {
-			client_context->client->remove(accel_device);
-			list_del(&client_context->list);
-			kfree(client_context);
-		}
+		mlx_accel_device_deinit(accel_device);
+		accel_device->hw_dev = NULL;
 	} else {
 		list_del(&accel_device->list);
 		kfree(accel_device);

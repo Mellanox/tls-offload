@@ -43,29 +43,38 @@
 #include <linux/mlx5/accel/accel_sdk.h>
 
 #define MLX_CLIENT_NAME_MAX			64
-/* [BP]: This length is Ok if each part of the name is delimited correctly
- * with NULL */
 #define MLX_ACCEL_DEVICE_NAME_MAX	(MLX5_MAX_NAME_LEN + IB_DEVICE_NAME_MAX)
 
-/* represents an accelerated ib_device */
+struct mlx_accel_core_conn;
+
+/* represents an accelerated device */
 struct mlx_accel_core_device {
 	struct mlx5_core_dev *hw_dev;
 	struct ib_device *ib_dev;
 	char name[MLX_ACCEL_DEVICE_NAME_MAX];
 	unsigned int properties; /* accelerator properties the device support */
 	unsigned int id;
-
-	struct list_head connections; /* [BP]: We assume only clients use this
-					 list */
+	u8 port;
 
 	struct list_head list;
+	struct list_head client_connections;
 	struct list_head client_data_list;
+	struct mlx_accel_core_conn *core_conn;
 
+	/* Transactions state */
+	struct mlx_accel_trans_device_state *trans;
+
+	/* Parameters for QPs */
+	struct ib_pd *pd;
+	struct ib_mr *mr;
+	union ib_gid gid;
+	u16 pkey_index;
+	u8 sl;
 };
 
 struct mlx_accel_core_client {
-	void (*add)    (struct mlx_accel_core_device *);
-	void (*remove) (struct mlx_accel_core_device *);
+	int  (*add)(struct mlx_accel_core_device *);
+	void (*remove)(struct mlx_accel_core_device *);
 
 	char name[MLX_CLIENT_NAME_MAX];
 	unsigned int properties; /* accelerator properties the client support */
@@ -75,11 +84,18 @@ struct mlx_accel_core_client {
 
 struct mlx_accel_core_dma_buf {
 	struct list_head list;
-	u64 dma_addr;
-	enum dma_data_direction dma_dir;
+	void (*complete)(struct mlx_accel_core_conn *conn,
+			 struct mlx_accel_core_dma_buf *buf, struct ib_wc *wc);
+	/* Payload */
+	void *data;
 	size_t data_size;
-	size_t offset;
-	char data[];
+	/* Optional second payload */
+	void *more;
+	size_t more_size;
+	/* Private members */
+	u64 data_dma_addr;
+	u64 more_dma_addr;
+	enum dma_data_direction dma_dir;
 };
 
 struct mlx_accel_core_conn_init_attr {
@@ -93,7 +109,7 @@ struct mlx_accel_core_conn {
 	struct mlx_accel_core_device *accel_device;
 	u8 port_num;
 
-	atomic_t pending_sends;
+	atomic_t inflight_sends;
 	atomic_t pending_recvs;
 
 	/* [BP]: TODO - Why not use RCU list? */
@@ -106,25 +122,22 @@ struct mlx_accel_core_conn {
 	struct completion exit_completion;
 	int exiting;
 
-	struct ib_pd *pd;
-	struct ib_mr *mr;
+	struct list_head list;
+
+	/* Parameters for the QP */
 	struct ib_cq *cq;
 	struct ib_qp *qp;
-	union ib_gid gid;
-	u16 pkey;			/* TODO */
-	u8 sl;				/* TODO */
-
-	u32 dqpn;			/* TODO */
-	union ib_gid dgid;	/* TODO */
-
-	struct list_head list;
+	u32 dqpn;
+	union ib_gid dgid;
 };
 
 void mlx_accel_core_client_register(struct mlx_accel_core_client *client);
 void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client);
 
-struct mlx_accel_core_conn *mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
-						       struct mlx_accel_core_conn_init_attr *conn_init_attr);
+struct mlx_accel_core_conn *
+mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
+			   struct mlx_accel_core_conn_init_attr *
+			   conn_init_attr);
 void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn);
 
 int mlx_accel_core_connect(struct mlx_accel_core_conn *conn);
