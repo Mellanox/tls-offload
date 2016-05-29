@@ -232,7 +232,8 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 	 * with (offload_handle != NULL)
 	 */
 	if (skb_dst(skb) && skb_dst(skb)->xfrm &&
-	    skb_dst(skb)->xfrm->xso.offload_handle) {
+	    skb_dst(skb)->xfrm->xso.offload_handle &&
+	    skb->protocol == htons(ETH_P_IP)) {
 		if (insert_pet(skb)) {
 			pr_warn("insert_pet failed!!\n");
 			kfree_skb(skb);
