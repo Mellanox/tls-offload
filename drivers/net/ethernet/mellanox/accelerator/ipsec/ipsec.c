@@ -404,11 +404,7 @@ out:
 	return NOTIFY_DONE;
 }
 
-/*
- * [BP]: TODO: This function should return an error code and the core should
- * free memory once an error code is returned
- */
-void mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
+int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 {
 	int ret = 0;
 	struct mlx_ipsec_dev *dev = NULL;
@@ -499,7 +495,7 @@ err_conn:
 err_dev:
 	kfree(dev);
 out:
-	return;
+	return ret;
 }
 
 /* [BP]: TODO - Remove all SA entries on mlx_xfrm_del_state */

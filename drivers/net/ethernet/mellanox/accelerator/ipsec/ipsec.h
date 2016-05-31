@@ -92,7 +92,7 @@ void mlx_ipsec_dev_release(struct kobject *kobj);
 int mlx_ipsec_netdev_event(struct notifier_block *this,
 		unsigned long event, void *ptr);
 
-void mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device);
+int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device);
 void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device);
 
 int mlx_xfrm_offload_input(struct xfrm_state *x, struct sk_buff **skb);

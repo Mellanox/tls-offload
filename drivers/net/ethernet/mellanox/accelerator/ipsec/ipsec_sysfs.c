@@ -49,9 +49,9 @@ struct mlx_ipsec_attribute {
 			.store = _store, \
 	}
 #define to_mlx_ipsec_dev(obj)	\
-		container_of(kobj, struct mlx_ipsec_dev, kobj)
+		container_of(obj, struct mlx_ipsec_dev, kobj)
 #define to_mlx_ipsec_attr(_attr)	\
-		container_of(attr, struct mlx_ipsec_attribute, attr)
+		container_of(_attr, struct mlx_ipsec_attribute, attr)
 
 static ssize_t mlx_ipsec_attr_show(struct kobject *kobj, struct attribute *attr,
 		char *buf)
@@ -86,28 +86,29 @@ static ssize_t mlx_ipsec_sqpn_read(struct mlx_ipsec_dev *dev, char *buf)
 
 static ssize_t mlx_ipsec_sgid_read(struct mlx_ipsec_dev *dev, char *buf)
 {
-	union ib_gid *sgid = &dev->conn->gid;
+	__be16 *sgid = (__be16 *)&dev->conn->fpga_qpc.remote_ip;
 
 	return sprintf(buf, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-			be16_to_cpu(((__be16 *)sgid->raw)[0]),
-			be16_to_cpu(((__be16 *)sgid->raw)[1]),
-			be16_to_cpu(((__be16 *)sgid->raw)[2]),
-			be16_to_cpu(((__be16 *)sgid->raw)[3]),
-			be16_to_cpu(((__be16 *)sgid->raw)[4]),
-			be16_to_cpu(((__be16 *)sgid->raw)[5]),
-			be16_to_cpu(((__be16 *)sgid->raw)[6]),
-			be16_to_cpu(((__be16 *)sgid->raw)[7]));
+			be16_to_cpu(sgid[0]),
+			be16_to_cpu(sgid[1]),
+			be16_to_cpu(sgid[2]),
+			be16_to_cpu(sgid[3]),
+			be16_to_cpu(sgid[4]),
+			be16_to_cpu(sgid[5]),
+			be16_to_cpu(sgid[6]),
+			be16_to_cpu(sgid[7]));
 }
 
 static ssize_t mlx_ipsec_dqpn_read(struct mlx_ipsec_dev *dev, char *buf)
 {
-	return sprintf(buf, "%d\n", dev->conn->dqpn);
+	return sprintf(buf, "%d\n", dev->conn->fpga_qpn);
 }
 
 static ssize_t mlx_ipsec_dqpn_write(struct mlx_ipsec_dev *dev, const char *buf,
 		size_t count)
 {
-	sscanf(buf, "%u\n", &dev->conn->dqpn);
+	if (sscanf(buf, "%u\n", &dev->conn->fpga_qpn) != 1)
+		return -EINVAL;
 	/* [SR] TODO: We are planning on keeping this interface in
 	 * final version as well? If so, how will we know what DQPN to
 	 * use? I guess we should have "allocate-user-QP-slot" API in
@@ -119,36 +120,31 @@ static ssize_t mlx_ipsec_dqpn_write(struct mlx_ipsec_dev *dev, const char *buf,
 
 static ssize_t mlx_ipsec_dgid_read(struct mlx_ipsec_dev *dev, char *buf)
 {
-	union ib_gid *dgid = &dev->conn->dgid;
+	__be16 *dgid = (__be16 *)&dev->conn->fpga_qpc.fpga_ip;
 
 	return sprintf(buf, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-			be16_to_cpu(((__be16 *)dgid->raw)[0]),
-			be16_to_cpu(((__be16 *)dgid->raw)[1]),
-			be16_to_cpu(((__be16 *)dgid->raw)[2]),
-			be16_to_cpu(((__be16 *)dgid->raw)[3]),
-			be16_to_cpu(((__be16 *)dgid->raw)[4]),
-			be16_to_cpu(((__be16 *)dgid->raw)[5]),
-			be16_to_cpu(((__be16 *)dgid->raw)[6]),
-			be16_to_cpu(((__be16 *)dgid->raw)[7]));
+			be16_to_cpu(dgid[0]),
+			be16_to_cpu(dgid[1]),
+			be16_to_cpu(dgid[2]),
+			be16_to_cpu(dgid[3]),
+			be16_to_cpu(dgid[4]),
+			be16_to_cpu(dgid[5]),
+			be16_to_cpu(dgid[6]),
+			be16_to_cpu(dgid[7]));
 }
 
 static ssize_t mlx_ipsec_dgid_write(struct mlx_ipsec_dev *dev, const char *buf,
 		size_t count)
 {
-	union ib_gid *dgid = &dev->conn->dgid;
+	__be16 *dgid = (__be16 *)&dev->conn->fpga_qpc.fpga_ip;
 	int i = 0;
-	sscanf(buf, "%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx\n",
-			&(((__be16 *) dgid->raw)[0]),
-			&(((__be16 *) dgid->raw)[1]),
-			&(((__be16 *) dgid->raw)[2]),
-			&(((__be16 *) dgid->raw)[3]),
-			&(((__be16 *) dgid->raw)[4]),
-			&(((__be16 *) dgid->raw)[5]),
-			&(((__be16 *) dgid->raw)[6]),
-			&(((__be16 *) dgid->raw)[7]));
+	if (sscanf(buf, "%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx\n",
+		   &dgid[0], &dgid[1], &dgid[2], &dgid[3],
+		   &dgid[4], &dgid[5], &dgid[6], &dgid[7]) != 8)
+		return -EINVAL;
+
 	for (i = 0; i < 8; i++)
-		((__be16 *) dgid->raw)[i] = cpu_to_be16(((u16 *)
-			dgid->raw)[i]);
+		dgid[i] = cpu_to_be16(dgid[i]);
 	return count;
 }
 
