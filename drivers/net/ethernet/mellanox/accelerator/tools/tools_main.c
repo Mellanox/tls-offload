@@ -40,7 +40,7 @@ MODULE_DESCRIPTION("Mellanox FPGA Accelerator Tools Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
-static void
+static int
 mlx_accel_tools_add_one(struct mlx_accel_core_device *accel_device);
 static void
 mlx_accel_tools_remove_one(struct mlx_accel_core_device *accel_device);
@@ -51,15 +51,16 @@ static struct mlx_accel_core_client mlx_accel_tools_client = {
 	.remove = mlx_accel_tools_remove_one,
 };
 
-static void mlx_accel_tools_add_one(struct mlx_accel_core_device *accel_device)
+static int mlx_accel_tools_add_one(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_tools_dev *dev = NULL;
+	int ret = 0;
 
 	pr_debug("mlx_accel_tools_add_one called for %s\n", accel_device->name);
 
 	dev = mlx_accel_tools_alloc(accel_device);
 	if (!dev) {
-		/* TODO: ret = -ENOMEM;*/
+		ret = -ENOMEM;
 		goto out;
 	}
 
@@ -67,7 +68,7 @@ static void mlx_accel_tools_add_one(struct mlx_accel_core_device *accel_device)
 				       &mlx_accel_tools_client, dev);
 
 out:
-	return;
+	return ret;
 }
 
 static void
