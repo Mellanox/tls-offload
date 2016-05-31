@@ -37,7 +37,7 @@
 #include <rdma/ib_verbs.h>
 
 #include "accel_core.h"
-#include "accel_core_trans.h"
+#include "accel_core_xfer.h"
 
 extern struct list_head mlx_accel_core_devices;
 extern struct list_head mlx_accel_core_clients;
