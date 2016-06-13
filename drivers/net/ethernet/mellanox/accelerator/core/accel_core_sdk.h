@@ -70,6 +70,9 @@ struct mlx_accel_core_device {
 	union ib_gid gid;
 	u16 pkey_index;
 	u8 sl;
+#ifdef QP_SIMULATOR
+	struct kobject sim_kobj;
+#endif
 };
 
 struct mlx_accel_core_client {
@@ -102,6 +105,7 @@ struct mlx_accel_core_conn_init_attr {
 	unsigned int tx_size;
 	unsigned int rx_size;
 	union ib_gid local_gid;
+	bool vlan;
 	u16 vlan_id;
 	u8 local_mac[ETH_ALEN];
 	void (*recv_cb)(void *cb_arg, struct mlx_accel_core_dma_buf *buf);

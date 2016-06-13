@@ -235,7 +235,10 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	core_conn_attr.local_gid.raw[13] = core_conn_attr.local_mac[3];
 	core_conn_attr.local_gid.raw[14] = core_conn_attr.local_mac[4];
 	core_conn_attr.local_gid.raw[15] = core_conn_attr.local_mac[5];
+#ifndef QP_SIMULATOR
+	core_conn_attr.vlan = true;
 	core_conn_attr.vlan_id = 0;
+#endif
 	pr_debug("Local gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
 		 ntohs(((__be16 *)&core_conn_attr.local_gid)[0]),
 		 ntohs(((__be16 *)&core_conn_attr.local_gid)[1]),
@@ -284,15 +287,19 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 				  MLX5_FPGA_QPC_STATE,
 				  &accel_device->core_conn->fpga_qpc);
 	if (err) {
-		pr_err("Failed to create FPGA RC QP: %d\n", err);
+		pr_err("Failed to activate FPGA RC QP: %d\n", err);
 		goto err_fpga_qp;
 	}
 
+#ifdef QP_SIMULATOR
+	pr_notice("**** QP Simulator mode; Waiting for QP setup ****\n");
+#else
 	err = mlx_accel_core_rdma_connect(accel_device->core_conn);
 	if (err) {
 		pr_err("Failed to connect core RC QP to FPGA QP: %d\n", err);
 		goto err_fpga_qp;
 	}
+#endif
 
 	list_for_each_entry(client, &mlx_accel_core_clients, list)
 		mlx_accel_client_context_add(accel_device, client);

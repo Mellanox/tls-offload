@@ -37,7 +37,6 @@
 #include "accel_core_sdk.h"
 #include <linux/in6.h>
 
-/*#define WORKAROUND_I2C*/
 #define MLX_RECV_SIZE 2048
 #define MLX_EXIT_WRID 1
 
@@ -73,7 +72,7 @@ int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 #define mlx_accel_fpga_qp_device_init(accel_device) 0
 #define mlx_accel_fpga_qp_device_deinit(accel_device)
 
-#if defined(WORKAROUND_I2C)
+#if defined(QP_SIMULATOR)
 #undef mlx_accel_fpga_qp_device_init
 #undef mlx_accel_fpga_qp_device_deinit
 int mlx_accel_fpga_qp_device_init(struct mlx_accel_core_device *accel_device);

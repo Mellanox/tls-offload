@@ -375,7 +375,8 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	err = mlx5_ib_reserved_gid_add(accel_device->ib_dev, accel_device->port,
 				       IB_GID_TYPE_ROCE_UDP_ENCAP,
 				       &conn_init_attr->local_gid,
-				       conn_init_attr->local_mac, true,
+				       conn_init_attr->local_mac,
+				       conn_init_attr->vlan,
 				       conn_init_attr->vlan_id,
 				       &conn->sgid_index);
 	if (err) {
