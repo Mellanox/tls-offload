@@ -61,8 +61,7 @@ void mlx_accel_core_rdma_conn_destroy(struct mlx_accel_core_conn *conn);
 int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 				  struct mlx_accel_core_dma_buf *buf);
 
-int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn,
-				int gid_index);
+int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn);
 
 /* I2C */
 int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
@@ -71,10 +70,14 @@ int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 			size_t size, u64 addr, u8 *buf);
 
 /* fpga QP */
-#ifdef WORKAROUND_I2C
-int mlx_accel_fpga_qp_device_init(struct mlx_accel_core_device *accel_device);
-#else
 #define mlx_accel_fpga_qp_device_init(accel_device) 0
+#define mlx_accel_fpga_qp_device_deinit(accel_device)
+
+#if defined(WORKAROUND_I2C)
+#undef mlx_accel_fpga_qp_device_init
+#undef mlx_accel_fpga_qp_device_deinit
+int mlx_accel_fpga_qp_device_init(struct mlx_accel_core_device *accel_device);
+int mlx_accel_fpga_qp_device_deinit(struct mlx_accel_core_device *accel_device);
 #endif
 
 #endif /* __MLX_ACCEL_CORE_H__ */

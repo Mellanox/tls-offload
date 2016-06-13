@@ -32,6 +32,9 @@
  */
 
 #include "accel_core.h"
+#include <linux/etherdevice.h>
+#include <linux/mlx5_ib/driver.h>
+#include <rdma/ib_mad.h>
 
 static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 {
@@ -342,6 +345,7 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 				struct mlx_accel_core_conn_init_attr *
 				conn_init_attr)
 {
+	int err;
 	struct mlx_accel_core_conn *ret = NULL;
 	struct mlx_accel_core_conn *conn = NULL;
 
@@ -368,14 +372,48 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	conn->recv_cb = conn_init_attr->recv_cb;
 	conn->cb_arg = conn_init_attr->cb_arg;
 
-	ret = ERR_PTR(mlx_accel_core_rdma_create_res(conn,
-						     conn_init_attr->tx_size,
-						     conn_init_attr->rx_size));
-	if (IS_ERR(ret))
+	err = mlx5_ib_reserved_gid_add(accel_device->ib_dev, accel_device->port,
+				       IB_GID_TYPE_ROCE_UDP_ENCAP,
+				       &conn_init_attr->local_gid,
+				       conn_init_attr->local_mac, true,
+				       conn_init_attr->vlan_id,
+				       &conn->sgid_index);
+	if (err) {
+		pr_warn("Failed to add reserved GID: %d\n", err);
+		ret = ERR_PTR(err);
 		goto err;
+	}
+
+	err = mlx_accel_core_rdma_create_res(conn,
+					     conn_init_attr->tx_size,
+					     conn_init_attr->rx_size);
+	if (err) {
+		ret = ERR_PTR(err);
+		goto err_rsvd_gid;
+	}
+
+	conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_INIT;
+	conn->fpga_qpc.qp_type = MLX5_FPGA_QP_TYPE_SHELL;
+	conn->fpga_qpc.st = MLX5_FPGA_QP_SERVICE_TYPE_RC;
+	conn->fpga_qpc.ether_type = ETH_P_8021Q;
+	conn->fpga_qpc.pkey = IB_DEFAULT_PKEY_FULL;
+	conn->fpga_qpc.remote_qpn = conn->qp->qp_num;
+	conn->fpga_qpc.rnr_retry = 7;
+	conn->fpga_qpc.retry_count = 7;
+	conn->fpga_qpc.vlan_id = conn_init_attr->vlan_id;
+	conn->fpga_qpc.next_rcv_psn = 1;
+	conn->fpga_qpc.next_send_psn = 0;
+
+	ether_addr_copy(conn->fpga_qpc.remote_mac, conn_init_attr->local_mac);
+	memcpy(&conn->fpga_qpc.remote_ip, &conn_init_attr->local_gid,
+	       sizeof(conn->fpga_qpc.remote_ip));
 
 	ret = conn;
 	goto out;
+
+err_rsvd_gid:
+	mlx5_ib_reserved_gid_del(accel_device->ib_dev, accel_device->port,
+				 conn->sgid_index);
 err:
 	kfree(conn);
 out:
@@ -444,6 +482,8 @@ static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn)
 void mlx_accel_core_rdma_conn_destroy(struct mlx_accel_core_conn *conn)
 {
 	mlx_accel_core_rdma_destroy_res(conn);
+	mlx5_ib_reserved_gid_del(conn->accel_device->ib_dev, conn->port_num,
+				 conn->sgid_index);
 	kfree(conn);
 }
 
@@ -478,23 +518,24 @@ static inline int mlx_accel_core_rdma_reset_qp(struct mlx_accel_core_conn *conn)
 	return rc;
 }
 
-static inline int mlx_accel_core_rdma_rtr_qp(struct mlx_accel_core_conn *conn,
-					     int gid_index)
+static inline int mlx_accel_core_rdma_rtr_qp(struct mlx_accel_core_conn *conn)
 {
 	struct ib_qp_attr attr = {0};
 	int rc = 0;
 
 	attr.qp_state = IB_QPS_RTR;
 	attr.path_mtu = IB_MTU_1024;
-	attr.dest_qp_num = conn->dqpn;
-	attr.rq_psn = 0;
+	attr.dest_qp_num = conn->fpga_qpn;
+	attr.rq_psn = conn->fpga_qpc.next_send_psn;
 	attr.max_dest_rd_atomic = 0;
 	attr.min_rnr_timer = 0x12;
 	attr.ah_attr.port_num = conn->port_num;
 	attr.ah_attr.sl = conn->accel_device->sl;
 	attr.ah_attr.ah_flags = IB_AH_GRH;
-	attr.ah_attr.grh.dgid = conn->dgid;
-	attr.ah_attr.grh.sgid_index = gid_index;
+	memcpy(&attr.ah_attr.grh.dgid, &conn->fpga_qpc.fpga_ip,
+	       sizeof(attr.ah_attr.grh.dgid));
+	attr.ah_attr.grh.sgid_index = conn->sgid_index;
+	pr_debug("Transition to RTR using sGID index %u\n", conn->sgid_index);
 
 	rc = ib_modify_qp(conn->qp, &attr,
 				IB_QP_STATE			|
@@ -514,10 +555,10 @@ static inline int mlx_accel_core_rdma_rts_qp(struct mlx_accel_core_conn *conn)
 	int rc = 0, flags;
 
 	attr.qp_state		= IB_QPS_RTS;
-	attr.timeout		= 0x12;
+	attr.timeout		= 0x12; /* 0x12 = ~1.07 sec */
 	attr.retry_cnt		= 7;
-	attr.rnr_retry		= 7;
-	attr.sq_psn		= 0;
+	attr.rnr_retry		= 7; /* Infinite retry in case of RNR NACK */
+	attr.sq_psn		= conn->fpga_qpc.next_rcv_psn;
 	attr.max_rd_atomic	= 0;
 
 	flags = IB_QP_STATE | IB_QP_TIMEOUT | IB_QP_RETRY_CNT |
@@ -528,7 +569,7 @@ static inline int mlx_accel_core_rdma_rts_qp(struct mlx_accel_core_conn *conn)
 	return rc;
 }
 
-int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn, int gid_index)
+int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn)
 {
 	int rc = 0;
 	rc = mlx_accel_core_rdma_reset_qp(conn);
@@ -546,7 +587,7 @@ int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn, int gid_index)
 	while (!mlx_accel_core_rdma_post_recv(conn))
 		;
 
-	rc = mlx_accel_core_rdma_rtr_qp(conn, gid_index);
+	rc = mlx_accel_core_rdma_rtr_qp(conn);
 	if (rc) {
 		pr_warn("Failed to change QP state from INIT to RTR\n");
 		return rc;

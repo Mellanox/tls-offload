@@ -123,7 +123,7 @@ int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 	pr_info("mlx_accel_core_connect called for %s\n",
 			conn->accel_device->name);
 
-	return mlx_accel_core_rdma_connect(conn, 0);
+	return mlx_accel_core_rdma_connect(conn);
 }
 EXPORT_SYMBOL(mlx_accel_core_connect);
 

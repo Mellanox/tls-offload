@@ -101,6 +101,9 @@ struct mlx_accel_core_dma_buf {
 struct mlx_accel_core_conn_init_attr {
 	unsigned int tx_size;
 	unsigned int rx_size;
+	union ib_gid local_gid;
+	u16 vlan_id;
+	u8 local_mac[ETH_ALEN];
 	void (*recv_cb)(void *cb_arg, struct mlx_accel_core_dma_buf *buf);
 	void *cb_arg;
 };
@@ -127,8 +130,10 @@ struct mlx_accel_core_conn {
 	/* Parameters for the QP */
 	struct ib_cq *cq;
 	struct ib_qp *qp;
-	u32 dqpn;
-	union ib_gid dgid;
+
+	struct mlx5_fpga_qpc fpga_qpc;
+	int sgid_index;
+	u32 fpga_qpn;
 };
 
 void mlx_accel_core_client_register(struct mlx_accel_core_client *client);

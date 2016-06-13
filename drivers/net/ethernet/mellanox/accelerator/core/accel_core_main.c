@@ -32,6 +32,8 @@
  */
 
 #include <linux/module.h>
+#include <linux/etherdevice.h>
+#include <linux/mlx5/vport.h>
 #include <rdma/ib_mad.h>
 
 #include "accel_core.h"
@@ -162,46 +164,14 @@ static struct mlx_accel_core_device *mlx_accel_device_alloc(void)
 	return accel_device;
 }
 
-static int build_core_conn_fpga_qpc(struct mlx_accel_core_device *accel_device,
-				    struct mlx5_fpga_qpc *qpc)
-{
-	struct net_device *netdev;
-	u8 port_num;
-
-	memset(qpc, 0, sizeof(*qpc));
-	qpc->state = MLX5_FPGA_QP_STATE_INIT;
-	qpc->qp_type = MLX5_FPGA_QP_TYPE_SHELL;
-	qpc->st = MLX5_FPGA_QP_SERVICE_TYPE_RC;
-	qpc->ether_type = ETH_P_8021Q;
-	qpc->pkey = IB_DEFAULT_PKEY_FULL;
-	qpc->remote_qpn = accel_device->core_conn->qp->qp_num;
-	qpc->rnr_retry = 7;
-	qpc->retry_count = 7;
-
-	port_num = accel_device->core_conn->port_num;
-	netdev = accel_device->ib_dev->get_netdev(accel_device->ib_dev,
-						  port_num);
-	if (!netdev) {
-		pr_warn("Failed to query device %s netdev\n",
-			accel_device->name);
-		return -ENOENT;
-	}
-
-	memcpy(&qpc->remote_mac, &netdev->dev_addr, sizeof(qpc->remote_mac));
-	dev_put(netdev);
-
-	memcpy(&qpc->remote_ip, &accel_device->gid, sizeof(accel_device->gid));
-	return 0;
-}
-
 static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_core_conn_init_attr core_conn_attr;
 	struct mlx_accel_core_client *client;
+#ifdef DEBUG
+	__be16 *fpga_ip;
+#endif
 	int err = 0;
-	int sgid_index = 5;
-	u16 pkey_index = 0;
-	struct mlx5_fpga_qpc qpc;
 
 	snprintf(accel_device->name, sizeof(accel_device->name), "%s-%s",
 		 accel_device->ib_dev->name,
@@ -214,32 +184,18 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	}
 
 	err = ib_find_pkey(accel_device->ib_dev, accel_device->port,
-			   IB_DEFAULT_PKEY_FULL, &pkey_index);
+			   IB_DEFAULT_PKEY_FULL, &accel_device->pkey_index);
 	if (err) {
 		pr_err("Failed to query pkey: %d\n", err);
-		goto out;
+		goto err_fpga_dev;
 	}
-
-	err = ib_query_gid(accel_device->ib_dev, accel_device->port, sgid_index,
-			   &accel_device->gid, NULL);
-	if (err) {
-		pr_err("Failed to query gid: %d\n", err);
-		goto out;
-	}
-	pr_debug("Accel device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-		 ntohs(((__be16 *)&accel_device->gid)[0]),
-		 ntohs(((__be16 *)&accel_device->gid)[1]),
-		 ntohs(((__be16 *)&accel_device->gid)[2]),
-		 ntohs(((__be16 *)&accel_device->gid)[3]),
-		 ntohs(((__be16 *)&accel_device->gid)[4]),
-		 ntohs(((__be16 *)&accel_device->gid)[5]),
-		 ntohs(((__be16 *)&accel_device->gid)[6]),
-		 ntohs(((__be16 *)&accel_device->gid)[7]));
+	pr_debug("pkey %x index is %u\n", IB_DEFAULT_PKEY_FULL,
+		 accel_device->pkey_index);
 
 	err = mlx_accel_trans_device_init(accel_device);
 	if (err) {
 		pr_err("Failed to initialize transaction machine: %d\n", err);
-		goto out;
+		goto err_fpga_dev;
 	}
 
 	accel_device->pd = ib_alloc_pd(accel_device->ib_dev);
@@ -263,50 +219,76 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	core_conn_attr.rx_size = MLX_ACCEL_TID_COUNT;
 	core_conn_attr.recv_cb = mlx_accel_trans_recv;
 	core_conn_attr.cb_arg = accel_device;
+	err = mlx5_query_nic_vport_mac_address(accel_device->hw_dev, 0,
+					       core_conn_attr.local_mac);
+	if (err) {
+		pr_err("Failed to query local MAC: %d\n", err);
+		goto err_pd;
+	}
+	core_conn_attr.local_gid.raw[0] = 0xfe;
+	core_conn_attr.local_gid.raw[1] = 0x80;
+	core_conn_attr.local_gid.raw[8] = core_conn_attr.local_mac[0] ^ 0x02;
+	core_conn_attr.local_gid.raw[9] = core_conn_attr.local_mac[1];
+	core_conn_attr.local_gid.raw[10] = core_conn_attr.local_mac[2];
+	core_conn_attr.local_gid.raw[11] = 0xff;
+	core_conn_attr.local_gid.raw[12] = 0xfe;
+	core_conn_attr.local_gid.raw[13] = core_conn_attr.local_mac[3];
+	core_conn_attr.local_gid.raw[14] = core_conn_attr.local_mac[4];
+	core_conn_attr.local_gid.raw[15] = core_conn_attr.local_mac[5];
+	core_conn_attr.vlan_id = 0;
+	pr_debug("Local gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[0]),
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[1]),
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[2]),
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[3]),
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[4]),
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[5]),
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[6]),
+		 ntohs(((__be16 *)&core_conn_attr.local_gid)[7]));
+
 	accel_device->core_conn = mlx_accel_core_rdma_conn_create(accel_device,
 							     &core_conn_attr);
 	if (IS_ERR(accel_device->core_conn)) {
 		err = PTR_ERR(accel_device->core_conn);
 		pr_err("Failed to create core RC QP: %d\n", err);
+		accel_device->core_conn = NULL;
 		goto err_mr;
 	}
 
-	err = build_core_conn_fpga_qpc(accel_device, &qpc);
-	if (err) {
-		pr_err("Failed to build FPGA QPC for core: %d\n", err);
-		goto err_core_conn;
-	}
-
-	err = mlx5_fpga_create_qp(accel_device->hw_dev, &qpc,
-				  &accel_device->core_conn->dqpn);
+	err = mlx5_fpga_create_qp(accel_device->hw_dev,
+				  &accel_device->core_conn->fpga_qpc,
+				  &accel_device->core_conn->fpga_qpn);
 	if (err) {
 		pr_err("Failed to create FPGA RC QP: %d\n", err);
 		goto err_core_conn;
 	}
-	memcpy(&accel_device->core_conn->dgid, &qpc.fpga_ip,
-	       sizeof(accel_device->core_conn->dgid));
 
-	pr_debug("FPGA QPN is %u\n", accel_device->core_conn->dqpn);
+#ifdef DEBUG
+	pr_debug("Local QPN is %u\n", accel_device->core_conn->qp->qp_num);
+	fpga_ip = (__be16 *)&accel_device->core_conn->fpga_qpc.fpga_ip;
 	pr_debug("FPGA device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[0]),
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[1]),
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[2]),
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[3]),
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[4]),
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[5]),
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[6]),
-		 ntohs(((__be16 *)&accel_device->core_conn->dgid)[7]));
+		 ntohs(fpga_ip[0]),
+		 ntohs(fpga_ip[1]),
+		 ntohs(fpga_ip[2]),
+		 ntohs(fpga_ip[3]),
+		 ntohs(fpga_ip[4]),
+		 ntohs(fpga_ip[5]),
+		 ntohs(fpga_ip[6]),
+		 ntohs(fpga_ip[7]));
+	pr_debug("FPGA QPN is %u\n", accel_device->core_conn->fpga_qpn);
+#endif
 
-	qpc.state = MLX5_FPGA_QP_STATE_ACTIVE;
+	accel_device->core_conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_ACTIVE;
 	err = mlx5_fpga_modify_qp(accel_device->hw_dev,
-				  accel_device->core_conn->dqpn,
-				  MLX5_FPGA_QPC_STATE, &qpc);
+				  accel_device->core_conn->fpga_qpn,
+				  MLX5_FPGA_QPC_STATE,
+				  &accel_device->core_conn->fpga_qpc);
 	if (err) {
 		pr_err("Failed to create FPGA RC QP: %d\n", err);
 		goto err_fpga_qp;
 	}
 
-	err = mlx_accel_core_rdma_connect(accel_device->core_conn, sgid_index);
+	err = mlx_accel_core_rdma_connect(accel_device->core_conn);
 	if (err) {
 		pr_err("Failed to connect core RC QP to FPGA QP: %d\n", err);
 		goto err_fpga_qp;
@@ -319,15 +301,20 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 
 err_fpga_qp:
 	mlx5_fpga_destroy_qp(accel_device->hw_dev,
-			     accel_device->core_conn->dqpn);
+			     accel_device->core_conn->fpga_qpn);
 err_core_conn:
 	mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
+	accel_device->core_conn = NULL;
 err_mr:
 	ib_dereg_mr(accel_device->mr);
+	accel_device->mr = NULL;
 err_pd:
 	ib_dealloc_pd(accel_device->pd);
+	accel_device->pd = NULL;
 err_trans:
 	mlx_accel_trans_device_deinit(accel_device);
+err_fpga_dev:
+	mlx_accel_fpga_qp_device_deinit(accel_device);
 out:
 	return err;
 }
@@ -337,21 +324,27 @@ static void mlx_accel_device_deinit(struct mlx_accel_core_device *accel_device)
 	int err = 0;
 	struct mlx_accel_client_data *client_context, *tmp;
 
-	list_for_each_entry_safe(client_context, tmp,
-				 &accel_device->client_data_list,
-				 list) {
-		client_context->client->remove(accel_device);
-		mlx_accel_client_context_del(client_context);
-	}
+	if (accel_device->core_conn) {
+		list_for_each_entry_safe(client_context, tmp,
+					 &accel_device->client_data_list,
+					 list) {
+			client_context->client->remove(accel_device);
+			mlx_accel_client_context_del(client_context);
+		}
 
-	mlx5_fpga_destroy_qp(accel_device->hw_dev,
-			     accel_device->core_conn->qp->qp_num);
-	mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
-	err = ib_dereg_mr(accel_device->mr);
-	if (err)
-		pr_err("Unexpected error deregistering MR: %d\n", err);
-	ib_dealloc_pd(accel_device->pd);
-	mlx_accel_trans_device_deinit(accel_device);
+		mlx5_fpga_destroy_qp(accel_device->hw_dev,
+				     accel_device->core_conn->fpga_qpn);
+		mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
+		accel_device->core_conn = NULL;
+		err = ib_dereg_mr(accel_device->mr);
+		if (err)
+			pr_err("Unexpected error deregistering MR: %d\n", err);
+		accel_device->mr = NULL;
+		ib_dealloc_pd(accel_device->pd);
+		accel_device->pd = NULL;
+		mlx_accel_trans_device_deinit(accel_device);
+		mlx_accel_fpga_qp_device_deinit(accel_device);
+	}
 }
 
 static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
