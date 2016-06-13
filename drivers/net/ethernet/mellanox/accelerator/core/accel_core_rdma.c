@@ -144,11 +144,11 @@ int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 	atomic_inc(&conn->inflight_sends);
 	pr_debug("Posting SEND buf %p\n", buf);
 #ifdef DEBUG
-	if (buf->more)
-		print_hex_dump_bytes("SEND Header ", DUMP_PREFIX_OFFSET,
-				     buf->more, buf->more_size);
-	print_hex_dump_bytes("SEND Payload ", DUMP_PREFIX_OFFSET,
+	print_hex_dump_bytes("SEND Data ", DUMP_PREFIX_OFFSET,
 			     buf->data, buf->data_size);
+	if (buf->more)
+		print_hex_dump_bytes("SEND More ", DUMP_PREFIX_OFFSET,
+				     buf->more, buf->more_size);
 #endif
 
 	rc = ib_post_send(conn->qp, &wr, &bad_wr);
@@ -229,13 +229,13 @@ static void mlx_accel_complete(struct mlx_accel_core_conn *conn,
 			atomic_dec(&conn->pending_recvs);
 			buf->data_size = wc->byte_len;
 #ifdef DEBUG
-			if (buf->more)
-				print_hex_dump_bytes("RECV header ",
-						     DUMP_PREFIX_OFFSET,
-						     buf->more, buf->more_size);
-			print_hex_dump_bytes("RECV payload ",
+			print_hex_dump_bytes("RECV Data ",
 					     DUMP_PREFIX_OFFSET, buf->data,
 					     buf->data_size);
+			if (buf->more)
+				print_hex_dump_bytes("RECV More ",
+						     DUMP_PREFIX_OFFSET,
+						     buf->more, buf->more_size);
 #endif
 			conn->recv_cb(conn->cb_arg, buf);
 			pr_debug("Msg with %u bytes received successfully %d buffs are posted\n",
