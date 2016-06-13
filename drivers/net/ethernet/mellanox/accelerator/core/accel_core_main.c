@@ -393,6 +393,11 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 		goto out;
 	}
 
+	if (!accel_device->ib_dev) {
+		pr_warn("Removing IB device that was not added\n");
+		goto out;
+	}
+
 	if (accel_device->hw_dev) {
 		mlx_accel_device_deinit(accel_device);
 		accel_device->ib_dev = NULL;
@@ -410,13 +415,17 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 	struct mlx_accel_core_device *accel_device = NULL;
 
 	pr_info("mlx_accel_hw_dev_add_one called for %s\n", dev->priv.name);
+
+	if (!MLX5_CAP_GEN(dev, fpga))
+		goto out;
+
 	mutex_lock(&mlx_accel_core_mutex);
 
 	accel_device = mlx_find_accel_dev_by_hw_dev_unlocked(dev);
 	if (!accel_device) {
 		accel_device = mlx_accel_device_alloc();
 		if (!accel_device)
-			goto out;
+			goto out_unlock;
 		accel_device->hw_dev = dev;
 	}
 
@@ -424,8 +433,9 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 	if ((accel_device->hw_dev) && (accel_device->ib_dev))
 		mlx_accel_device_init(accel_device);
 
-out:
+out_unlock:
 	mutex_unlock(&mlx_accel_core_mutex);
+out:
 	return accel_device;
 }
 
