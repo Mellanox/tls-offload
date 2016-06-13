@@ -49,7 +49,7 @@ int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
 
 		rc = mlx5_fpga_access_reg(dev, actual_size,
 					  addr + bytes_done,
-					  buf + bytes_done, 0);
+					  buf + bytes_done, false);
 		if (rc) {
 			pr_err("Failed to read FPGA crspace data for %s\n",
 			       dev_name(&dev->pdev->dev));
@@ -75,7 +75,7 @@ int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 
 		rc = mlx5_fpga_access_reg(dev, actual_size,
 					  addr + bytes_done,
-					  buf + bytes_done, 1);
+					  buf + bytes_done, true);
 		if (rc) {
 			pr_err("Failed to write FPGA crspace data for %s\n",
 			       dev_name(&dev->pdev->dev));
