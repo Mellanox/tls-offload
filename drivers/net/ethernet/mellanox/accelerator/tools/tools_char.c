@@ -36,6 +36,7 @@
 #include <linux/stat.h>
 #include <linux/fs.h>
 #include <linux/mlx5/accel/tools_chardev.h>
+#include <linux/mlx5/driver.h>
 
 static int major_number;
 static struct class *char_class;
@@ -152,21 +153,58 @@ static loff_t tools_char_llseek(struct file *filep, loff_t offset, int whence)
 
 long tools_char_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 {
+	int err = 0;
 	struct file_context *context = filep->private_data;
+	struct mlx_accel_fpga_query query;
+	struct mlx5_core_dev *dev = context->sb_dev->accel_device->hw_dev;
+
+	if (!dev)
+		return -ENXIO;
 
 	switch (cmd) {
 	case IOCTL_ACCESS_TYPE:
 		if (arg > MLX_ACCEL_ACCESS_TYPE_MAX) {
 			pr_err("unknown access type %lu\n", arg);
-			return -EINVAL;
+			err = -EINVAL;
+			break;
 		}
 		context->access_type = arg;
 		break;
+	case IOCTL_FPGA_LOAD:
+		if (arg > MLX_ACCEL_IMAGE_MAX) {
+			pr_err("unknown image type %lu\n", arg);
+			err = -EINVAL;
+			break;
+		}
+		err = mlx5_fpga_load(dev, arg);
+		break;
+	case IOCTL_FPGA_RESET:
+		err = mlx5_fpga_reset(dev);
+		break;
+	case IOCTL_FPGA_IMAGE_SEL:
+		if (arg > MLX_ACCEL_IMAGE_MAX) {
+			pr_err("unknown image type %lu\n", arg);
+			err = -EINVAL;
+			break;
+		}
+		err = mlx5_fpga_image_select(dev, arg);
+		break;
+	case IOCTL_FPGA_QUERY:
+		err = mlx5_fpga_query(dev, &query.status, &query.admin_image,
+				      &query.oper_image);
+		if (err)
+			break;
+
+		if (copy_to_user((void __user *)arg, &query, sizeof(query))) {
+			pr_err("Failed to copy data to user buffer\n");
+			err = -EFAULT;
+		}
+		break;
 	default:
 		pr_err("unknown ioctl command 0x%08x\n", cmd);
-		return -ENOIOCTLCMD;
+		err = -ENOIOCTLCMD;
 	}
-	return 0;
+	return err;
 }
 
 static const struct file_operations tools_fops = {

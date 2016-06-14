@@ -40,7 +40,21 @@
 #define MLX_ACCEL_TOOLS_NAME_PREFIX "mlx5_"
 #define MLX_ACCEL_TOOLS_NAME_SUFFIX "_accel_tools"
 
+struct mlx_accel_fpga_query {
+	enum mlx_accel_fpga_image  admin_image;
+	enum mlx_accel_fpga_image  oper_image;
+	enum mlx_accel_fpga_status status;
+};
+
 /* Set the memory access type */
-#define IOCTL_ACCESS_TYPE _IOW('m', 0x80, enum mlx_accel_access_type)
+#define IOCTL_ACCESS_TYPE    _IOW('m', 0x80, enum mlx_accel_access_type)
+/* Load FPGA image from flash */
+#define IOCTL_FPGA_LOAD      _IOW('m', 0x81, enum mlx_accel_fpga_image)
+/* Reset FPGA hardware logic */
+#define IOCTL_FPGA_RESET      _IO('m', 0x82)
+/* Select image for next reset or power-on */
+#define IOCTL_FPGA_IMAGE_SEL _IOW('m', 0x83, enum mlx_accel_fpga_image)
+/* Query selected and running images */
+#define IOCTL_FPGA_QUERY     _IOR('m', 0x84, struct mlx_accel_fpga_query *)
 
 #endif /* TOOLS_CHARDEV_H */
