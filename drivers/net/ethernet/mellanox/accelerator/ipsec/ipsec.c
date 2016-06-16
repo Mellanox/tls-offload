@@ -200,6 +200,42 @@ static void remove_pet(struct sk_buff *skb, struct pet *pet)
 	/* Ethertype is already in its new place */
 }
 
+static void remove_dummy_dword(struct sk_buff *skb)
+{
+	struct iphdr *iphdr = (struct iphdr *)skb->data;
+	unsigned char *old = skb->data - sizeof(struct ethhdr);
+	unsigned char *new = skb_pull_inline(skb, sizeof(struct dummy_dword)) -
+			sizeof(struct ethhdr);
+	unsigned int iphdr_len = iphdr->ihl * 4;
+
+	pr_debug("remove_dummy_dword started\n");
+
+	/* We expect IP header right after the PET
+	 * with no IP options, all other are not offloaded for now
+	 */
+	if (be16_to_cpu(skb->protocol) != ETH_P_IP)
+		pr_warn("expected ETH_P_IP but received %04x\n",
+			be16_to_cpu(skb->protocol));
+	if (iphdr_len > sizeof(struct iphdr))
+		pr_warn("expected ETH_P_IP without IP options\n");
+
+#ifdef DEBUG
+	print_hex_dump_bytes("pkt with dummy dword ", DUMP_PREFIX_OFFSET,
+			     skb->data, skb->len);
+#endif
+
+	if (iphdr->protocol != IPPROTO_DUMMY_DWORD)
+		return;
+
+	iphdr->protocol = IPPROTO_ESP; /* TODO */
+	iphdr->tot_len = htons(ntohs(iphdr->tot_len) - 4);
+	iphdr->check = htons(~(~ntohs(iphdr->check) - 0xd1));
+
+	memmove(new, old, ETH_HLEN + iphdr_len);
+
+	skb->mac_header += sizeof(struct dummy_dword);
+}
+
 static int insert_pet(struct sk_buff *skb)
 {
 	struct ethhdr *eth;
@@ -263,13 +299,9 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 		 sizeof(pet), be16_to_cpu(pet.ethertype), pet.syndrome,
 		 be32_to_cpu(pet.content.rcv.sa_id));
 
-	/* At least on this development phase, we expect IP header
-	 * right after the PET
-	 */
-	if (be16_to_cpu(pet.ethertype) != ETH_P_IP)
-		pr_warn("expected ETH_P_IP but received %04x\n",
-				be16_to_cpu(pet.ethertype));
 	skb->protocol = pet.ethertype;
+
+	remove_dummy_dword(skb);
 
 	WARN_ON(skb->sp != NULL);
 	skb->sp = secpath_dup(skb->sp);

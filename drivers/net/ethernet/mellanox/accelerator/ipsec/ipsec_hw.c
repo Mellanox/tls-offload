@@ -370,6 +370,7 @@ out:
 
 int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
 {
+	module_put(THIS_MODULE);
 	return 0;
 }
 

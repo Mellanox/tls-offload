@@ -74,7 +74,13 @@ struct pet {
 	__be16		ethertype;		/* packet type ID field	*/
 } __packed;
 
+#define IPPROTO_DUMMY_DWORD 0xff
 
+struct dummy_dword {
+	unsigned char next_proto;
+	unsigned char len;
+	__be16 reserved;
+} __packed;
 
 enum fpga_cmds {
 	CMD_ADD_SA			= 1,
