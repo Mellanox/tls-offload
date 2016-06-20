@@ -88,6 +88,9 @@ static ssize_t tools_char_read(struct file *filep, char __user *buffer,
 	pr_debug("mlx tools %u char device reading %lu bytes at 0x%llx\n",
 		 context->sb_dev->accel_device->id, len, *offset);
 
+	if (len < 1)
+		return len;
+
 	kbuf = kmalloc(len, GFP_KERNEL);
 	if (!kbuf) {
 		ret = -ENOMEM;
@@ -117,6 +120,9 @@ static ssize_t tools_char_write(struct file *filep, const char __user *buffer,
 
 	pr_debug("mlx tools %u char device writing %lu bytes at 0x%llx\n",
 		 context->sb_dev->accel_device->id, len, *offset);
+
+	if (len < 1)
+		return len;
 
 	kbuf = kmalloc(len, GFP_KERNEL);
 	if (!kbuf) {
