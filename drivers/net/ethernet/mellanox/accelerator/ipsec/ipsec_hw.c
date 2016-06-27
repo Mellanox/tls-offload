@@ -136,23 +136,23 @@ struct __attribute__((__packed__)) sadb_entry {
 	__be32 sw_sa_handle;
 	__be16 sport;
 	__be16 dport;
-	u8 pad;
-	u8 enable;
-	u8 enc_auth_mode;
 	u8 ip_proto;
+	u8 enc_auth_mode;
+	u8 enable;
+	u8 pad;
 };
 
-static void copy_key_to_hw(void *dst, void *src, unsigned int bytes)
+static void copy_sadb_to_hw(void *dst, void *src, unsigned int bytes)
 {
 	u32 *dst_w = dst, *src_w = src;
 	unsigned int i, words = bytes / 4;
 
 	WARN_ON(bytes & 3);
 	for (i = 0; i < words; i++)
-		dst_w[words - i - 1] = src_w[i];
+		dst_w[i] = htonl(src_w[i]);
 }
 
-#define SADB_SLOT_SIZE   0x40 /* MAS bug, should be 0x80 */
+#define SADB_SLOT_SIZE   0x80 /* MAS bug, should be 0x80 */
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 			  struct mlx_ipsec_dev *dev)
 {
@@ -170,7 +170,7 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 	pr_debug("sa Index %lu Address %llx\n", sa_index, sa_addr);
 
 	memset(&hw_entry, 0, sizeof(hw_entry));
-	copy_key_to_hw(&hw_entry.key, sa->x->aead->alg_key, crypto_data_len);
+	memcpy(&hw_entry.key, sa->x->aead->alg_key, crypto_data_len);
 	hw_entry.enable |= SADB_SA_VALID | SADB_SPI_EN;
 	hw_entry.sip = sa->x->props.saddr.a4;
 	hw_entry.sip_mask = inet_make_mask(sa->x->sel.prefixlen_s);
@@ -192,6 +192,8 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 		hw_entry.enable |= SADB_DIR_SX;
 	if (sa->x->props.mode)
 		hw_entry.enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
+
+	copy_sadb_to_hw(&hw_entry, &hw_entry, sizeof(hw_entry));
 
 	res = mlx_accel_core_mem_write(dev->accel_device, sizeof(hw_entry),
 				       sa_addr, &hw_entry,

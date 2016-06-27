@@ -140,14 +140,14 @@ struct sa_cmd_v4 {
 	u8 pad;
 };
 
-#define SADB_DIR_SX      BIT(0)
-#define SADB_SA_VALID    BIT(1)
-#define SADB_SPI_EN      BIT(2)
-#define SADB_IP_PROTO_EN BIT(3)
-#define SADB_SPORT_EN    BIT(4)
-#define SADB_DPORT_EN    BIT(5)
-#define SADB_TUNNEL      BIT(6)
-#define SADB_TUNNEL_EN   BIT(7)
+#define SADB_DIR_SX      BIT(7)
+#define SADB_SA_VALID    BIT(6)
+#define SADB_SPI_EN      BIT(5)
+#define SADB_IP_PROTO_EN BIT(4)
+#define SADB_SPORT_EN    BIT(3)
+#define SADB_DPORT_EN    BIT(2)
+#define SADB_TUNNEL      BIT(1)
+#define SADB_TUNNEL_EN   BIT(0)
 
 struct fpga_reply_generic {
 	__be32 opcode;
