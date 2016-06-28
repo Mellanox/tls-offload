@@ -34,6 +34,8 @@
 #ifndef __IPSEC_H__
 #define __IPSEC_H__
 
+/* #define MLX_IPSEC_SADB_RDMA */
+
 #include <linux/types.h>
 #include <linux/kobject.h>
 #include <linux/kfifo.h>
@@ -47,7 +49,6 @@
 
 #include "../core/accel_core_sdk.h"
 #include "ipsec_cmds.h"
-
 
 #define DRIVER_NAME		"mlx_ipsec"
 #define DRIVER_VERSION	"0.1"

@@ -34,7 +34,6 @@
 #ifndef MLX_IPSEC_CMDS_H
 #define MLX_IPSEC_CMDS_H
 
-
 #define UNASSIGNED_SA_ID ((u32)~0)
 
 enum rcv_pet_syndrome {
@@ -63,15 +62,16 @@ struct send_pet_content {
 } __packed;
 
 struct pet {
-	unsigned char	syndrome;
+	unsigned char syndrome;
 	union {
-		unsigned char	raw[5];
+		unsigned char raw[5];
 		/* from FPGA to host, on successful decrypt */
 		struct rcv_pet_content rcv;
 		/* from host to FPGA */
 		struct send_pet_content send;
 	} __packed content;
-	__be16		ethertype;		/* packet type ID field	*/
+	/* packet type ID field	*/
+	__be16 ethertype;
 } __packed;
 
 #define IPPROTO_DUMMY_DWORD 0xff
@@ -84,28 +84,28 @@ struct dummy_dword {
 
 enum fpga_cmds {
 	CMD_ADD_SA			= 1,
-	CMD_UPDATE_SA			= 2,
+	CMD_UPDATE_SA		= 2,
 	CMD_DEL_SA			= 3
 };
 
 enum fpga_del_sa_status {
 	DEL_SA_SUCCESS			= 0x80,
-	DEL_SA_FAIL_NOT_FOUND		= 0x81
+	DEL_SA_FAIL_NOT_FOUND	= 0x81
 };
 
 /* [BP]: TODO - Test all return codes in mlx_xfrm_add_state */
 enum fpga_add_sa_status {
 	ADD_SA_PENDING			= -1,
 	ADD_SA_SUCCESS			= 0,
-	ADD_SA_FAIL_CAPACITY		= 1,
-	ADD_SA_FAIL_CONFLICT		= 2
+	ADD_SA_FAIL_CAPACITY	= 1,
+	ADD_SA_FAIL_CONFLICT	= 2
 };
 
 enum fpga_response {
 	EVENT_ADD_SA_RESPONSE			= 0x81,
 	EVENT_ADD_SA_ERR_RESPONSE		= 0xC1,
 	EVENT_UPDATE_SA_RESPONSE		= 0x82,
-	EVENT_UPDATE_SA_ERR_RESPONSE		= 0xC2,
+	EVENT_UPDATE_SA_ERR_RESPONSE	= 0xC2,
 	EVENT_DEL_SA_RESPONSE			= 0x83,
 	EVENT_DEL_SA_ERR_RESPONSE		= 0xC3
 };
@@ -116,16 +116,18 @@ enum direction {
 };
 
 enum crypto_identifier {
-	IPSEC_OFFLOAD_CRYPTO_NONE	 = 0,
-	IPSEC_OFFLOAD_CRYPTO_AES_GCM_128 = 1,
-	IPSEC_OFFLOAD_CRYPTO_AES_GCM_256 = 2,
+	IPSEC_OFFLOAD_CRYPTO_NONE			= 0,
+	IPSEC_OFFLOAD_CRYPTO_AES_GCM_128	= 1,
+	IPSEC_OFFLOAD_CRYPTO_AES_GCM_256	= 2,
 };
 
 enum auth_identifier {
-	IPSEC_OFFLOAD_AUTH_NONE	       = 0,
-	IPSEC_OFFLOAD_AUTH_AES_GCM_128 = 1,
-	IPSEC_OFFLOAD_AUTH_AES_GCM_256 = 2,
+	IPSEC_OFFLOAD_AUTH_NONE			= 0,
+	IPSEC_OFFLOAD_AUTH_AES_GCM_128	= 1,
+	IPSEC_OFFLOAD_AUTH_AES_GCM_256	= 2,
 };
+
+#ifdef MLX_IPSEC_SADB_RDMA
 
 /* [BP]: TODO - There should be another command for IPv6 */
 struct sa_cmd_v4 {
@@ -145,6 +147,31 @@ struct sa_cmd_v4 {
 	u8 enable;
 	u8 pad;
 };
+
+#else
+
+#define IPSEC_FLUSH_CACHE_ADDR	0x144
+#define IPSEC_FLUSH_CACHE_BIT	0x100
+#define SADB_SLOT_SIZE			0x80
+
+struct __attribute__((__packed__)) sadb_entry {
+	u8 key[32];
+	__be32 sip;
+	__be32 sip_mask;
+	__be32 dip;
+	__be32 dip_mask;
+	__be32 spi;
+	__be32 salt;
+	__be32 sw_sa_handle;
+	__be16 sport;
+	__be16 dport;
+	u8 ip_proto;
+	u8 enc_auth_mode;
+	u8 enable;
+	u8 pad;
+};
+
+#endif	/*  MLX_IPSEC_SADB_RDMA */
 
 #define SADB_DIR_SX      BIT(7)
 #define SADB_SA_VALID    BIT(6)

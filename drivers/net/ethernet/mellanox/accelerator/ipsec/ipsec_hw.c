@@ -34,7 +34,7 @@
 #include "ipsec_hw.h"
 #include <linux/inetdevice.h>
 
-#ifndef SADB_RDMA
+#ifndef MLX_IPSEC_SADB_RDMA
 /* [IT]: TODO get rid of this work queue:
  * Use async add/del SA operations over RDMA/RC-QP
  * Get rid of mutex lock in add/del sa flows
@@ -45,7 +45,7 @@ static struct workqueue_struct *mlx_ipsec_workq;
 
 int mlx_ipsec_hw_init(void)
 {
-#ifndef SADB_RDMA
+#ifndef MLX_IPSEC_SADB_RDMA
 	mlx_ipsec_workq = create_workqueue("mlx_ipsec");
 	if (!mlx_ipsec_workq)
 		return -ENOMEM;
@@ -55,7 +55,7 @@ int mlx_ipsec_hw_init(void)
 
 void mlx_ipsec_hw_deinit(void)
 {
-#ifndef SADB_RDMA
+#ifndef MLX_IPSEC_SADB_RDMA
 	flush_workqueue(mlx_ipsec_workq);
 	destroy_workqueue(mlx_ipsec_workq);
 	mlx_ipsec_workq = NULL;
@@ -98,10 +98,8 @@ mlx_ipsec_get_crypto_identifier(struct xfrm_state *x)
 	}
 }
 
-#ifndef SADB_RDMA
+#ifndef MLX_IPSEC_SADB_RDMA
 
-#define IPSEC_FLUSH_CACHE_ADDR 0x144
-#define IPSEC_FLUSH_CACHE_BIT 0x100
 static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 {
 	int res;
@@ -125,23 +123,6 @@ static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 	}
 }
 
-struct __attribute__((__packed__)) sadb_entry {
-	u8 key[32];
-	__be32 sip;
-	__be32 sip_mask;
-	__be32 dip;
-	__be32 dip_mask;
-	__be32 spi;
-	__be32 salt;
-	__be32 sw_sa_handle;
-	__be16 sport;
-	__be16 dport;
-	u8 ip_proto;
-	u8 enc_auth_mode;
-	u8 enable;
-	u8 pad;
-};
-
 static void copy_sadb_to_hw(void *dst, void *src, unsigned int bytes)
 {
 	u32 *dst_w = dst, *src_w = src;
@@ -152,7 +133,6 @@ static void copy_sadb_to_hw(void *dst, void *src, unsigned int bytes)
 		dst_w[i] = htonl(src_w[i]);
 }
 
-#define SADB_SLOT_SIZE   0x80 /* MAS bug, should be 0x80 */
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 			  struct mlx_ipsec_dev *dev)
 {
@@ -292,7 +272,7 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 	WARN_ON(buf);
 }
 
-#else /* SADB_RDMA */
+#else /* MLX_IPSEC_SADB_RDMA */
 
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 			  struct mlx_ipsec_dev *dev)
@@ -414,4 +394,4 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 	}
 }
 
-#endif /* SADB_RDMA */
+#endif /* MLX_IPSEC_SADB_RDMA */
