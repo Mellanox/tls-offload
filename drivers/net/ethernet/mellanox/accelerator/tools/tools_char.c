@@ -38,6 +38,8 @@
 #include <linux/mlx5/accel/tools_chardev.h>
 #include <linux/mlx5/driver.h>
 
+#define CHUNK_SIZE (32 * 1024)
+
 static int major_number;
 static struct class *char_class;
 
@@ -90,6 +92,8 @@ static ssize_t tools_char_read(struct file *filep, char __user *buffer,
 
 	if (len < 1)
 		return len;
+	if (len > CHUNK_SIZE)
+		len = CHUNK_SIZE;
 
 	kbuf = kmalloc(len, GFP_KERNEL);
 	if (!kbuf) {
@@ -123,6 +127,8 @@ static ssize_t tools_char_write(struct file *filep, const char __user *buffer,
 
 	if (len < 1)
 		return len;
+	if (len > CHUNK_SIZE)
+		len = CHUNK_SIZE;
 
 	kbuf = kmalloc(len, GFP_KERNEL);
 	if (!kbuf) {
