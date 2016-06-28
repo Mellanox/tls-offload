@@ -41,9 +41,9 @@ enum mlx_accel_access_type {
 };
 
 enum mlx_accel_fpga_image {
-	MLX_ACCEL_IMAGE_FACTORY = 0x0,
-	MLX_ACCEL_IMAGE_USER,
-	MLX_ACCEL_IMAGE_MAX = MLX_ACCEL_IMAGE_USER,
+	MLX_ACCEL_IMAGE_USER = 0x0,
+	MLX_ACCEL_IMAGE_FACTORY,
+	MLX_ACCEL_IMAGE_MAX = MLX_ACCEL_IMAGE_FACTORY,
 };
 
 enum mlx_accel_fpga_status {
