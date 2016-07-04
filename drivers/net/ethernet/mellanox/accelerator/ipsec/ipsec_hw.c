@@ -123,16 +123,6 @@ static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 	}
 }
 
-static void copy_sadb_to_hw(void *dst, void *src, unsigned int bytes)
-{
-	u32 *dst_w = dst, *src_w = src;
-	unsigned int i, words = bytes / 4;
-
-	WARN_ON(bytes & 3);
-	for (i = 0; i < words; i++)
-		dst_w[i] = htonl(src_w[i]);
-}
-
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 			  struct mlx_ipsec_dev *dev)
 {
@@ -172,8 +162,6 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 		hw_entry.enable |= SADB_DIR_SX;
 	if (sa->x->props.mode)
 		hw_entry.enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
-
-	copy_sadb_to_hw(&hw_entry, &hw_entry, sizeof(hw_entry));
 
 	res = mlx_accel_core_mem_write(dev->accel_device, sizeof(hw_entry),
 				       sa_addr, &hw_entry,
