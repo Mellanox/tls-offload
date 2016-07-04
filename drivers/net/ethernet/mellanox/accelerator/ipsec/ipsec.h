@@ -56,7 +56,7 @@
 
 #define MLX_IPSEC_DEVICE_NAME					"mlx_ipsec"
 /* TODO: Consider moving this to include/uapi/linux/if_ether.h */
-#define MLX_IPSEC_PET_ETHERTYPE					(0x8948)
+#define MLX_IPSEC_PET_ETHERTYPE					(0x8CE4)
 
 #define MLX_IPSEC_SA_HASH_TABLE_BITS			10
 #define MLX_SA_HW2SW_FIFO_SIZE				8
