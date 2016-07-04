@@ -73,6 +73,29 @@ struct mlx_ipsec_dev *mlx_ipsec_find_dev_by_netdev(struct net_device *netdev)
 	return dev;
 }
 
+static void mlx_ipsec_clear_bypass(struct mlx_ipsec_dev *dev)
+{
+	int res;
+	u32 dw;
+
+	res = mlx_accel_core_mem_read(dev->accel_device, 4,
+				      IPSEC_BYPASS_ADDR, &dw,
+				      MLX_ACCEL_ACCESS_TYPE_I2C);
+	if (res != 4) {
+		pr_warn("IPSec bypass clear failed on read\n");
+		return;
+	}
+
+	dw &= ~IPSEC_BYPASS_BIT;
+	res = mlx_accel_core_mem_write(dev->accel_device, 4,
+				       IPSEC_BYPASS_ADDR, &dw,
+				       MLX_ACCEL_ACCESS_TYPE_I2C);
+	if (res != 4) {
+		pr_warn("IPSec bypass clear failed on write\n");
+		return;
+	}
+}
+
 /*
  * returns 0 on success, negative error if failed to send message to FPGA
  * positive error if FPGA returned a bad response
@@ -482,6 +505,8 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	rtnl_lock();
 	netdev_change_features(dev->netdev);
 	rtnl_unlock();
+
+	mlx_ipsec_clear_bypass(dev);
 	goto out;
 
 err_tx_register:
