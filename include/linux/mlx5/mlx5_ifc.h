@@ -7117,6 +7117,15 @@ struct mlx5_ifc_pvlc_reg_bits {
 	u8         vl_operational[0x4];
 };
 
+struct mlx5_ifc_fnvcra_reg_bits {
+	u8         reserved_0[0x20];
+	u8         reserved_1[0x18];
+	u8         size[0x8];
+	u8         address_63_32[0x20];
+	u8         address_31_0[0x20];
+	u8         data[64][0x8];
+};
+
 struct mlx5_ifc_pude_reg_bits {
 	u8         swid[0x8];
 	u8         local_port[0x8];
@@ -7950,6 +7959,7 @@ union mlx5_ifc_ports_control_registers_document_bits {
 	struct mlx5_ifc_pvlc_reg_bits pvlc_reg;
 	struct mlx5_ifc_slrg_reg_bits slrg_reg;
 	struct mlx5_ifc_sltp_reg_bits sltp_reg;
+	struct mlx5_ifc_fnvcra_reg_bits fnvcra_reg;
 	u8         reserved_at_0[0x60e0];
 };
 
