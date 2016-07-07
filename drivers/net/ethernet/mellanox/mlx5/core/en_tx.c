@@ -216,6 +216,26 @@ static inline void mlx5e_insert_vlan(void *start, struct sk_buff *skb, u16 ihs,
 	mlx5e_tx_skb_pull_inline(skb_data, skb_len, cpy2_sz);
 }
 
+/* [BP]: TODO: use a queue of tx handlers - don't just override the tx handler*/
+int mlx5e_register_tx_handler(struct net_device *dev,
+		struct sk_buff* (*tx_handler)(struct sk_buff *skb)) {
+	struct mlx5e_priv *priv = netdev_priv(dev);
+
+	rcu_assign_pointer(priv->tx_handler, tx_handler);
+	return 0;
+}
+EXPORT_SYMBOL(mlx5e_register_tx_handler);
+
+int mlx5e_unregister_tx_handler(struct net_device *dev)
+{
+	struct mlx5e_priv *priv = netdev_priv(dev);
+	rcu_assign_pointer(priv->tx_handler, NULL);
+	synchronize_rcu();
+
+	return 0;
+}
+EXPORT_SYMBOL(mlx5e_unregister_tx_handler);
+
 static netdev_tx_t mlx5e_sq_xmit(struct mlx5e_sq *sq, struct sk_buff *skb)
 {
 	struct mlx5_wq_cyc       *wq   = &sq->wq;
@@ -393,7 +413,21 @@ dma_unmap_wqe_err:
 netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct mlx5e_priv *priv = netdev_priv(dev);
-	struct mlx5e_sq *sq = priv->txq_to_sq_map[skb_get_queue_mapping(skb)];
+	struct mlx5e_sq *sq = NULL;
+	struct sk_buff* (*tx_handler)(struct sk_buff *skb);
+
+	rcu_read_lock();
+	tx_handler = rcu_dereference(priv->tx_handler);
+	if (tx_handler) {
+		skb = tx_handler(skb);
+		if (!skb) {
+			rcu_read_unlock();
+			return NETDEV_TX_OK;
+		}
+	}
+	rcu_read_unlock();
+
+	sq = priv->txq_to_sq_map[skb_get_queue_mapping(skb)];
 
 	return mlx5e_sq_xmit(sq, skb);
 }

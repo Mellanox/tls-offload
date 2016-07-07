@@ -3550,6 +3550,9 @@ static void mlx5e_build_nic_netdev_priv(struct mlx5_core_dev *mdev,
 	INIT_WORK(&priv->set_rx_mode_work, mlx5e_set_rx_mode_work);
 	INIT_WORK(&priv->tx_timeout_work, mlx5e_tx_timeout_work);
 	INIT_DELAYED_WORK(&priv->update_stats_work, mlx5e_update_stats_work);
+
+	priv->tx_handler = NULL;
+	priv->rx_handler = NULL;
 }
 
 static void mlx5e_set_netdev_dev_addr(struct net_device *netdev)
