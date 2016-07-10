@@ -244,9 +244,8 @@ int mlx_accel_tools_char_add_one(struct mlx_accel_tools_dev *sb_dev)
 	}
 
 	sb_dev->char_device = device_create(char_class, NULL, sb_dev->dev, NULL,
-					    "%s%u%s",
-					    MLX_ACCEL_TOOLS_NAME_PREFIX,
-					    sb_dev->accel_device->id - 1,
+					    "%s%s",
+					    sb_dev->accel_device->name,
 					    MLX_ACCEL_TOOLS_NAME_SUFFIX);
 	if (IS_ERR(sb_dev->char_device)) {
 		ret = PTR_ERR(sb_dev->char_device);

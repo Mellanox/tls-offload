@@ -37,7 +37,6 @@
 #include <linux/ioctl.h>
 #include "accel_sdk.h"
 
-#define MLX_ACCEL_TOOLS_NAME_PREFIX "mlx5_"
 #define MLX_ACCEL_TOOLS_NAME_SUFFIX "_accel_tools"
 
 struct mlx_accel_fpga_query {
