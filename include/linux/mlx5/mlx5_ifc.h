@@ -7122,15 +7122,6 @@ struct mlx5_ifc_pvlc_reg_bits {
 	u8         vl_operational[0x4];
 };
 
-struct mlx5_ifc_fnvcra_reg_bits {
-	u8         reserved_0[0x20];
-	u8         reserved_1[0x18];
-	u8         size[0x8];
-	u8         address_63_32[0x20];
-	u8         address_31_0[0x20];
-	u8         data[64][0x8];
-};
-
 struct mlx5_ifc_pude_reg_bits {
 	u8         swid[0x8];
 	u8         local_port[0x8];
@@ -7919,6 +7910,109 @@ struct mlx5_ifc_initial_seg_bits {
 	u8         reserved_at_80a0[0x17fc0];
 };
 
+#define MLX5_FPGA_ACCESS_REG_SIZE_MAX 64
+
+struct mlx5_ifc_fpga_access_reg_bits {
+	u8         reserved_auto1[0x00020];
+
+	u8         reserved_auto2[0x00010];
+	u8         size[0x00010];
+
+	u8         address_h[0x00020];
+
+	u8         address_l[0x00020];
+
+	u8         data[MLX5_FPGA_ACCESS_REG_SIZE_MAX][0x00008];
+};
+
+enum {
+	MLX5_FPGA_CTRL_OP_LOAD = 1,
+	MLX5_FPGA_CTRL_OP_RESET = 2,
+	MLX5_FPGA_CTRL_OP_IMAGE_SEL = 3,
+};
+
+struct mlx5_ifc_fpga_ctrl_bits {
+	u8         reserved_auto1[0x00008];
+	u8         operation[0x00008];
+	u8         reserved_auto2[0x00008];
+	u8         status[0x00008];
+
+	u8         reserved_auto3[0x00008];
+	u8         image_select_admin[0x00008];
+	u8         reserved_auto4[0x00008];
+	u8         image_select_oper[0x00008];
+
+	u8         reserved_auto5[0x00040];
+};
+
+struct mlx5_ifc_fpga_shell_caps_bits {
+	u8         max_num_qps[0x00010];
+	u8         reserved_auto1[0x00008];
+	u8         total_rcv_credits[0x00008];
+
+	u8         reserved_auto2[0x0000e];
+	u8         qp_type[0x00002];
+	u8         reserved_auto3[0x00005];
+	u8         rae[0x00001];
+	u8         rwe[0x00001];
+	u8         rre[0x00001];
+	u8         reserved_auto4[0x00004];
+	u8         dc[0x00001];
+	u8         ud[0x00001];
+	u8         uc[0x00001];
+	u8         rc[0x00001];
+
+	u8         reserved_auto5[0x0001a];
+	u8         log_ddr_size[0x00006];
+
+	u8         reserved_auto6[0x001a0];
+};
+
+struct mlx5_ifc_fpga_cap_bits {
+	u8         fpga_id[0x00008];
+	u8         fpga_device[0x00018];
+
+	u8         register_file_ver[0x00020];
+
+	u8         fpga_ctrl_modify[0x00001];
+	u8         reserved_auto1[0x00005];
+	u8         access_reg_query_mode[0x00002];
+	u8         reserved_auto2[0x00006];
+	u8         access_reg_modify_mode[0x00002];
+	u8         reserved_auto3[0x00010];
+
+	u8         reserved_auto4[0x00020];
+
+	u8         image_version[0x00020];
+
+	u8         image_date[0x00020];
+
+	u8         image_time[0x00020];
+
+	u8         shell_version[0x00020];
+
+	u8         reserved_auto5[0x00080];
+
+	struct mlx5_ifc_fpga_shell_caps_bits shell_caps;
+
+	u8         reserved_auto6[0x00008];
+	u8         ieee_vendor_id[0x00018];
+
+	u8         sandbox_product_version[0x00010];
+	u8         sandbox_product_id[0x00010];
+
+	u8         sandbox_basic_caps[0x00020];
+
+	u8         reserved_auto7[0x00010];
+	u8         sandbox_extended_caps_len[0x00010];
+
+	u8         sandbox_extended_caps_addr_h[0x00020];
+
+	u8         sandbox_extended_caps_addr_l[0x00020];
+
+	u8         reserved_auto8[0x003c0];
+};
+
 union mlx5_ifc_ports_control_registers_document_bits {
 	struct mlx5_ifc_bufferx_reg_bits bufferx_reg;
 	struct mlx5_ifc_eth_2819_cntrs_grp_data_layout_bits eth_2819_cntrs_grp_data_layout;
@@ -7964,7 +8058,9 @@ union mlx5_ifc_ports_control_registers_document_bits {
 	struct mlx5_ifc_pvlc_reg_bits pvlc_reg;
 	struct mlx5_ifc_slrg_reg_bits slrg_reg;
 	struct mlx5_ifc_sltp_reg_bits sltp_reg;
-	struct mlx5_ifc_fnvcra_reg_bits fnvcra_reg;
+	struct mlx5_ifc_fpga_access_reg_bits fpga_access_reg;
+	struct mlx5_ifc_fpga_ctrl_bits fpga_ctrl_bits;
+	struct mlx5_ifc_fpga_cap_bits fpga_cap_bits;
 	u8         reserved_at_0[0x60e0];
 };
 

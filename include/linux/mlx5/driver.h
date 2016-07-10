@@ -47,6 +47,7 @@
 #include <linux/mlx5/device.h>
 #include <linux/mlx5/doorbell.h>
 #include <linux/mlx5/srq.h>
+#include <linux/mlx5/accel/accel_sdk.h>
 
 enum {
 	MLX5_BOARD_ID_LEN = 64,
@@ -106,6 +107,9 @@ enum {
 	MLX5_REG_QTCT		 = 0x400a,
 	MLX5_REG_DCBX_PARAM      = 0x4020,
 	MLX5_REG_DCBX_APP        = 0x4021,
+	MLX5_REG_FPGA_CAP	 = 0x4022,
+	MLX5_REG_FPGA_CTRL	 = 0x4023,
+	MLX5_REG_FPGA_ACCESS_REG = 0x4024,
 	MLX5_REG_PCAP		 = 0x5001,
 	MLX5_REG_PMTU		 = 0x5003,
 	MLX5_REG_PTYS		 = 0x5004,
@@ -121,7 +125,6 @@ enum {
 	MLX5_REG_PMLP		 = 0x5002,
 	MLX5_REG_NODE_DESC	 = 0x6001,
 	MLX5_REG_HOST_ENDIANNESS = 0x7004,
-	MLX5_REG_FNVCRA		 = 0x4024,
 	MLX5_REG_MCIA		 = 0x9014,
 	MLX5_REG_MLCR		 = 0x902b,
 	MLX5_REG_MPCNT		 = 0x9051,
@@ -982,6 +985,16 @@ int mlx5_rl_add_rate(struct mlx5_core_dev *dev, u32 rate, u16 *index);
 void mlx5_rl_remove_rate(struct mlx5_core_dev *dev, u32 rate);
 bool mlx5_rl_is_in_range(struct mlx5_core_dev *dev, u32 rate);
 
+int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
+			 u8 *buf, bool write);
+int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image);
+int mlx5_fpga_reset(struct mlx5_core_dev *dev);
+int mlx5_fpga_image_select(struct mlx5_core_dev *dev,
+			   enum mlx_accel_fpga_image image);
+int mlx5_fpga_query(struct mlx5_core_dev *dev,
+		    enum mlx_accel_fpga_status *status,
+		    enum mlx_accel_fpga_image *admin_image,
+		    enum mlx_accel_fpga_image *oper_image);
 int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
 			struct mlx5_fpga_qpc *fpga_qpc, u32 *fpga_qpn);
 int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,

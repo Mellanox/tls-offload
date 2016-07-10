@@ -36,6 +36,102 @@
 #include <linux/etherdevice.h>
 #include "mlx5_core.h"
 
+int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
+			 u8 *buf, bool write)
+{
+	u32 in[MLX5_ST_SZ_DW(fpga_access_reg) + MLX5_FPGA_ACCESS_REG_SIZE_MAX];
+	u32 out[MLX5_ST_SZ_DW(fpga_access_reg) + MLX5_FPGA_ACCESS_REG_SIZE_MAX];
+	int err, i;
+
+	if (size & 3)
+		return -EINVAL;
+	if (addr & 3)
+		return -EINVAL;
+	if (size > MLX5_FPGA_ACCESS_REG_SIZE_MAX)
+		return -EINVAL;
+
+	memset(in, 0, sizeof(in));
+	MLX5_SET(fpga_access_reg, in, size, size);
+	MLX5_SET(fpga_access_reg, in, address_h, addr >> 32);
+	MLX5_SET(fpga_access_reg, in, address_l, addr & 0xFFFFFFFF);
+	if (write) {
+		for (i = 0; i < size; ++i)
+			MLX5_SET(fpga_access_reg, in, data[i], buf[i]);
+	}
+
+	err = mlx5_core_access_reg(dev, in, sizeof(in), out, sizeof(out),
+				   MLX5_REG_FPGA_ACCESS_REG, 0, write);
+	if (err)
+		return err;
+
+	if (!write) {
+		for (i = 0; i < size; i++)
+			buf[i] = MLX5_GET(fpga_access_reg, out, data[i]);
+	}
+	return 0;
+}
+EXPORT_SYMBOL_GPL(mlx5_fpga_access_reg);
+
+static int mlx5_fpga_ctrl_write(struct mlx5_core_dev *dev, u8 op,
+				enum mlx_accel_fpga_image image)
+{
+	u32 in[MLX5_ST_SZ_DW(fpga_ctrl)];
+	u32 out[MLX5_ST_SZ_DW(fpga_ctrl)];
+
+	memset(in, 0, sizeof(in));
+	MLX5_SET(fpga_ctrl, in, operation, op);
+	MLX5_SET(fpga_ctrl, in, image_select_admin, image);
+
+	return mlx5_core_access_reg(dev, in, sizeof(in), out, sizeof(out),
+				    MLX5_REG_FPGA_CTRL, 0, true);
+}
+
+int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image)
+{
+	return mlx5_fpga_ctrl_write(dev, MLX5_FPGA_CTRL_OP_LOAD, image);
+}
+EXPORT_SYMBOL_GPL(mlx5_fpga_load);
+
+int mlx5_fpga_reset(struct mlx5_core_dev *dev)
+{
+	return mlx5_fpga_ctrl_write(dev, MLX5_FPGA_CTRL_OP_RESET, 0);
+}
+EXPORT_SYMBOL_GPL(mlx5_fpga_reset);
+
+int mlx5_fpga_image_select(struct mlx5_core_dev *dev,
+			   enum mlx_accel_fpga_image image)
+{
+	return mlx5_fpga_ctrl_write(dev, MLX5_FPGA_CTRL_OP_IMAGE_SEL, image);
+}
+EXPORT_SYMBOL_GPL(mlx5_fpga_image_select);
+
+int mlx5_fpga_query(struct mlx5_core_dev *dev,
+		    enum mlx_accel_fpga_status *status,
+		    enum mlx_accel_fpga_image *admin_image,
+		    enum mlx_accel_fpga_image *oper_image)
+{
+	u32 in[MLX5_ST_SZ_DW(fpga_ctrl)];
+	u32 out[MLX5_ST_SZ_DW(fpga_ctrl)];
+	int err;
+
+	memset(in, 0, sizeof(in));
+	err = mlx5_core_access_reg(dev, in, sizeof(in), out, sizeof(out),
+				   MLX5_REG_FPGA_CTRL, 0, false);
+	if (err)
+		goto out;
+
+	if (status)
+		*status = MLX5_GET(fpga_ctrl, out, status);
+	if (admin_image)
+		*admin_image = MLX5_GET(fpga_ctrl, out, image_select_admin);
+	if (oper_image)
+		*oper_image = MLX5_GET(fpga_ctrl, out, image_select_oper);
+
+out:
+	return err;
+}
+EXPORT_SYMBOL_GPL(mlx5_fpga_query);
+
 static void fpga_qpc_to_mailbox(struct mlx5_fpga_qpc *fpga_qpc, u8 *in)
 {
 	u8 *dst;

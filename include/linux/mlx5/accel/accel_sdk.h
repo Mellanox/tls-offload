@@ -40,4 +40,16 @@ enum mlx_accel_access_type {
 	MLX_ACCEL_ACCESS_TYPE_MAX = MLX_ACCEL_ACCESS_TYPE_RDMA,
 };
 
+enum mlx_accel_fpga_image {
+	MLX_ACCEL_IMAGE_FACTORY = 0x0,
+	MLX_ACCEL_IMAGE_USER,
+	MLX_ACCEL_IMAGE_MAX = MLX_ACCEL_IMAGE_USER,
+};
+
+enum mlx_accel_fpga_status {
+	MLX_ACCEL_FPGA_STATUS_SUCCESS = 0,
+	MLX_ACCEL_FPGA_STATUS_FAILURE = 1,
+	MLX_ACCEL_FPGA_STATUS_IN_PROGRESS = 2,
+};
+
 #endif /* SDK_H */
