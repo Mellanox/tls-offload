@@ -866,6 +866,12 @@ enum {
 	MLX5_L3_PROT_TYPE_IPV6		= 1,
 };
 
+#define MLX5_CAP_FPGA(mdev, cap) \
+	MLX5_GET(fpga_cap, mdev->fpga_caps, cap)
+
+#define MLX5_CAP_FPGA_SHELL(mdev, cap) \
+	MLX5_GET(fpga_cap, mdev->fpga_caps, shell_caps.cap)
+
 enum {
 	MLX5_L4_PROT_TYPE_TCP		= 0,
 	MLX5_L4_PROT_TYPE_UDP		= 1,

@@ -299,3 +299,24 @@ out:
 	return ret;
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_query_qp_counters);
+
+int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps)
+{
+	int err;
+	u32 in[MLX5_ST_SZ_DW(fpga_cap)];
+	u32 out[MLX5_ST_SZ_DW(fpga_cap)];
+
+	memset(in, 0, sizeof(in));
+	err = mlx5_core_access_reg(dev, in, sizeof(in), out, sizeof(out),
+				   MLX5_REG_FPGA_CAP, 0, 0);
+	if (err)
+		return err;
+
+	memcpy(caps, out, sizeof(out));
+#ifdef DEBUG
+	print_hex_dump_bytes("FPGA caps ", DUMP_PREFIX_OFFSET, out,
+			     sizeof(out));
+#endif
+	return 0;
+}
+EXPORT_SYMBOL_GPL(mlx5_fpga_caps);

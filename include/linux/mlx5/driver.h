@@ -646,6 +646,7 @@ struct mlx5_core_dev {
 	struct mlx5_port_caps	port_caps[MLX5_MAX_PORTS];
 	u32 hca_caps_cur[MLX5_CAP_NUM][MLX5_UN_SZ_DW(hca_cap_union)];
 	u32 hca_caps_max[MLX5_CAP_NUM][MLX5_UN_SZ_DW(hca_cap_union)];
+	u32			fpga_caps[MLX5_ST_SZ_DW(fpga_cap)];
 	phys_addr_t		iseg_base;
 	struct mlx5_init_seg __iomem *iseg;
 	enum mlx5_device_state	state;
@@ -985,6 +986,7 @@ int mlx5_rl_add_rate(struct mlx5_core_dev *dev, u32 rate, u16 *index);
 void mlx5_rl_remove_rate(struct mlx5_core_dev *dev, u32 rate);
 bool mlx5_rl_is_in_range(struct mlx5_core_dev *dev, u32 rate);
 
+int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps);
 int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 			 u8 *buf, bool write);
 int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image);
