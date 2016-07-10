@@ -41,10 +41,12 @@ static LIST_HEAD(mlx_ipsec_devs);
 static DEFINE_MUTEX(mlx_ipsec_mutex);
 static int mlx_xfrm_add_state(struct xfrm_state *x);
 static void mlx_xfrm_del_state(struct xfrm_state *x);
+static void mlx_xfrm_free_state(struct xfrm_state *x);
 
 static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_state_add	= mlx_xfrm_add_state,
 	.xdo_dev_state_delete	= mlx_xfrm_del_state,
+	.xdo_dev_state_free = mlx_xfrm_free_state,
 	.xdo_dev_encap		= xfrm_dev_encap,
 	.xdo_dev_prepare	= xfrm_dev_prepare,
 };
@@ -186,6 +188,11 @@ static void mlx_xfrm_del_state(struct xfrm_state *x)
 		 * context
 		 */
 	}
+}
+
+static void mlx_xfrm_free_state(struct xfrm_state *x)
+{
+	/* [AY/IT] TODO: workaround until take patches. */
 }
 
 static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
