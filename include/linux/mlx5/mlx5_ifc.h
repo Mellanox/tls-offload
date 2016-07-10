@@ -8615,6 +8615,66 @@ struct mlx5_ifc_fpga_shell_qp_packet_bits {
 	u8      data[0][0x00008];
 };
 
+struct mlx5_ifc_ipsec_extended_cap_bits {
+	u8				encapsulation[0x00020];
+
+	u8				reserved_auto1[0x00015];
+	u8				ipv4_fragment[0x00001];
+	u8				ipv6[0x00001];
+	u8				esn[0x00001];
+	u8				lso[0x00001];
+	u8				transport_and_tunnel_mode[0x00001];
+	u8				tunnel_mode[0x00001];
+	u8				transport_mode[0x00001];
+	u8				ah_esp[0x00001];
+	u8				esp[0x00001];
+	u8				ah[0x00001];
+	u8				ipv4_options[0x00001];
+
+	u8				auth_alg[0x00020];
+
+	u8				enc_alg[0x00020];
+
+	u8				sa_cap[0x00020];
+
+	u8				reserved_auto2[0x00010];
+	u8				number_of_ipsec_counters[0x00010];
+
+	struct mlx5_ifc_uint64_bits	ipsec_counters_start_addr;
+
+	u8				reserved_auto3[0x00020];
+};
+
+struct mlx5_ifc_ipsec_counters_bits {
+	struct mlx5_ifc_uint64_bits		dec_in_packets;
+
+	struct mlx5_ifc_uint64_bits		dec_out_packets;
+
+	struct mlx5_ifc_uint64_bits		dec_bypass_packets;
+
+	struct mlx5_ifc_uint64_bits		enc_in_packets;
+
+	struct mlx5_ifc_uint64_bits		enc_out_packets;
+
+	struct mlx5_ifc_uint64_bits		enc_bypass_packets;
+
+	struct mlx5_ifc_uint64_bits		drop_dec_packets;
+
+	struct mlx5_ifc_uint64_bits		failed_auth_dec_packets;
+
+	struct mlx5_ifc_uint64_bits		drop_enc_packets;
+
+	struct mlx5_ifc_uint64_bits		success_add_sa;
+
+	struct mlx5_ifc_uint64_bits		fail_add_sa;
+
+	struct mlx5_ifc_uint64_bits		success_delete_sa;
+
+	struct mlx5_ifc_uint64_bits		fail_delete_sa;
+
+	struct mlx5_ifc_uint64_bits		dropped_cmd;
+};
+
 struct mlx5_ifc_fpga_qp_error_event_bits {
 	u8      reserved_auto1[0x00040];
 
