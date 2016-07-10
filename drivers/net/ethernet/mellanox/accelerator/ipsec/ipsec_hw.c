@@ -113,7 +113,7 @@ static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 		return;
 	}
 
-	dw ^= htonl(IPSEC_FLUSH_CACHE_BIT);
+	dw ^= IPSEC_FLUSH_CACHE_BIT;
 	res = mlx_accel_core_mem_write(dev->accel_device, 4,
 				       IPSEC_FLUSH_CACHE_ADDR, &dw,
 				       MLX_ACCEL_ACCESS_TYPE_I2C);
