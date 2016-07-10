@@ -2205,8 +2205,10 @@ static int mlx5_set_path(struct mlx5_ib_dev *dev, struct mlx5_ib_qp *qp,
 						     attr->pkey_index);
 
 	if (ah->ah_flags & IB_AH_GRH) {
-		if (ah->grh.sgid_index >=
-		    dev->mdev->port_caps[port - 1].gid_table_len) {
+		if ((ah->grh.sgid_index >=
+		    dev->mdev->port_caps[port - 1].gid_table_len) &&
+		    !mlx5_ib_is_gid_reserved(&dev->ib_dev, port,
+					     ah->grh.sgid_index)) {
 			pr_err("sgid_index (%u) too large. max is %d\n",
 			       ah->grh.sgid_index,
 			       dev->mdev->port_caps[port - 1].gid_table_len);

@@ -222,73 +222,86 @@ static int mlx5_query_port_roce(struct ib_device *device, u8 port_num,
 	return 0;
 }
 
-static void ib_gid_to_mlx5_roce_addr(const union ib_gid *gid,
-				     const struct ib_gid_attr *attr,
-				     void *mlx5_addr)
+int mlx5_ib_set_roce_gid(struct mlx5_core_dev *dev, unsigned int index,
+			 enum ib_gid_type gid_type, const union ib_gid *gid,
+			 const u8 *mac, bool vlan, u16 vlan_id)
 {
 #define MLX5_SET_RA(p, f, v) MLX5_SET(roce_addr_layout, p, f, v)
-	char *mlx5_addr_l3_addr	= MLX5_ADDR_OF(roce_addr_layout, mlx5_addr,
+	u32  in[MLX5_ST_SZ_DW(set_roce_address_in)] = {0};
+	u32 out[MLX5_ST_SZ_DW(set_roce_address_out)] = {0};
+	void *in_addr = MLX5_ADDR_OF(set_roce_address_in, in, roce_address);
+	char *mlx5_addr_l3_addr	= MLX5_ADDR_OF(roce_addr_layout, in_addr,
 					       source_l3_address);
-	void *mlx5_addr_mac	= MLX5_ADDR_OF(roce_addr_layout, mlx5_addr,
+	void *mlx5_addr_mac	= MLX5_ADDR_OF(roce_addr_layout, in_addr,
 					       source_mac_47_32);
 
-	if (!gid)
-		return;
+	if (MLX5_CAP_GEN(dev, port_type) != MLX5_CAP_PORT_TYPE_ETH)
+		return -EINVAL;
 
-	ether_addr_copy(mlx5_addr_mac, attr->ndev->dev_addr);
+	if (gid) {
+		ether_addr_copy(mlx5_addr_mac, mac);
 
-	if (is_vlan_dev(attr->ndev)) {
-		MLX5_SET_RA(mlx5_addr, vlan_valid, 1);
-		MLX5_SET_RA(mlx5_addr, vlan_id, vlan_dev_vlan_id(attr->ndev));
-	}
+		if (vlan) {
+			MLX5_SET_RA(in_addr, vlan_valid, 1);
+			MLX5_SET_RA(in_addr, vlan_id, vlan_id);
+		}
 
-	switch (attr->gid_type) {
-	case IB_GID_TYPE_IB:
-		MLX5_SET_RA(mlx5_addr, roce_version, MLX5_ROCE_VERSION_1);
-		break;
-	case IB_GID_TYPE_ROCE_UDP_ENCAP:
-		MLX5_SET_RA(mlx5_addr, roce_version, MLX5_ROCE_VERSION_2);
-		break;
+		switch (gid_type) {
+		case IB_GID_TYPE_IB:
+			MLX5_SET_RA(in_addr, roce_version, MLX5_ROCE_VERSION_1);
+			break;
+		case IB_GID_TYPE_ROCE_UDP_ENCAP:
+			MLX5_SET_RA(in_addr, roce_version, MLX5_ROCE_VERSION_2);
+			break;
 
-	default:
-		WARN_ON(true);
-	}
+		default:
+			WARN_ON(true);
+		}
 
-	if (attr->gid_type != IB_GID_TYPE_IB) {
-		if (ipv6_addr_v4mapped((void *)gid))
-			MLX5_SET_RA(mlx5_addr, roce_l3_type,
-				    MLX5_ROCE_L3_TYPE_IPV4);
+		if (gid_type != IB_GID_TYPE_IB) {
+			if (ipv6_addr_v4mapped((void *)gid))
+				MLX5_SET_RA(in_addr, roce_l3_type,
+					    MLX5_ROCE_L3_TYPE_IPV4);
+			else
+				MLX5_SET_RA(in_addr, roce_l3_type,
+					    MLX5_ROCE_L3_TYPE_IPV6);
+		}
+
+		if ((gid_type == IB_GID_TYPE_IB) ||
+		    !ipv6_addr_v4mapped((void *)gid))
+			memcpy(mlx5_addr_l3_addr, gid, sizeof(*gid));
 		else
-			MLX5_SET_RA(mlx5_addr, roce_l3_type,
-				    MLX5_ROCE_L3_TYPE_IPV6);
+			memcpy(&mlx5_addr_l3_addr[12], &gid->raw[12], 4);
 	}
 
-	if ((attr->gid_type == IB_GID_TYPE_IB) ||
-	    !ipv6_addr_v4mapped((void *)gid))
-		memcpy(mlx5_addr_l3_addr, gid, sizeof(*gid));
-	else
-		memcpy(&mlx5_addr_l3_addr[12], &gid->raw[12], 4);
+	MLX5_SET(set_roce_address_in, in, roce_address_index, index);
+	MLX5_SET(set_roce_address_in, in, opcode, MLX5_CMD_OP_SET_ROCE_ADDRESS);
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 }
+EXPORT_SYMBOL(mlx5_ib_set_roce_gid);
 
 static int set_roce_addr(struct ib_device *device, u8 port_num,
 			 unsigned int index,
 			 const union ib_gid *gid,
 			 const struct ib_gid_attr *attr)
 {
-	struct mlx5_ib_dev *dev = to_mdev(device);
-	u32  in[MLX5_ST_SZ_DW(set_roce_address_in)]  = {0};
-	u32 out[MLX5_ST_SZ_DW(set_roce_address_out)] = {0};
-	void *in_addr = MLX5_ADDR_OF(set_roce_address_in, in, roce_address);
-	enum rdma_link_layer ll = mlx5_ib_port_link_layer(device, port_num);
+	u8 mac[ETH_ALEN] = {0};
+	bool vlan = false;
+	u16 vlan_id = 0;
+	enum ib_gid_type gid_type = IB_GID_TYPE_IB;
 
-	if (ll != IB_LINK_LAYER_ETHERNET)
-		return -EINVAL;
+	if (gid) {
+		gid_type = attr->gid_type;
+		ether_addr_copy(mac, attr->ndev->dev_addr);
 
-	ib_gid_to_mlx5_roce_addr(gid, attr, in_addr);
+		if (is_vlan_dev(attr->ndev)) {
+			vlan = true;
+			vlan_id = vlan_dev_vlan_id(attr->ndev);
+		}
+	}
 
-	MLX5_SET(set_roce_address_in, in, roce_address_index, index);
-	MLX5_SET(set_roce_address_in, in, opcode, MLX5_CMD_OP_SET_ROCE_ADDRESS);
-	return mlx5_cmd_exec(dev->mdev, in, sizeof(in), out, sizeof(out));
+	return mlx5_ib_set_roce_gid(to_mdev(device)->mdev, index,
+				    gid_type, gid, mac, vlan, vlan_id);
 }
 
 static int mlx5_ib_add_gid(struct ib_device *device, u8 port_num,
@@ -311,17 +324,20 @@ __be16 mlx5_get_roce_udp_sport(struct mlx5_ib_dev *dev, u8 port_num,
 	struct ib_gid_attr attr;
 	union ib_gid gid;
 
+	/* Reserved GIDs are not in cache and not connected to a netdev */
+	if (mlx5_ib_is_gid_reserved(&dev->ib_dev, port_num, index))
+		goto out;
+
 	if (ib_get_cached_gid(&dev->ib_dev, port_num, index, &gid, &attr))
 		return 0;
 
-	if (!attr.ndev)
-		return 0;
-
-	dev_put(attr.ndev);
+	if (attr.ndev)
+		dev_put(attr.ndev);
 
 	if (attr.gid_type != IB_GID_TYPE_ROCE_UDP_ENCAP)
 		return 0;
 
+out:
 	return cpu_to_be16(MLX5_CAP_ROCE(dev->mdev, r_roce_min_src_udp_port));
 }
 
@@ -849,19 +865,35 @@ out:
 int mlx5_ib_query_port(struct ib_device *ibdev, u8 port,
 		       struct ib_port_attr *props)
 {
+	int ret;
+	unsigned int reserved;
+
 	switch (mlx5_get_vport_access_method(ibdev)) {
 	case MLX5_VPORT_ACCESS_METHOD_MAD:
-		return mlx5_query_mad_ifc_port(ibdev, port, props);
+		ret = mlx5_query_mad_ifc_port(ibdev, port, props);
+		break;
 
 	case MLX5_VPORT_ACCESS_METHOD_HCA:
-		return mlx5_query_hca_port(ibdev, port, props);
+		ret = mlx5_query_hca_port(ibdev, port, props);
+		break;
 
 	case MLX5_VPORT_ACCESS_METHOD_NIC:
-		return mlx5_query_port_roce(ibdev, port, props);
+		ret = mlx5_query_port_roce(ibdev, port, props);
+		break;
 
 	default:
-		return -EINVAL;
+		ret = -EINVAL;
 	}
+
+	if (!ret && props) {
+		reserved = to_mdev(ibdev)->reserved_gids.count;
+		if (props->gid_tbl_len > reserved) {
+			props->gid_tbl_len -= reserved;
+			pr_debug("Gid table reduced by %u reserved gids to %u\n",
+				 reserved, props->gid_tbl_len);
+		}
+	}
+	return ret;
 }
 
 static int mlx5_ib_query_gid(struct ib_device *ibdev, u8 port, int index,
@@ -2964,6 +2996,8 @@ static void *mlx5_ib_add(struct mlx5_core_dev *mdev)
 		goto err_dealloc;
 
 	rwlock_init(&dev->roce.netdev_lock);
+
+	mlx5_ib_reserved_gid_init(dev);
 	err = get_port_caps(dev);
 	if (err)
 		goto err_free_port;
@@ -3126,6 +3160,7 @@ static void *mlx5_ib_add(struct mlx5_core_dev *mdev)
 	mutex_init(&dev->cap_mask_mutex);
 	INIT_LIST_HEAD(&dev->qp_list);
 	spin_lock_init(&dev->reset_flow_resource_lock);
+	mutex_init(&dev->reserved_gids.mutex);
 
 	if (ll == IB_LINK_LAYER_ETHERNET) {
 		err = mlx5_enable_roce(dev);
