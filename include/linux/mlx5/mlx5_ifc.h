@@ -8614,4 +8614,25 @@ struct mlx5_ifc_fpga_shell_qp_packet_bits {
 
 	u8      data[0][0x00008];
 };
+
+struct mlx5_ifc_fpga_qp_error_event_bits {
+	u8      reserved_auto1[0x00040];
+
+	u8      reserved_auto2[0x00018];
+	u8      syndrome[0x00008];
+
+	u8      reserved_auto3[0x00060];
+
+	u8      reserved_auto4[0x00008];
+	u8      fpga_qpn[0x00018];
+};
+
+struct fpga_error_event_bits {
+	u8      reserved_auto1[0x00040];
+
+	u8      reserved_auto2[0x00018];
+	u8      syndrome[0x00008];
+
+	u8      reserved_auto3[0x00080];
+};
 #endif /* MLX5_IFC_H */
