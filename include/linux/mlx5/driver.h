@@ -748,6 +748,54 @@ struct mlx5_hca_vport_context {
 	bool			grh_required;
 };
 
+enum mlx5_fpga_qp_state {
+	MLX5_FPGA_QP_STATE_INIT = 0,
+	MLX5_FPGA_QP_STATE_ACTIVE = 1,
+	MLX5_FPGA_QP_STATE_ERROR = 2,
+};
+
+enum mlx5_fpga_qp_type {
+	MLX5_FPGA_QP_TYPE_SHELL = 0,
+	MLX5_FPGA_QP_TYPE_SANDBOX = 1,
+};
+
+enum mlx5_fpga_qp_service_type {
+	MLX5_FPGA_QP_SERVICE_TYPE_RC = 0,
+};
+
+enum mlx5_fpga_qpc_field_select {
+	MLX5_FPGA_QPC_STATE = BIT(0),
+};
+
+struct mlx5_fpga_qpc {
+	enum mlx5_fpga_qp_state		state;
+	enum mlx5_fpga_qp_type		qp_type;
+	enum mlx5_fpga_qp_service_type	st;
+	u8				tclass;
+	u16				ether_type;
+	u8				pcp;
+	u8				dei;
+	u16				vlan_id;
+	u32				next_rcv_psn;
+	u32				next_send_psn;
+	u16				pkey;
+	u32				remote_qpn;
+	u8				rnr_retry;
+	u8				retry_count;
+	u8				remote_mac[ETH_ALEN];
+	struct in6_addr			remote_ip;
+	u8				fpga_mac[ETH_ALEN];
+	struct in6_addr			fpga_ip;
+};
+
+struct mlx5_fpga_qp_counters {
+	u64 rx_ack_packets;
+	u64 rx_send_packets;
+	u64 tx_ack_packets;
+	u64 tx_send_packets;
+	u64 rx_total_drop;
+};
+
 static inline void *mlx5_buf_offset(struct mlx5_buf *buf, int offset)
 {
 		return buf->direct.buf + offset;
@@ -933,6 +981,17 @@ void mlx5_cleanup_rl_table(struct mlx5_core_dev *dev);
 int mlx5_rl_add_rate(struct mlx5_core_dev *dev, u32 rate, u16 *index);
 void mlx5_rl_remove_rate(struct mlx5_core_dev *dev, u32 rate);
 bool mlx5_rl_is_in_range(struct mlx5_core_dev *dev, u32 rate);
+
+int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
+			struct mlx5_fpga_qpc *fpga_qpc, u32 *fpga_qpn);
+int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
+			enum mlx5_fpga_qpc_field_select fields,
+			struct mlx5_fpga_qpc *fpga_qpc);
+int mlx5_fpga_query_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
+		       struct mlx5_fpga_qpc *fpga_qpc);
+int mlx5_fpga_query_qp_counters(struct mlx5_core_dev *dev, u32 fpga_qpn,
+				bool clear, struct mlx5_fpga_qp_counters *data);
+int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn);
 
 static inline int fw_initializing(struct mlx5_core_dev *dev)
 {

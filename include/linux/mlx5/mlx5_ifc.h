@@ -227,6 +227,11 @@ enum {
 	MLX5_CMD_OP_MODIFY_FLOW_TABLE             = 0x93c,
 	MLX5_CMD_OP_ALLOC_ENCAP_HEADER            = 0x93d,
 	MLX5_CMD_OP_DEALLOC_ENCAP_HEADER          = 0x93e,
+	MLX5_CMD_OP_FPGA_CREATE_QP                = 0x960,
+	MLX5_CMD_OP_FPGA_MODIFY_QP                = 0x961,
+	MLX5_CMD_OP_FPGA_QUERY_QP                 = 0x962,
+	MLX5_CMD_OP_FPGA_DESTROY_QP               = 0x963,
+	MLX5_CMD_OP_FPGA_QUERY_QP_COUNTERS        = 0x964,
 	MLX5_CMD_OP_MAX
 };
 
@@ -8286,4 +8291,230 @@ struct mlx5_ifc_destroy_vport_lag_in_bits {
 	u8         reserved_at_40[0x40];
 };
 
+struct mlx5_ifc_fpga_qpc_bits {
+	u8         state[0x00004];
+	u8         reserved_auto1[0x0001b];
+	u8         qp_type[0x00001];
+
+	u8         reserved_auto2[0x00004];
+	u8         st[0x00004];
+	u8         reserved_auto3[0x00010];
+	u8         traffic_class[0x00008];
+
+	u8         ether_type[0x00010];
+	u8         prio[0x00003];
+	u8         dei[0x00001];
+	u8         vid[0x0000c];
+
+	u8         reserved_auto4[0x00020];
+
+	u8         reserved_auto5[0x00008];
+	u8         next_rcv_psn[0x00018];
+
+	u8         reserved_auto6[0x00008];
+	u8         next_send_psn[0x00018];
+
+	u8         reserved_auto7[0x00010];
+	u8         pkey[0x00010];
+
+	u8         reserved_auto8[0x00008];
+	u8         remote_qpn[0x00018];
+
+	u8         reserved_auto9[0x00015];
+	u8         rnr_retry[0x00003];
+	u8         reserved_auto10[0x00005];
+	u8         retry_count[0x00003];
+
+	u8         reserved_auto11[0x00020];
+
+	u8         reserved_auto12[0x00010];
+	u8         remote_mac_47_32[0x00010];
+
+	u8         remote_mac_31_0[0x00020];
+
+	u8         remote_ip[16][0x00008];
+
+	u8         reserved_auto13[0x00040];
+
+	u8         reserved_auto14[0x00010];
+	u8         fpga_mac_47_32[0x00010];
+
+	u8         fpga_mac_31_0[0x00020];
+
+	u8         fpga_ip[16][0x00008];
+};
+
+struct mlx5_ifc_fpga_query_qp_out_bits {
+	u8         status[0x00008];
+	u8         reserved_auto1[0x00018];
+
+	u8         syndrome[0x00020];
+
+	u8         reserved_auto2[0x00040];
+
+	struct mlx5_ifc_fpga_qpc_bits fpga_qpc;
+};
+
+struct mlx5_ifc_fpga_query_qp_in_bits {
+	u8         opcode[0x00010];
+	u8         reserved_auto1[0x00010];
+
+	u8         reserved_auto2[0x00010];
+	u8         op_mod[0x00010];
+
+	u8         reserved_auto3[0x00008];
+	u8         fpga_qpn[0x00018];
+
+	u8         reserved_auto4[0x00020];
+};
+
+struct mlx5_ifc_fpga_modify_qp_out_bits {
+	u8         status[0x00008];
+	u8         reserved_auto1[0x00018];
+
+	u8         syndrome[0x00020];
+
+	u8         reserved_auto2[0x00040];
+};
+
+struct mlx5_ifc_fpga_modify_qp_in_bits {
+	u8         opcode[0x00010];
+	u8         reserved_auto1[0x00010];
+
+	u8         reserved_auto2[0x00010];
+	u8         op_mod[0x00010];
+
+	u8         reserved_auto3[0x00008];
+	u8         fpga_qpn[0x00018];
+
+	u8         field_select[0x00020];
+
+	struct mlx5_ifc_fpga_qpc_bits fpga_qpc;
+};
+
+struct mlx5_ifc_fpga_destroy_qp_out_bits {
+	u8         status[0x00008];
+	u8         reserved_auto1[0x00018];
+
+	u8         syndrome[0x00020];
+
+	u8         reserved_auto2[0x00040];
+};
+
+struct mlx5_ifc_fpga_destroy_qp_in_bits {
+	u8         opcode[0x00010];
+	u8         reserved_auto1[0x00010];
+
+	u8         reserved_auto2[0x00010];
+	u8         op_mod[0x00010];
+
+	u8         reserved_auto3[0x00008];
+	u8         fpga_qpn[0x00018];
+
+	u8         reserved_auto4[0x00020];
+};
+
+struct mlx5_ifc_fpga_create_qp_out_bits {
+	u8         status[0x00008];
+	u8         reserved_auto1[0x00018];
+
+	u8         syndrome[0x00020];
+
+	u8         reserved_auto2[0x00008];
+	u8         fpga_qpn[0x00018];
+
+	u8         reserved_auto3[0x00020];
+
+	struct mlx5_ifc_fpga_qpc_bits fpga_qpc;
+};
+
+struct mlx5_ifc_fpga_create_qp_in_bits {
+	u8         opcode[0x00010];
+	u8         reserved_auto1[0x00010];
+
+	u8         reserved_auto2[0x00010];
+	u8         op_mod[0x00010];
+
+	u8         reserved_auto3[0x00040];
+
+	struct mlx5_ifc_fpga_qpc_bits fpga_qpc;
+};
+
+struct mlx5_ifc_fpga_query_qp_counters_out_bits {
+	u8                              status[0x00008];
+	u8                              reserved_auto1[0x00018];
+
+	u8                              syndrome[0x00020];
+
+	u8                              reserved_auto2[0x00040];
+
+	struct mlx5_ifc_uint64_bits     rx_ack_packets;
+
+	struct mlx5_ifc_uint64_bits     rx_send_packets;
+
+	struct mlx5_ifc_uint64_bits     tx_ack_packets;
+
+	struct mlx5_ifc_uint64_bits     tx_send_packets;
+
+	struct mlx5_ifc_uint64_bits     rx_total_drop;
+
+	u8                              reserved_auto3[0x001c0];
+};
+
+struct mlx5_ifc_fpga_query_qp_counters_in_bits {
+	u8      opcode[0x00010];
+	u8      reserved_auto1[0x00010];
+
+	u8      reserved_auto2[0x00010];
+	u8      op_mod[0x00010];
+
+	u8      clear[0x00001];
+	u8      reserved_auto3[0x00007];
+	u8      fpga_qpn[0x00018];
+
+	u8      reserved_auto4[0x00020];
+};
+
+struct mlx5_ifc_fpga_shell_counters_bits {
+	u8                              reserved_auto1[0x00020];
+
+	u8                              clear[0x00001];
+	u8                              reserved_auto2[0x0001f];
+
+	u8                              reserved_auto3[0x00040];
+
+	struct mlx5_ifc_uint64_bits     ddr_read_requests;
+
+	struct mlx5_ifc_uint64_bits     ddr_write_requests;
+
+	struct mlx5_ifc_uint64_bits     ddr_read_bytes;
+
+	struct mlx5_ifc_uint64_bits     ddr_write_bytes;
+
+	u8                              reserved_auto4[0x00200];
+};
+
+enum {
+	MLX5_FPGA_MSG_READ = 0,
+	MLX5_FPGA_MSG_WRITE = 1,
+	MLX5_FPGA_MSG_READ_RESPONSE = 2,
+	MLX5_FPGA_MSG_WRITE_RESPONSE = 3,
+};
+
+struct mlx5_ifc_fpga_shell_qp_packet_bits {
+	u8      version[0x00004];
+	u8      syndrome[0x00004];
+	u8      reserved_auto1[0x00004];
+	u8      type[0x00004];
+	u8      reserved_auto2[0x00008];
+	u8      tid[0x00008];
+
+	u8      len[0x00020];
+
+	u8      address_h[0x00020];
+
+	u8      address_l[0x00020];
+
+	u8      data[0][0x00008];
+};
 #endif /* MLX5_IFC_H */
