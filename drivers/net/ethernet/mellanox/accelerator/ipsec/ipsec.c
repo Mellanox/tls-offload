@@ -483,6 +483,8 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	}
 	dev->netdev = netdev;
 
+	netif_keep_dst(dev->netdev);
+
 	ret = mlx5e_register_rx_handler(netdev, mlx_ipsec_rx_handler);
 	if (ret) {
 		pr_err("mlx_ipsec_add_one(): Got error while registering RX handler %d\n", ret);
