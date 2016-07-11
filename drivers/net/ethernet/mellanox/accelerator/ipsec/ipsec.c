@@ -233,9 +233,8 @@ static void remove_pet(struct sk_buff *skb, struct pet *pet)
 static void remove_dummy_dword(struct sk_buff *skb)
 {
 	struct iphdr *iphdr = (struct iphdr *)skb->data;
-	unsigned char *old = skb->data - sizeof(struct ethhdr);
-	unsigned char *new = skb_pull_inline(skb, sizeof(struct dummy_dword)) -
-			sizeof(struct ethhdr);
+	unsigned char *old;
+	unsigned char *new;
 	unsigned int iphdr_len = iphdr->ihl * 4;
 
 	pr_debug("remove_dummy_dword started\n");
@@ -257,6 +256,9 @@ static void remove_dummy_dword(struct sk_buff *skb)
 	if (iphdr->protocol != IPPROTO_DUMMY_DWORD)
 		return;
 
+	old = skb->data - sizeof(struct ethhdr);
+	new = skb_pull_inline(skb, sizeof(struct dummy_dword)) -
+			      sizeof(struct ethhdr);
 	iphdr->protocol = IPPROTO_ESP; /* TODO */
 	iphdr->tot_len = htons(ntohs(iphdr->tot_len) - 4);
 	iphdr->check = htons(~(~ntohs(iphdr->check) - 0xd1));
