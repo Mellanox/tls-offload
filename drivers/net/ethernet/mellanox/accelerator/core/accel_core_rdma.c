@@ -209,12 +209,13 @@ static void mlx_accel_complete(struct mlx_accel_core_conn *conn,
 		return;
 	}
 	buf = (struct mlx_accel_core_dma_buf *)wc->wr_id;
-	if (wc->status != IB_WC_SUCCESS)
+	if ((wc->status != IB_WC_SUCCESS) && (wc->status != IB_WC_WR_FLUSH_ERR))
 		pr_warn("QP returned buf %p with vendor error %d status msg: %s\n",
 			buf, wc->vendor_err, ib_wc_status_msg(wc->status));
 	else
-		pr_debug("Successful completion of buf %p opcode %u\n", buf,
-			 wc->opcode);
+		pr_debug("Completion of buf %p opcode %u status %d: %s\n", buf,
+			 wc->opcode, wc->vendor_err,
+			 ib_wc_status_msg(wc->status));
 
 	ib_dma_unmap_single(conn->accel_device->ib_dev,
 			    buf->data_dma_addr,
