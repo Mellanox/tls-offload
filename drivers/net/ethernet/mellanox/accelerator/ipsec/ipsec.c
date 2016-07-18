@@ -42,6 +42,7 @@ static DEFINE_MUTEX(mlx_ipsec_mutex);
 static int mlx_xfrm_add_state(struct xfrm_state *x);
 static void mlx_xfrm_del_state(struct xfrm_state *x);
 static void mlx_xfrm_free_state(struct xfrm_state *x);
+static int mlx_ipsec_dev_crypto(struct sk_buff *skb);
 
 static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_state_add	= mlx_xfrm_add_state,
@@ -49,6 +50,7 @@ static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_state_free = mlx_xfrm_free_state,
 	.xdo_dev_encap		= xfrm_dev_encap,
 	.xdo_dev_prepare	= xfrm_dev_prepare,
+	.xdo_dev_crypto		= mlx_ipsec_dev_crypto,
 };
 
 /* must hold mlx_ipsec_mutex to call this function */
@@ -291,16 +293,39 @@ static int insert_pet(struct sk_buff *skb)
 	return 0;
 }
 
+static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
+{
+	struct dst_entry *dst = skb_dst(skb);
+	struct xfrm_state *x = dst->xfrm;
+
+	u32 path_mtu = dst_mtu(dst->path);
+
+	if (skb->len > path_mtu) {
+		/* This packet is about to be IP-fragmented */
+		pr_warn("Skipping offload of %u-bytes packet on path mtu %u\n",
+			skb->len, path_mtu);
+		return 0;
+	}
+
+	return 0;
+}
+
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 {
+	struct xfrm_state *x;
 	pr_debug("mlx_ipsec_tx_handler started\n");
 
-	/* [BP]: TODO - Verify invariant in the stack:
-	 * offload packets MUST have the last skb_dst(skb)->xfrm
-	 * with (offload_handle != NULL)
-	 */
-	if (skb_dst(skb) && skb_dst(skb)->xfrm &&
-	    skb_dst(skb)->xfrm->xso.offload_handle &&
+	if (!skb->sp)
+		goto out;
+
+	if (skb->sp->len != 1)
+		goto out;
+
+	x = skb->sp->xvec[0];
+	if (!x)
+		goto out;
+
+	if (x->xso.offload_handle &&
 	    skb->protocol == htons(ETH_P_IP)) {
 		if (insert_pet(skb)) {
 			pr_warn("insert_pet failed!!\n");
@@ -308,7 +333,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 			skb = NULL;
 		}
 	}
-
+out:
 	return skb;
 }
 
