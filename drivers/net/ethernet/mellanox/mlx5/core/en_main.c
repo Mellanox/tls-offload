@@ -114,6 +114,45 @@ static void mlx5e_set_rq_priv_params(struct mlx5e_priv *priv)
 	mlx5e_set_rq_type_params(priv, rq_type);
 }
 
+static struct sk_buff *mlx5e_accel_tx_handler(struct sk_buff *skb)
+{
+	return skb;
+}
+
+static struct sk_buff *mlx5e_accel_rx_handler(struct sk_buff *skb)
+{
+	return skb;
+}
+
+static u16 mlx5e_accel_mtu_handler(u16 mtu, bool is_sw2hw)
+{
+	return mtu;
+}
+
+static struct mlx5e_accel_client_ops accel_ops_default = {
+	.rx_handler  = mlx5e_accel_rx_handler,
+	.tx_handler  = mlx5e_accel_tx_handler,
+	.mtu_handler = mlx5e_accel_mtu_handler,
+};
+
+#define MLX5E_HW2SW_MTU(hwmtu) (hwmtu - (ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN))
+#define MLX5E_SW2HW_MTU(swmtu) (swmtu + (ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN))
+
+static inline u16 mlx5e_mtu(u16 mtu, bool is_sw2hw, struct mlx5e_priv *priv)
+{
+	u16 new_mtu;
+	struct mlx5e_accel_client_ops *accel_client_ops;
+
+	new_mtu = is_sw2hw ? MLX5E_SW2HW_MTU(mtu) : MLX5E_HW2SW_MTU(mtu);
+
+	rcu_read_lock();
+	accel_client_ops = rcu_dereference(priv->accel_client_ops);
+	new_mtu = accel_client_ops->mtu_handler(new_mtu, is_sw2hw);
+	rcu_read_unlock();
+
+	return new_mtu;
+}
+
 static void mlx5e_update_carrier(struct mlx5e_priv *priv)
 {
 	struct mlx5_core_dev *mdev = priv->mdev;
@@ -367,9 +406,6 @@ static void mlx5e_disable_async_events(struct mlx5e_priv *priv)
 	synchronize_irq(mlx5_get_msix_vec(priv->mdev, MLX5_EQ_VEC_ASYNC));
 }
 
-#define MLX5E_HW2SW_MTU(hwmtu) (hwmtu - (ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN))
-#define MLX5E_SW2HW_MTU(swmtu) (swmtu + (ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN))
-
 static inline int mlx5e_get_wqe_mtt_sz(void)
 {
 	/* UMR copies MTTs in units of MLX5_UMR_MTT_ALIGNMENT bytes.
@@ -531,6 +567,7 @@ static int mlx5e_create_rq(struct mlx5e_channel *c,
 	int wq_sz;
 	int err;
 	int i;
+	u16 hw_mtu;
 
 	param->wq.db_numa_node = cpu_to_node(c->cpu);
 
@@ -604,9 +641,11 @@ static int mlx5e_create_rq(struct mlx5e_channel *c,
 		rq->alloc_wqe = mlx5e_alloc_rx_wqe;
 		rq->dealloc_wqe = mlx5e_dealloc_rx_wqe;
 
+		hw_mtu = mlx5e_mtu(priv->netdev->mtu, true, priv);
+
 		rq->buff.wqe_sz = (priv->params.lro_en) ?
 				priv->params.lro_wqe_sz :
-				MLX5E_SW2HW_MTU(priv->netdev->mtu);
+				hw_mtu;
 		byte_count = rq->buff.wqe_sz;
 
 		/* calc the required page order */
@@ -2102,8 +2141,10 @@ free_in:
 static int mlx5e_set_mtu(struct mlx5e_priv *priv, u16 mtu)
 {
 	struct mlx5_core_dev *mdev = priv->mdev;
-	u16 hw_mtu = MLX5E_SW2HW_MTU(mtu);
+	u16 hw_mtu;
 	int err;
+
+	hw_mtu = mlx5e_mtu(mtu, true, priv);
 
 	err = mlx5_set_port_mtu(mdev, hw_mtu, 1);
 	if (err)
@@ -2124,7 +2165,7 @@ static void mlx5e_query_mtu(struct mlx5e_priv *priv, u16 *mtu)
 	if (err || !hw_mtu) /* fallback to port oper mtu */
 		mlx5_query_port_oper_mtu(mdev, &hw_mtu, 1);
 
-	*mtu = MLX5E_HW2SW_MTU(hw_mtu);
+	*mtu = mlx5e_mtu(hw_mtu, false, priv);
 }
 
 static int mlx5e_set_dev_port_mtu(struct net_device *netdev)
@@ -3476,6 +3517,45 @@ u32 mlx5e_choose_lro_timeout(struct mlx5_core_dev *mdev, u32 wanted_timeout)
 	return MLX5_CAP_ETH(mdev, lro_timer_supported_periods[i]);
 }
 
+int
+mlx5e_register_accel_ops(struct net_device *dev,
+			 struct mlx5e_accel_client_ops *ops)
+{
+	struct mlx5e_priv *priv = netdev_priv(dev);
+	struct mlx5e_accel_client_ops *accel_client_ops;
+
+	WARN_ON(!ops->mtu_handler || !ops->tx_handler || !ops->rx_handler);
+
+	rcu_read_lock();
+	accel_client_ops = rcu_dereference(priv->accel_client_ops);
+	rcu_read_unlock();
+	if (accel_client_ops != &accel_ops_default) {
+		pr_err("mlx5e_register_accel_ops(): Error registering client_ops over non-default pointer\n");
+		return -EACCES;
+	}
+	rcu_assign_pointer(priv->accel_client_ops, ops);
+
+	rtnl_lock();
+	dev->netdev_ops->ndo_change_mtu(dev, dev->mtu);
+	rtnl_unlock();
+
+	return 0;
+}
+EXPORT_SYMBOL(mlx5e_register_accel_ops);
+
+void mlx5e_unregister_accel_ops(struct net_device *dev)
+{
+	struct mlx5e_priv *priv = netdev_priv(dev);
+
+	rcu_assign_pointer(priv->accel_client_ops, &accel_ops_default);
+	synchronize_rcu();
+
+	rtnl_lock();
+	dev->netdev_ops->ndo_change_mtu(dev, dev->mtu);
+	rtnl_unlock();
+}
+EXPORT_SYMBOL(mlx5e_unregister_accel_ops);
+
 static void mlx5e_build_nic_netdev_priv(struct mlx5_core_dev *mdev,
 					struct net_device *netdev,
 					const struct mlx5e_profile *profile,
@@ -3551,8 +3631,7 @@ static void mlx5e_build_nic_netdev_priv(struct mlx5_core_dev *mdev,
 	INIT_WORK(&priv->tx_timeout_work, mlx5e_tx_timeout_work);
 	INIT_DELAYED_WORK(&priv->update_stats_work, mlx5e_update_stats_work);
 
-	priv->tx_handler = NULL;
-	priv->rx_handler = NULL;
+	rcu_assign_pointer(priv->accel_client_ops, &accel_ops_default);
 }
 
 static void mlx5e_set_netdev_dev_addr(struct net_device *netdev)
@@ -4074,10 +4153,17 @@ void mlx5e_destroy_netdev(struct mlx5_core_dev *mdev, struct mlx5e_priv *priv)
 {
 	const struct mlx5e_profile *profile = priv->profile;
 	struct net_device *netdev = priv->netdev;
+	struct mlx5e_accel_client_ops *accel_client_ops;
 
 	destroy_workqueue(priv->wq);
 	if (profile->cleanup)
 		profile->cleanup(priv);
+
+	rcu_read_lock();
+	accel_client_ops = rcu_dereference(priv->accel_client_ops);
+	rcu_read_unlock();
+	WARN_ON(accel_client_ops != &accel_ops_default);
+
 	free_netdev(netdev);
 }
 

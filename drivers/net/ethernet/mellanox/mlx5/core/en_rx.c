@@ -587,25 +587,6 @@ csum_none:
 	rq->stats.csum_none++;
 }
 
-int mlx5e_register_rx_handler(struct net_device *dev,
-		struct sk_buff* (*rx_handler)(struct sk_buff *skb)) {
-	struct mlx5e_priv *priv = netdev_priv(dev);
-
-	rcu_assign_pointer(priv->rx_handler, rx_handler);
-	return 0;
-}
-EXPORT_SYMBOL(mlx5e_register_rx_handler);
-
-int mlx5e_unregister_rx_handler(struct net_device *dev)
-{
-	struct mlx5e_priv *priv = netdev_priv(dev);
-	rcu_assign_pointer(priv->rx_handler, NULL);
-	synchronize_rcu();
-
-	return 0;
-}
-EXPORT_SYMBOL(mlx5e_unregister_rx_handler);
-
 static inline void mlx5e_build_rx_skb(struct mlx5_cqe64 *cqe,
 				      u32 cqe_bcnt,
 				      struct mlx5e_rq *rq,
@@ -646,20 +627,18 @@ static inline void mlx5e_complete_rx_cqe(struct mlx5e_rq *rq,
 					 u32 cqe_bcnt,
 					 struct sk_buff *skb)
 {
-	struct sk_buff* (*rx_handler)(struct sk_buff *skb);
+	struct mlx5e_accel_client_ops *accel_client_ops;
 
 	rq->stats.packets++;
 	rq->stats.bytes += cqe_bcnt;
 	mlx5e_build_rx_skb(cqe, cqe_bcnt, rq, skb);
 
 	rcu_read_lock();
-	rx_handler = rcu_dereference(rq->priv->rx_handler);
-	if (rx_handler) {
-		skb = rx_handler(skb);
-		if (!skb) {
-			rcu_read_unlock();
-			return;
-		}
+	accel_client_ops = rcu_dereference(rq->priv->accel_client_ops);
+	skb = accel_client_ops->rx_handler(skb);
+	if (!skb) {
+		rcu_read_unlock();
+		return;
 	}
 	rcu_read_unlock();
 }

@@ -34,11 +34,16 @@
 #ifndef MLX5_EN_DRIVER_H
 #define MLX5_EN_DRIVER_H
 
-int mlx5e_register_rx_handler(struct net_device *dev,
-		struct sk_buff* (*rx_handler)(struct sk_buff *skb));
-int mlx5e_unregister_rx_handler(struct net_device *dev);
-int mlx5e_register_tx_handler(struct net_device *dev,
-		struct sk_buff* (*tx_handler)(struct sk_buff *skb));
-int mlx5e_unregister_tx_handler(struct net_device *dev);
 
+struct mlx5e_accel_client_ops {
+	struct sk_buff  *(*rx_handler)(struct sk_buff *skb);
+	struct sk_buff  *(*tx_handler)(struct sk_buff *skb);
+	u16              (*mtu_handler)(u16 mtu, bool hw_sw_);
+
+};
+
+int
+mlx5e_register_accel_ops(struct net_device *netdev,
+			struct mlx5e_accel_client_ops *client_ops);
+void mlx5e_unregister_accel_ops(struct net_device *netdev);
 #endif /* MLX5_EN_DRIVER_H */
