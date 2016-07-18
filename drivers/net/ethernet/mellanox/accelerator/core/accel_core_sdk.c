@@ -98,6 +98,26 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 }
 EXPORT_SYMBOL(mlx_accel_core_client_unregister);
 
+int
+mlx_accel_core_client_ops_register(struct net_device *netdev,
+				   struct mlx5e_accel_client_ops *client_ops)
+{
+	int ret = 0;
+
+	ret = mlx5e_register_accel_ops(netdev, client_ops);
+	if (ret)
+		pr_err("mlx_ipsec_add_one(): Got error while registering client_ops %d\n",
+		       ret);
+	return ret;
+}
+EXPORT_SYMBOL(mlx_accel_core_client_ops_register);
+
+void mlx_accel_core_client_ops_unregister(struct net_device *netdev)
+{
+	mlx5e_unregister_accel_ops(netdev);
+}
+EXPORT_SYMBOL(mlx_accel_core_client_ops_unregister);
+
 struct mlx_accel_core_conn *
 mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
 		struct mlx_accel_core_conn_init_attr *conn_init_attr)
@@ -121,7 +141,7 @@ EXPORT_SYMBOL(mlx_accel_core_conn_destroy);
 int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 {
 	pr_info("mlx_accel_core_connect called for %s\n",
-			conn->accel_device->name);
+		conn->accel_device->name);
 
 	return mlx_accel_core_rdma_connect(conn);
 }

@@ -36,6 +36,7 @@
 
 #include <rdma/ib_verbs.h>
 #include <linux/mlx5/driver.h>
+#include <linux/mlx5/en_driver.h>
 #include <linux/types.h>
 #include <linux/list.h>
 #include <linux/dma-direction.h>
@@ -142,6 +143,9 @@ struct mlx_accel_core_conn {
 
 void mlx_accel_core_client_register(struct mlx_accel_core_client *client);
 void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client);
+int mlx_accel_core_client_ops_register(struct net_device *netdev,
+				       struct mlx5e_accel_client_ops *ops);
+void mlx_accel_core_client_ops_unregister(struct net_device *netdev);
 
 struct mlx_accel_core_conn *
 mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
