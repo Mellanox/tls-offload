@@ -43,6 +43,9 @@ static int mlx_xfrm_add_state(struct xfrm_state *x);
 static void mlx_xfrm_del_state(struct xfrm_state *x);
 static void mlx_xfrm_free_state(struct xfrm_state *x);
 static int mlx_ipsec_dev_crypto(struct sk_buff *skb);
+static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb);
+static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb);
+static u16             mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw);
 
 static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_state_add	= mlx_xfrm_add_state,
@@ -51,6 +54,12 @@ static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_encap		= xfrm_dev_encap,
 	.xdo_dev_prepare	= xfrm_dev_prepare,
 	.xdo_dev_crypto		= mlx_ipsec_dev_crypto,
+};
+
+static struct mlx5e_accel_client_ops mlx_ipsec_client_ops = {
+	.rx_handler   = mlx_ipsec_rx_handler,
+	.tx_handler   = mlx_ipsec_tx_handler,
+	.mtu_handler  = mlx_ipsec_mtu_handler,
 };
 
 /* must hold mlx_ipsec_mutex to call this function */
@@ -310,6 +319,16 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 	return 0;
 }
 
+static u16 mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw)
+{
+	u16 mtu_diff = sizeof(struct pet) + sizeof(struct dummy_dword);
+
+	if (is_sw2hw)
+		return mtu + mtu_diff;
+	else
+		return mtu - mtu_diff;
+}
+
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 {
 	struct xfrm_state *x;
@@ -453,6 +472,7 @@ int mlx_ipsec_netdev_event(struct notifier_block *this,
 		pr_debug("mlx_ipsec_netdev_event: Failed to find ipsec device for net device\n");
 		goto unlock;
 	}
+	mlx_accel_core_client_ops_unregister(netdev);
 	mlx_ipsec_free(accel_dev);
 
 unlock:
@@ -508,16 +528,11 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	}
 	dev->netdev = netdev;
 
-	ret = mlx5e_register_rx_handler(netdev, mlx_ipsec_rx_handler);
+	ret = mlx_accel_core_client_ops_register(netdev, &mlx_ipsec_client_ops);
 	if (ret) {
-		pr_err("mlx_ipsec_add_one(): Got error while registering RX handler %d\n", ret);
+		pr_err("mlx_ipsec_add_one(): Failed to register client ops %d\n",
+		       ret);
 		goto err_netdev;
-	}
-
-	ret = mlx5e_register_tx_handler(netdev, mlx_ipsec_tx_handler);
-	if (ret) {
-		pr_err("mlx_ipsec_add_one(): Got error while registering TX handler %d\n", ret);
-		goto err_rx_register;
 	}
 
 	ret = ipsec_sysfs_init_and_add(&dev->kobj,
@@ -526,7 +541,7 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 			"accel_dev");
 	if (ret) {
 		pr_err("mlx_ipsec_add_one(): Got error from kobject_init_and_add %d\n", ret);
-		goto err_tx_register;
+		goto err_ops_register;
 	}
 
 	mutex_lock(&mlx_ipsec_mutex);
@@ -543,10 +558,8 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	mlx_ipsec_clear_bypass(dev);
 	goto out;
 
-err_tx_register:
-	mlx5e_unregister_tx_handler(netdev);
-err_rx_register:
-	mlx5e_unregister_rx_handler(netdev);
+err_ops_register:
+	mlx_accel_core_client_ops_unregister(netdev);
 err_netdev:
 	dev_put(netdev);
 err_conn:
@@ -573,8 +586,7 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 			dev->netdev->wanted_features &= ~NETIF_F_HW_ESP;
 			netdev = dev->netdev;
 			mlx_accel_core_conn_destroy(dev->conn);
-			mlx5e_unregister_rx_handler(dev->netdev);
-			mlx5e_unregister_tx_handler(dev->netdev);
+			mlx_accel_core_client_ops_unregister(netdev);
 			mlx_ipsec_free(dev);
 			break;
 		}
