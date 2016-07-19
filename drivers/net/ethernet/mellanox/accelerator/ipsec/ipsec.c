@@ -311,8 +311,8 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 
 	if (skb->len > path_mtu) {
 		/* This packet is about to be IP-fragmented */
-		pr_warn("Skipping offload of %u-bytes packet on path mtu %u\n",
-			skb->len, path_mtu);
+		pr_debug("Skipping offload of %u-bytes packet on path mtu %u\n",
+			 skb->len, path_mtu);
 		return 0;
 	}
 
