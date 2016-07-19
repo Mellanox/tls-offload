@@ -407,17 +407,79 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 
-static void mlx_accel_hw_dev_event_one(struct mlx5_core_dev *mdev,
-		void *context, enum mlx5_dev_event event, unsigned long param)
+static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
+				 u8 syndrome)
 {
-	/*
-	 * [AY]: TODO: I don't think we need to something with the event,
-	 * we will get it throw ibdev or throw netdev
-	 */
-	pr_debug("mlx_accel_hw_dev_event_one called for %s with %d\n",
-			mdev->priv.name, event);
+	switch (syndrome) {
+	case MLX5_FPGA_ERROR_EVENT_SYNDROME_CORRUPTED_DDR:
+		dev_warn(&accel_device->hw_dev->pdev->dev,
+			 "FPGA Error: Corrupted DDR\n");
+		break;
+	case MLX5_FPGA_ERROR_EVENT_SYNDROME_FLASH_TIMEOUT:
+		dev_warn(&accel_device->hw_dev->pdev->dev,
+			 "FPGA Error: Flash Timeout\n");
+		break;
+	case MLX5_FPGA_ERROR_EVENT_SYNDROME_INTERNAL_LINK_ERROR:
+		dev_warn(&accel_device->hw_dev->pdev->dev,
+			 "FPGA Error: Internal Link Error\n");
+		break;
+	default:
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Unknown FPGA Error syndrome %u\n", syndrome);
+		break;
+	}
 }
 
+static void mlx_accel_fpga_qp_error(struct mlx_accel_core_device *accel_device,
+				    u8 syndrome, u32 fpga_qpn)
+{
+	switch (syndrome) {
+	case MLX5_FPGA_QP_ERROR_EVENT_SYNDROME_RETRY_COUNTER_EXPIRED:
+		dev_warn(&accel_device->ib_dev->dev,
+			 "FPGA Error on QP %u: Retry counter expired\n",
+			 fpga_qpn);
+		break;
+	case MLX5_FPGA_QP_ERROR_EVENT_SYNDROME_RNR_EXPIRED:
+		dev_warn(&accel_device->ib_dev->dev,
+			 "FPGA Error on QP %u: RnR Expired\n",
+			 fpga_qpn);
+		break;
+	default:
+		dev_err(&accel_device->ib_dev->dev,
+			"Unknown FPGA Error on QP %u syndrome %u\n",
+			fpga_qpn, syndrome);
+		break;
+	}
+}
+
+static void mlx_accel_hw_dev_event_one(struct mlx5_core_dev *mdev,
+				       void *context, enum mlx5_dev_event event,
+				       unsigned long param)
+{
+	struct mlx_accel_core_device *accel_device =
+			(struct mlx_accel_core_device *)context;
+
+	pr_debug("mlx_accel_hw_dev_event_one called for %s with %d\n",
+		  accel_device->name, event);
+
+	switch (event) {
+	case MLX5_DEV_EVENT_FPGA_ERROR:
+		mlx_accel_fpga_error(accel_device,
+				     MLX5_GET(fpga_error_event,
+					      (void *)param, syndrome));
+		break;
+	case MLX5_DEV_EVENT_FPGA_QP_ERROR:
+		mlx_accel_fpga_qp_error(accel_device,
+					MLX5_GET(fpga_qp_error_event,
+						 (void *)param, syndrome),
+					MLX5_GET(fpga_qp_error_event,
+						 (void *)param, fpga_qpn));
+		break;
+
+	default:
+		break;
+	}
+}
 
 static struct ib_client mlx_accel_ib_client = {
 		.name   = "mlx_accel_core",
