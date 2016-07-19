@@ -52,7 +52,7 @@ void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 	mutex_lock(&mlx_accel_core_mutex);
 
 	list_for_each_entry(accel_device, &mlx_accel_core_devices, list)
-		if (accel_device->ib_dev && accel_device->hw_dev)
+		if (accel_device->core_conn)
 			mlx_accel_client_context_add(accel_device, client);
 
 	list_add_tail(&client->list, &mlx_accel_core_clients);
