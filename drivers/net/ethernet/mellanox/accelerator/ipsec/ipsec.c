@@ -121,6 +121,47 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 	unsigned long flags;
 	int res;
 
+	if (x->props.mode != XFRM_MODE_TUNNEL) {
+		dev_info(&netdev->dev, "Only tunnel xfrm state may be offloaded\n");
+		return -EINVAL;
+	}
+	if (x->props.aalgo != SADB_AALG_NONE) {
+		dev_info(&netdev->dev, "Cannot offload authenticated xfrm states\n");
+		return -EINVAL;
+	}
+	if (x->props.ealgo != SADB_X_EALG_AES_GCM_ICV16) {
+		dev_info(&netdev->dev, "Only AES-GCM-ICV16 xfrm state may be offloaded\n");
+		return -EINVAL;
+	}
+	if (x->props.calgo != SADB_X_CALG_NONE) {
+		dev_info(&netdev->dev, "Cannot offload compressed xfrm states\n");
+		return -EINVAL;
+	}
+	if (x->props.flags != 0) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states with flags\n");
+		return -EINVAL;
+	}
+	if (x->props.family != AF_INET) {
+		dev_info(&netdev->dev, "Only IPv4 xfrm state may be offloaded\n");
+		return -EINVAL;
+	}
+	if (x->props.extra_flags != 0) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states with extra flags\n");
+		return -EINVAL;
+	}
+	if (!x->aead) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states without aead\n");
+		return -EINVAL;
+	}
+	if (x->aead->alg_icv_len != 128) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states with AEAD ICV length other than 128bit\n");
+		return -EINVAL;
+	}
+	if ((x->aead->alg_key_len != 128 + 32) &&
+	    (x->aead->alg_key_len != 256 + 32)) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states with AEAD key length other than 128/256 bit\n");
+		return -EINVAL;
+	}
 	pr_debug("add_sa(): key_len %d\n",
 			(x->aead->alg_key_len + 7) / 8 - 4);
 
