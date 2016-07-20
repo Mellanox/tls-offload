@@ -129,10 +129,28 @@ static u16 mlx5e_accel_mtu_handler(u16 mtu, bool is_sw2hw)
 	return mtu;
 }
 
+static int mlx5e_accel_get_count(struct net_device *netdev)
+{
+	return 0;
+}
+
+static int mlx5e_accel_get_strings(struct net_device *netdev, uint8_t *data)
+{
+	return 0;
+}
+
+static int mlx5e_accel_get_stats(struct net_device *netdev, u64 *data)
+{
+	return 0;
+}
+
 static struct mlx5e_accel_client_ops accel_ops_default = {
 	.rx_handler  = mlx5e_accel_rx_handler,
 	.tx_handler  = mlx5e_accel_tx_handler,
 	.mtu_handler = mlx5e_accel_mtu_handler,
+	.get_count   = mlx5e_accel_get_count,
+	.get_strings = mlx5e_accel_get_strings,
+	.get_stats   = mlx5e_accel_get_stats,
 };
 
 #define MLX5E_HW2SW_MTU(hwmtu) (hwmtu - (ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN))
@@ -3525,6 +3543,7 @@ mlx5e_register_accel_ops(struct net_device *dev,
 	struct mlx5e_accel_client_ops *accel_client_ops;
 
 	WARN_ON(!ops->mtu_handler || !ops->tx_handler || !ops->rx_handler);
+	WARN_ON(!ops->get_count || !ops->get_strings || !ops->get_stats);
 
 	rcu_read_lock();
 	accel_client_ops = rcu_dereference(priv->accel_client_ops);

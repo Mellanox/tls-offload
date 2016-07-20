@@ -176,8 +176,8 @@ static int mlx5e_get_sset_count(struct net_device *dev, int sset)
 		       MLX5E_NUM_SQ_STATS(priv) +
 		       MLX5E_NUM_PFC_COUNTERS(priv) +
 		       ARRAY_SIZE(mlx5e_pme_status_desc) +
-		       ARRAY_SIZE(mlx5e_pme_error_desc);
-
+		       ARRAY_SIZE(mlx5e_pme_error_desc) +
+		       priv->accel_client_ops->get_count(dev);
 	case ETH_SS_PRIV_FLAGS:
 		return ARRAY_SIZE(mlx5e_priv_flags);
 	case ETH_SS_TEST:
@@ -273,6 +273,10 @@ static void mlx5e_fill_stats_strings(struct mlx5e_priv *priv, uint8_t *data)
 				sprintf(data + (idx++) * ETH_GSTRING_LEN,
 					sq_stats_desc[j].format,
 					priv->channeltc_to_txq_map[i][tc]);
+
+	/* Accelerator counters */
+	idx += priv->accel_client_ops->get_strings(priv->netdev, data +
+						   idx * ETH_GSTRING_LEN);
 }
 
 static void mlx5e_get_strings(struct net_device *dev,
@@ -393,6 +397,9 @@ static void mlx5e_get_ethtool_stats(struct net_device *dev,
 			for (j = 0; j < NUM_SQ_STATS; j++)
 				data[idx++] = MLX5E_READ_CTR64_CPU(&priv->channel[i]->sq[tc].stats,
 								   sq_stats_desc, j);
+
+	/* Accelerator counters */
+	idx += priv->accel_client_ops->get_stats(dev, data + idx);
 }
 
 static u32 mlx5e_rx_wqes_to_packets(struct mlx5e_priv *priv, int rq_wq_type,
