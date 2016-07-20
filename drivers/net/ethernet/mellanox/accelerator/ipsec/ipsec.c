@@ -84,7 +84,7 @@ struct mlx_ipsec_dev *mlx_ipsec_find_dev_by_netdev(struct net_device *netdev)
 	return dev;
 }
 
-static void mlx_ipsec_clear_bypass(struct mlx_ipsec_dev *dev)
+static void mlx_ipsec_set_clear_bypass(struct mlx_ipsec_dev *dev, bool set)
 {
 	int res;
 	u32 dw;
@@ -97,7 +97,7 @@ static void mlx_ipsec_clear_bypass(struct mlx_ipsec_dev *dev)
 		return;
 	}
 
-	dw &= ~IPSEC_BYPASS_BIT;
+	dw = set ? dw | IPSEC_BYPASS_BIT : dw & ~IPSEC_BYPASS_BIT;
 	res = mlx_accel_core_mem_write(dev->accel_device, 4,
 				       IPSEC_BYPASS_ADDR, &dw,
 				       MLX_ACCEL_ACCESS_TYPE_I2C);
@@ -613,7 +613,7 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	netdev_change_features(dev->netdev);
 	rtnl_unlock();
 
-	mlx_ipsec_clear_bypass(dev);
+	mlx_ipsec_set_clear_bypass(dev, false);
 	goto out;
 
 err_ops_register:
@@ -644,6 +644,7 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 			dev->netdev->wanted_features &= ~NETIF_F_HW_ESP;
 			netdev = dev->netdev;
 			mlx_accel_core_conn_destroy(dev->conn);
+			mlx_ipsec_set_clear_bypass(dev, true);
 			mlx_accel_core_client_ops_unregister(netdev);
 			mlx_ipsec_free(dev);
 			break;
