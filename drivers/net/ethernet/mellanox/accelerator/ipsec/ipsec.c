@@ -51,8 +51,6 @@ static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_state_add	= mlx_xfrm_add_state,
 	.xdo_dev_state_delete	= mlx_xfrm_del_state,
 	.xdo_dev_state_free = mlx_xfrm_free_state,
-	.xdo_dev_encap		= xfrm_dev_encap,
-	.xdo_dev_prepare	= xfrm_dev_prepare,
 	.xdo_dev_crypto		= mlx_ipsec_dev_crypto,
 };
 
@@ -346,14 +344,15 @@ static int insert_pet(struct sk_buff *skb)
 static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
-	struct xfrm_state *x = dst->xfrm;
 
 	u32 path_mtu = dst_mtu(dst->path);
 
-	if (skb->len > path_mtu) {
+	if ((!skb_is_gso(skb) && skb->len > path_mtu) ||
+	    (skb_is_gso(skb) && skb_gso_network_seglen(skb) >
+	     ip_skb_dst_mtu(skb->sk, skb))) {
 		/* This packet is about to be IP-fragmented */
-		pr_debug("Skipping offload of %u-bytes packet on path mtu %u\n",
-			 skb->len, path_mtu);
+		pr_info_ratelimited("Skipping offload of %u-bytes packet on path mtu %u\n",
+				    skb->len, path_mtu);
 		return 0;
 	}
 
