@@ -568,6 +568,8 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	}
 	dev->netdev = netdev;
 
+	netif_keep_dst(dev->netdev);
+
 	ret = mlx_accel_core_client_ops_register(netdev, &mlx_ipsec_client_ops);
 	if (ret) {
 		pr_err("mlx_ipsec_add_one(): Failed to register client ops %d\n",
