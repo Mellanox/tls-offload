@@ -356,7 +356,7 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 		return 0;
 	}
 
-	return 0;
+	return 1;
 }
 
 static u16 mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw)
