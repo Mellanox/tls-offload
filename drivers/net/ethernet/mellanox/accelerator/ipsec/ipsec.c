@@ -345,15 +345,23 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 {
 	struct dst_entry *dst = skb_dst(skb);
 
-	u32 path_mtu = dst_mtu(dst->path);
-
-	if ((!skb_is_gso(skb) && skb->len > path_mtu) ||
-	    (skb_is_gso(skb) && skb_gso_network_seglen(skb) >
-	     ip_skb_dst_mtu(skb->sk, skb))) {
-		/* This packet is about to be IP-fragmented */
-		pr_info_ratelimited("Skipping offload of %u-bytes packet on path mtu %u\n",
-				    skb->len, path_mtu);
-		return 0;
+	if (skb_is_gso(skb)) {
+		if (skb_gso_network_seglen(skb) >
+		    ip_skb_dst_mtu(skb->sk, skb)) {
+			/* This GSO packet is about to be IP-fragmented */
+			pr_info_ratelimited("Skipping offload of %u-seglen GSO packet on path mtu %u\n",
+					    skb_gso_network_seglen(skb),
+					    ip_skb_dst_mtu(skb->sk, skb));
+			return 0;
+		}
+	} else {
+		if (skb->len > dst_mtu(dst->path)) {
+			/* This packet is about to be IP-fragmented */
+			pr_info_ratelimited("Skipping offload of %u-bytes packet on path mtu %u\n",
+					    skb->len, dst_mtu(dst->path));
+			return 0;
+		}
+		skb->sp->flags |= SKB_CRYPTO_OFFLOAD;
 	}
 
 	return 1;
@@ -377,12 +385,20 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 	if (!skb->sp)
 		goto out;
 
-	if (skb->sp->len != 1)
+	if (!(skb->sp->flags & SKB_CRYPTO_OFFLOAD))
 		goto out;
 
-	x = skb->sp->xvec[0];
-	if (!x)
+	if (skb->sp->len != 1) {
+		pr_warn_ratelimited("Cannot offload crypto for a bundle of %u XFRM states\n",
+				    skb->sp->len);
 		goto out;
+	}
+
+	x = skb->sp->xvec[0];
+	if (!x) {
+		pr_warn_ratelimited("Crypto-offload packet has no xfrm_state\n");
+		goto out;
+	}
 
 	if (x->xso.offload_handle &&
 	    skb->protocol == htons(ETH_P_IP)) {
