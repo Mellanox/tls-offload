@@ -250,20 +250,12 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		 ntohs(((__be16 *)&core_conn_attr.local_gid)[7]));
 
 	accel_device->core_conn = mlx_accel_core_rdma_conn_create(accel_device,
-							     &core_conn_attr);
+							&core_conn_attr, true);
 	if (IS_ERR(accel_device->core_conn)) {
 		err = PTR_ERR(accel_device->core_conn);
 		pr_err("Failed to create core RC QP: %d\n", err);
 		accel_device->core_conn = NULL;
 		goto err_mr;
-	}
-
-	err = mlx5_fpga_create_qp(accel_device->hw_dev,
-				  &accel_device->core_conn->fpga_qpc,
-				  &accel_device->core_conn->fpga_qpn);
-	if (err) {
-		pr_err("Failed to create FPGA RC QP: %d\n", err);
-		goto err_core_conn;
 	}
 
 #ifdef DEBUG
@@ -281,23 +273,13 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	pr_debug("FPGA QPN is %u\n", accel_device->core_conn->fpga_qpn);
 #endif
 
-	accel_device->core_conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_ACTIVE;
-	err = mlx5_fpga_modify_qp(accel_device->hw_dev,
-				  accel_device->core_conn->fpga_qpn,
-				  MLX5_FPGA_QPC_STATE,
-				  &accel_device->core_conn->fpga_qpc);
-	if (err) {
-		pr_err("Failed to activate FPGA RC QP: %d\n", err);
-		goto err_fpga_qp;
-	}
-
 #ifdef QP_SIMULATOR
 	pr_notice("**** QP Simulator mode; Waiting for QP setup ****\n");
 #else
 	err = mlx_accel_core_rdma_connect(accel_device->core_conn);
 	if (err) {
 		pr_err("Failed to connect core RC QP to FPGA QP: %d\n", err);
-		goto err_fpga_qp;
+		goto err_core_conn;
 	}
 #endif
 
@@ -306,9 +288,6 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 
 	goto out;
 
-err_fpga_qp:
-	mlx5_fpga_destroy_qp(accel_device->hw_dev,
-			     accel_device->core_conn->fpga_qpn);
 err_core_conn:
 	mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
 	accel_device->core_conn = NULL;
@@ -339,8 +318,6 @@ static void mlx_accel_device_deinit(struct mlx_accel_core_device *accel_device)
 			mlx_accel_client_context_del(client_context);
 		}
 
-		mlx5_fpga_destroy_qp(accel_device->hw_dev,
-				     accel_device->core_conn->fpga_qpn);
 		mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
 		accel_device->core_conn = NULL;
 		err = ib_dereg_mr(accel_device->mr);

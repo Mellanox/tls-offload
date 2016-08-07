@@ -54,7 +54,7 @@ void mlx_accel_client_context_del(struct mlx_accel_client_data *context);
 struct mlx_accel_core_conn *
 mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 				struct mlx_accel_core_conn_init_attr
-				*conn_init_attr);
+				*conn_init_attr, bool is_shell_conn);
 void mlx_accel_core_rdma_conn_destroy(struct mlx_accel_core_conn *conn);
 
 int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,

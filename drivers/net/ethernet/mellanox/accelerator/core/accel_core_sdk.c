@@ -125,7 +125,8 @@ mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
 	pr_info("mlx_accel_core_conn_create called for %s\n",
 		accel_device->name);
 
-	return mlx_accel_core_rdma_conn_create(accel_device, conn_init_attr);
+	return mlx_accel_core_rdma_conn_create(accel_device,
+					conn_init_attr, false);
 }
 EXPORT_SYMBOL(mlx_accel_core_conn_create);
 

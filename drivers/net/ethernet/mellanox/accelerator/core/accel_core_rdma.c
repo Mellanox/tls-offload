@@ -34,7 +34,11 @@
 #include "accel_core.h"
 #include <linux/etherdevice.h>
 #include <linux/mlx5_ib/driver.h>
+#include <linux/mlx5/driver.h>
 #include <rdma/ib_mad.h>
+
+static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn);
+static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn);
 
 static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 {
@@ -344,7 +348,7 @@ out:
 struct mlx_accel_core_conn *
 mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 				struct mlx_accel_core_conn_init_attr *
-				conn_init_attr)
+				conn_init_attr, bool is_shell_conn)
 {
 	int err;
 	struct mlx_accel_core_conn *ret = NULL;
@@ -395,7 +399,8 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	}
 
 	conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_INIT;
-	conn->fpga_qpc.qp_type = MLX5_FPGA_QP_TYPE_SHELL;
+	conn->fpga_qpc.qp_type = is_shell_conn ? MLX5_FPGA_QP_TYPE_SHELL :
+			MLX5_FPGA_QP_TYPE_SANDBOX;
 	conn->fpga_qpc.st = MLX5_FPGA_QP_SERVICE_TYPE_RC;
 	conn->fpga_qpc.ether_type = ETH_P_8021Q;
 	conn->fpga_qpc.pkey = IB_DEFAULT_PKEY_FULL;
@@ -410,9 +415,19 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	memcpy(&conn->fpga_qpc.remote_ip, &conn_init_attr->local_gid,
 	       sizeof(conn->fpga_qpc.remote_ip));
 
+	err = mlx5_fpga_create_qp(accel_device->hw_dev,
+				  &conn->fpga_qpc,
+				  &conn->fpga_qpn);
+	if (err) {
+		pr_err("Failed to create FPGA RC QP: %d\n", err);
+		ret = ERR_PTR(err);
+		goto err_create_res;
+	}
 	ret = conn;
 	goto out;
 
+err_create_res:
+	mlx_accel_core_rdma_destroy_res(conn);
 err_rsvd_gid:
 	mlx5_ib_reserved_gid_del(accel_device->ib_dev, accel_device->port,
 				 conn->sgid_index);
@@ -475,6 +490,7 @@ out:
 static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn)
 {
 	int err = 0;
+
 	mlx_accel_core_rdma_close_qp(conn);
 	err = ib_destroy_cq(conn->cq);
 	if (err)
@@ -483,6 +499,7 @@ static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn)
 
 void mlx_accel_core_rdma_conn_destroy(struct mlx_accel_core_conn *conn)
 {
+	mlx5_fpga_destroy_qp(conn->accel_device->hw_dev, conn->fpga_qpn);
 	mlx_accel_core_rdma_destroy_res(conn);
 	mlx5_ib_reserved_gid_del(conn->accel_device->ib_dev, conn->port_num,
 				 conn->sgid_index);
@@ -574,16 +591,27 @@ static inline int mlx_accel_core_rdma_rts_qp(struct mlx_accel_core_conn *conn)
 int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn)
 {
 	int rc = 0;
+
+	conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_ACTIVE;
+	rc = mlx5_fpga_modify_qp(conn->accel_device->hw_dev,
+				 conn->fpga_qpn,
+				 MLX5_FPGA_QPC_STATE,
+				 &conn->fpga_qpc);
+	if (rc) {
+		pr_warn("Failed to activate FPGA RC QP: %d\n", rc);
+		goto err;
+	}
+
 	rc = mlx_accel_core_rdma_reset_qp(conn);
 	if (rc) {
 		pr_warn("Failed to change QP state to reset\n");
-		return rc;
+		goto err_fpga_qp;
 	}
 
 	rc = mlx_accel_core_rdma_init_qp(conn);
 	if (rc) {
 		pr_warn("Failed to modify QP from RESET to INIT\n");
-		return rc;
+		goto err_fpga_qp;
 	}
 
 	while (!mlx_accel_core_rdma_post_recv(conn))
@@ -592,14 +620,22 @@ int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn)
 	rc = mlx_accel_core_rdma_rtr_qp(conn);
 	if (rc) {
 		pr_warn("Failed to change QP state from INIT to RTR\n");
-		return rc;
+		goto err_fpga_qp;
 	}
 
 	rc = mlx_accel_core_rdma_rts_qp(conn);
 	if (rc) {
 		pr_warn("Failed to change QP state from RTR to RTS\n");
-		return rc;
+		goto err_fpga_qp;
 	}
+	goto err;
 
+err_fpga_qp:
+	conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_INIT;
+	if (mlx5_fpga_modify_qp(conn->accel_device->hw_dev,
+				conn->fpga_qpn, MLX5_FPGA_QPC_STATE,
+				&conn->fpga_qpc))
+		pr_warn("Failed to revert FPGA QP to INIT\n");
+err:
 	return rc;
 }
