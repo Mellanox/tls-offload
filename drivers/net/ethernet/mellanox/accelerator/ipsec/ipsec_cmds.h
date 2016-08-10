@@ -127,6 +127,9 @@ enum auth_identifier {
 	IPSEC_OFFLOAD_AUTH_AES_GCM_256	= 2,
 };
 
+#define IPSEC_BYPASS_ADDR	0x0
+#define IPSEC_BYPASS_BIT	0x400000
+
 #ifdef MLX_IPSEC_SADB_RDMA
 
 /* [BP]: TODO - There should be another command for IPv6 */
@@ -152,8 +155,6 @@ struct sa_cmd_v4 {
 
 #define IPSEC_FLUSH_CACHE_ADDR	0x144
 #define IPSEC_FLUSH_CACHE_BIT	0x100
-#define IPSEC_BYPASS_ADDR	0x0
-#define IPSEC_BYPASS_BIT	0x200000
 #define SADB_SLOT_SIZE		0x80
 
 struct __attribute__((__packed__)) sadb_entry {
