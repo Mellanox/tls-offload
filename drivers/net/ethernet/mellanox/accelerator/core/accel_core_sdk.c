@@ -355,3 +355,29 @@ struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *device)
 	return device->ib_dev->ports_parent;
 }
 EXPORT_SYMBOL(mlx_accel_core_kobj);
+
+int mlx_accel_get_sbu_caps(struct mlx_accel_core_device *dev, int size,
+			   void *buf)
+{
+	u64 addr = MLX5_CAP64_FPGA(dev->hw_dev, sandbox_extended_caps_addr);
+	int cap_size = MLX5_CAP_FPGA(dev->hw_dev, sandbox_extended_caps_len);
+	int ret;
+
+	pr_debug("Reading %d bytes SBU caps from addr 0x%llx\n", size, addr);
+
+	if (cap_size < size) {
+		pr_err("get_sbu_caps: Requested Cap size 0x%8x is bigger than HW size 0x%8x",
+		       size, cap_size);
+		return -EINVAL;
+	}
+
+	ret = mlx_accel_core_mem_read(dev, size, addr, buf,
+				      MLX_ACCEL_ACCESS_TYPE_DONTCARE);
+	if (ret < 0)
+		dev_err(&dev->hw_dev->pdev->dev, "Failed read of SBU caps: %d\n",
+			ret);
+	else
+		ret = 0;
+	return ret;
+}
+EXPORT_SYMBOL(mlx_accel_get_sbu_caps);

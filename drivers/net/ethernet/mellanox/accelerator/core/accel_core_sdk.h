@@ -174,5 +174,6 @@ void *mlx_accel_core_client_data_get(struct mlx_accel_core_device *accel_device,
 				     struct mlx_accel_core_client *client);
 
 struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *accel_device);
-
+int mlx_accel_get_sbu_caps(struct mlx_accel_core_device *dev, int size,
+			   void *buf);
 #endif /* __MLX_ACCEL_CORE_SDK_H__ */

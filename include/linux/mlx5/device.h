@@ -869,6 +869,9 @@ enum {
 #define MLX5_CAP_FPGA(mdev, cap) \
 	MLX5_GET(fpga_cap, mdev->fpga_caps, cap)
 
+#define MLX5_CAP64_FPGA(mdev, cap) \
+	MLX5_GET64(fpga_cap, mdev->fpga_caps, cap)
+
 #define MLX5_CAP_FPGA_SHELL(mdev, cap) \
 	MLX5_GET(fpga_cap, mdev->fpga_caps, shell_caps.cap)
 
