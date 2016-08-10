@@ -43,6 +43,7 @@
 #include <linux/skbuff.h>
 #include <linux/hashtable.h>
 #include <linux/mlx5/en_driver.h>
+#include <linux/mlx5/device.h>
 #include <net/sock.h>
 #include <net/inet_common.h>
 #include <net/xfrm.h>
@@ -85,6 +86,7 @@ struct mlx_ipsec_dev {
 	spinlock_t sw_sa_id2xfrm_state_lock;
 	atomic_t next_sw_sa_id;
 	wait_queue_head_t wq;
+	u32 ipsec_caps[MLX5_ST_SZ_DW(ipsec_extended_cap)];
 };
 
 void mlx_ipsec_dev_release(struct kobject *kobj);
@@ -99,5 +101,8 @@ int mlx_xfrm_offload_input(struct xfrm_state *x, struct sk_buff **skb);
 int mlx_xfrm_offload_output(struct xfrm_state *x, struct sk_buff **skb);
 
 struct mlx_ipsec_dev *mlx_ipsec_find_dev_by_netdev(struct net_device *netdev);
+int mlx_ipsec_get_count(struct net_device *netdev);
+int mlx_ipsec_get_strings(struct net_device *netdev, uint8_t *data);
+int mlx_ipsec_get_stats(struct net_device *netdev, u64 *data);
 
 #endif	/* __IPSEC_H__ */

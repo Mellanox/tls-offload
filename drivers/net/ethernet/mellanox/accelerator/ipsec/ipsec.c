@@ -58,6 +58,9 @@ static struct mlx5e_accel_client_ops mlx_ipsec_client_ops = {
 	.rx_handler   = mlx_ipsec_rx_handler,
 	.tx_handler   = mlx_ipsec_tx_handler,
 	.mtu_handler  = mlx_ipsec_mtu_handler,
+	.get_count    = mlx_ipsec_get_count,
+	.get_strings  = mlx_ipsec_get_strings,
+	.get_stats    = mlx_ipsec_get_stats,
 };
 
 /* must hold mlx_ipsec_mutex to call this function */
@@ -540,17 +543,35 @@ out:
 int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 {
 	int ret = 0;
+	int i;
 	struct mlx_ipsec_dev *dev = NULL;
 	struct net_device *netdev = NULL;
 	struct mlx_accel_core_conn_init_attr init_attr = {0};
 
 	pr_debug("mlx_ipsec_add_one called for %s\n", accel_device->name);
 
+	if (MLX5_CAP_FPGA(accel_device->hw_dev, sandbox_product_id) !=
+		/* TODO: HW bug w/a; MLX5_FPGA_CAP_SANDBOX_PRODUCT_ID_IPSEC */
+		1) {
+		ret = -EINVAL;
+		goto out;
+	}
+
 	dev = kzalloc(sizeof(struct mlx_ipsec_dev), GFP_KERNEL);
 	if (!dev) {
 		ret = -ENOMEM;
 		goto out;
 	}
+
+	ret = mlx_accel_get_sbu_caps(accel_device, sizeof(dev->ipsec_caps),
+				     (void *)dev->ipsec_caps);
+	if (ret) {
+		pr_err("Failed to retrieve ipsec extended capabilities\n");
+		goto err_dev;
+	}
+	/*Need to reverse endianness to use MLX5_GET macros*/
+	for (i = 0; i < sizeof(dev->ipsec_caps) / 4; i++)
+		dev->ipsec_caps[i] = cpu_to_be32(dev->ipsec_caps[i]);
 
 	init_waitqueue_head(&dev->wq);
 	INIT_LIST_HEAD(&dev->accel_dev_list);
