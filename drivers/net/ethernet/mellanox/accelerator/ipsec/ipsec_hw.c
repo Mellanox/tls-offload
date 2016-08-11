@@ -33,6 +33,8 @@
 
 #include "ipsec_hw.h"
 #include <linux/inetdevice.h>
+#include <crypto/internal/geniv.h>
+#include <crypto/aead.h>
 
 #ifndef MLX_IPSEC_SADB_RDMA
 /* [IT]: TODO get rid of this work queue:
@@ -132,6 +134,10 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 	unsigned long sa_index;
 	u64 sa_addr;
 	int res;
+	struct crypto_aead *aead = (struct crypto_aead *)sa->x->data;
+	struct aead_geniv_ctx *geniv_ctx = (struct aead_geniv_ctx *)
+					   aead->base.__crt_ctx;
+	int ivsize = crypto_aead_ivsize(aead);
 
 	pr_debug("sa IP %08x SPI %08x\n", sa->x->id.daddr.a4, sa->x->id.spi);
 	sa_index = (ntohl(sa->x->id.daddr.a4) ^ ntohl(sa->x->id.spi)) & 0xFFFFF;
@@ -141,6 +147,7 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 
 	memset(&hw_entry, 0, sizeof(hw_entry));
 	memcpy(&hw_entry.key, sa->x->aead->alg_key, crypto_data_len);
+	memcpy(&hw_entry.salt_iv, geniv_ctx->salt, ivsize);
 	hw_entry.enable |= SADB_SA_VALID | SADB_SPI_EN;
 	hw_entry.sip = sa->x->props.saddr.a4;
 	hw_entry.sip_mask = inet_make_mask(sa->x->sel.prefixlen_s);

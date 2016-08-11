@@ -383,6 +383,9 @@ static u16 mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw)
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 {
 	struct xfrm_state *x;
+	int iv_offset;
+	__be64 seqno;
+
 	pr_debug("mlx_ipsec_tx_handler started\n");
 
 	if (!skb->sp)
@@ -410,6 +413,11 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 			kfree_skb(skb);
 			skb = NULL;
 		}
+		seqno = cpu_to_be64(XFRM_SKB_CB(skb)->seq.output.low +
+			    ((u64)XFRM_SKB_CB(skb)->seq.output.hi << 32));
+		iv_offset = skb->transport_header + sizeof(struct ip_esp_hdr)
+					- skb_headroom(skb);
+		skb_store_bits(skb, iv_offset, &seqno, 8);
 	}
 out:
 	return skb;
@@ -471,7 +479,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 		xos->status = CRYPTO_TUNNEL_ESP_AUTH_FAILED;
 		break;
 	default:
-		pr_warn("Unknown metadata syndrom\n");
+		pr_warn("Unknown metadata syndrom %d\n", pet.syndrome);
 		goto drop;
 	}
 	goto out;
