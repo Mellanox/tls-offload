@@ -36,10 +36,10 @@
 
 #define UNASSIGNED_SA_ID ((u32)~0)
 
-enum rcv_pet_syndrome {
+enum rcv_pet_syndrom {
 	/*PET_SYNDROME_DECRYPTED_WITH_DUMMY_IP	= 0x00,*/
-	PET_SYNDROME_DECRYPTED			= 0x01,
-	PET_SYNDROME_AUTH_FAILED		= 0x02
+	PET_SYNDROME_DECRYPTED			= 0x11,
+	PET_SYNDROME_AUTH_FAILED		= 0x12,
 };
 
 struct rcv_pet_content {
@@ -48,8 +48,10 @@ struct rcv_pet_content {
 } __packed;
 
 enum send_pet_syndrome {
-	PET_SYNDROME_OFFLOAD_REQUIRED		= 0,
-	PET_SYNDROME_OFFLOAD_WITH_LSO_REQUIRED	= 1
+	PET_SYNDROME_OFFLOAD_REQUIRED		= 0x8,
+	PET_SYNDROME_OFFLOAD_WITH_LSO_TCP_REQUIRED	= 0x9,
+	PET_SYNDROME_OFFLOAD_WITH_LSO_IPV4_REQUIRED	= 0xA,
+	PET_SYNDROME_OFFLOAD_WITH_LSO_IPV6_REQUIRED	= 0xB,
 };
 
 struct send_pet_content {
@@ -165,6 +167,7 @@ struct __attribute__((__packed__)) sadb_entry {
 	__be32 dip_mask;
 	__be32 spi;
 	__be32 salt;
+	u8 salt_iv[8];
 	__be32 sw_sa_handle;
 	__be16 sport;
 	__be16 dport;
