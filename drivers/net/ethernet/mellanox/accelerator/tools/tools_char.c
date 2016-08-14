@@ -58,7 +58,7 @@ static int tools_char_open(struct inode *inodep, struct file *filep)
 
 	context = kzalloc(sizeof(*context), GFP_KERNEL);
 	context->sb_dev = sb_dev;
-	context->access_type = MLX_ACCEL_ACCESS_TYPE_RDMA;
+	context->access_type = MLX_ACCEL_ACCESS_TYPE_DONTCARE;
 	filep->private_data = context;
 	atomic_inc(&sb_dev->open_count);
 	pr_debug("mlx tools %u char device opened %d times\n",
