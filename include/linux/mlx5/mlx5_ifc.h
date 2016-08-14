@@ -8662,9 +8662,7 @@ struct mlx5_ifc_ipsec_extended_cap_bits {
 	u8         reserved_1[0x10];
 	u8         number_of_ipsec_counters[0x10];
 
-	u8         ipsec_counters_start_addr[0x40];
-
-	u8         reserved_2[0x20];
+	u8         ipsec_counters_start_addr[0x20];
 };
 
 struct mlx5_ifc_ipsec_counters_bits {
