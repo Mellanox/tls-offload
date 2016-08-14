@@ -104,14 +104,17 @@ void mlx_accel_xfer_comp_trans(const struct mlx_accel_transaction *complete,
 /* Xfer state spin lock must be locked */
 static int mlx_accel_xfer_exec_more(struct xfer_state *xfer_state)
 {
-	u64 pos_addr;
+	u64 pos_addr, ddr_base;
 	u8 *pos_data;
 	size_t left, cur_size, page_size;
 	struct xfer_transaction *xfer_trans;
 	int ret = 0;
 	bool more;
 
-	page_size = 1 << MLX_ACCEL_TRANSACTION_SEND_PAGE_BITS;
+	ddr_base = mlx_accel_core_ddr_base_get(xfer_state->xfer->conn->
+					       accel_device);
+	page_size = (xfer_state->xfer->addr + xfer_state->pos < ddr_base) ?
+		    sizeof(u32) : (1 << MLX_ACCEL_TRANSACTION_SEND_PAGE_BITS);
 
 	do {
 		more = false;
@@ -182,10 +185,6 @@ int mlx_accel_xfer_exec(const struct mlx_accel_transaction *xfer)
 	u64 size = mlx_accel_core_ddr_size_get(xfer->conn->accel_device);
 	unsigned long flags;
 	bool done = false;
-
-	/* Cr-Space access must be a single transaction */
-	if (xfer->addr < base)
-		return mlx_accel_trans_exec(xfer);
 
 	if (xfer->addr + xfer->size > base + size) {
 		pr_warn("Transfer ends at %llx outside of DDR range %llx\n",

@@ -247,6 +247,10 @@ int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 {
 	int ret;
 
+	if (access_type == MLX_ACCEL_ACCESS_TYPE_DONTCARE)
+		access_type = dev->core_conn ? MLX_ACCEL_ACCESS_TYPE_RDMA :
+			      MLX_ACCEL_ACCESS_TYPE_I2C;
+
 	pr_debug("**** Reading %lu bytes at 0x%llx using %s\n", size, addr,
 		 access_type ? "RDMA" : "I2C");
 
@@ -278,6 +282,10 @@ int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 			     enum mlx_accel_access_type access_type)
 {
 	int ret;
+
+	if (access_type == MLX_ACCEL_ACCESS_TYPE_DONTCARE)
+		access_type = dev->core_conn ? MLX_ACCEL_ACCESS_TYPE_RDMA :
+			      MLX_ACCEL_ACCESS_TYPE_I2C;
 
 	pr_debug("**** Writing %lu bytes at 0x%llx using %s\n", size, addr,
 		 access_type ? "RDMA" : "I2C");
