@@ -91,7 +91,7 @@ static void mlx_ipsec_set_clear_bypass(struct mlx_ipsec_dev *dev, bool set)
 
 	res = mlx_accel_core_mem_read(dev->accel_device, 4,
 				      IPSEC_BYPASS_ADDR, &dw,
-				      MLX_ACCEL_ACCESS_TYPE_I2C);
+				      MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 	if (res != 4) {
 		pr_warn("IPSec bypass clear failed on read\n");
 		return;
@@ -100,7 +100,7 @@ static void mlx_ipsec_set_clear_bypass(struct mlx_ipsec_dev *dev, bool set)
 	dw = set ? dw | IPSEC_BYPASS_BIT : dw & ~IPSEC_BYPASS_BIT;
 	res = mlx_accel_core_mem_write(dev->accel_device, 4,
 				       IPSEC_BYPASS_ADDR, &dw,
-				       MLX_ACCEL_ACCESS_TYPE_I2C);
+				       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 	if (res != 4) {
 		pr_warn("IPSec bypass clear failed on write\n");
 		return;

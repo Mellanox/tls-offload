@@ -107,7 +107,7 @@ static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 
 	res = mlx_accel_core_mem_read(dev->accel_device, 4,
 				      IPSEC_FLUSH_CACHE_ADDR, &dw,
-				      MLX_ACCEL_ACCESS_TYPE_I2C);
+				      MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 	if (res != 4) {
 		pr_warn("IPSec cache flush failed on read\n");
 		return;
@@ -116,7 +116,7 @@ static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 	dw ^= IPSEC_FLUSH_CACHE_BIT;
 	res = mlx_accel_core_mem_write(dev->accel_device, 4,
 				       IPSEC_FLUSH_CACHE_ADDR, &dw,
-				       MLX_ACCEL_ACCESS_TYPE_I2C);
+				       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 	if (res != 4) {
 		pr_warn("IPSec cache flush failed on write\n");
 		return;
@@ -165,7 +165,7 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 
 	res = mlx_accel_core_mem_write(dev->accel_device, sizeof(hw_entry),
 				       sa_addr, &hw_entry,
-				       MLX_ACCEL_ACCESS_TYPE_I2C);
+				       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 	if (res != sizeof(hw_entry)) {
 		pr_warn("Writing SA to HW memory failed %d\n", res);
 		goto out;
@@ -206,7 +206,7 @@ static void mlx_xfrm_del_state_work(struct work_struct *work)
 		res = mlx_accel_core_mem_write(dev->accel_device,
 					       sizeof(hw_entry), sa_addr,
 					       &hw_entry,
-					       MLX_ACCEL_ACCESS_TYPE_I2C);
+					       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 		if (res != sizeof(hw_entry))
 			pr_warn("Deleting SA in HW memory failed %d\n", res);
 		mlx_ipsec_flush_cache(dev);
