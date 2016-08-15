@@ -197,7 +197,7 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 	}
 
 	sa_entry->status = ADD_SA_PENDING;
-	res = mlx_ipsec_hw_sadb_add(sa_entry, dev);
+	res = mlx_ipsec_hw_sadb_add(sa_entry);
 	if (res)
 		goto err_hash_rcu;
 

@@ -125,8 +125,7 @@ static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 	}
 }
 
-int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
-			  struct mlx_ipsec_dev *dev)
+int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 {
 	unsigned int key_len = (sa->x->aead->alg_key_len + 7) / 8;
 	unsigned int crypto_data_len = key_len - 4; /* 4 bytes salt at end */
@@ -141,7 +140,7 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 
 	pr_debug("sa IP %08x SPI %08x\n", sa->x->id.daddr.a4, sa->x->id.spi);
 	sa_index = (ntohl(sa->x->id.daddr.a4) ^ ntohl(sa->x->id.spi)) & 0xFFFFF;
-	sa_addr = mlx_accel_core_ddr_base_get(dev->accel_device) +
+	sa_addr = mlx_accel_core_ddr_base_get(sa->dev->accel_device) +
 		  (sa_index * SADB_SLOT_SIZE);
 	pr_debug("sa Index %lu Address %llx\n", sa_index, sa_addr);
 
@@ -170,7 +169,7 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 	if (sa->x->props.mode)
 		hw_entry.enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
 
-	res = mlx_accel_core_mem_write(dev->accel_device, sizeof(hw_entry),
+	res = mlx_accel_core_mem_write(sa->dev->accel_device, sizeof(hw_entry),
 				       sa_addr, &hw_entry,
 				       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 	if (res != sizeof(hw_entry)) {
@@ -178,7 +177,7 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 		goto out;
 	}
 	res = 0;
-	mlx_ipsec_flush_cache(dev);
+	mlx_ipsec_flush_cache(sa->dev);
 
 out:
 	return res;
@@ -269,8 +268,7 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 
 #else /* MLX_IPSEC_SADB_RDMA */
 
-int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
-			  struct mlx_ipsec_dev *dev)
+int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 {
 	unsigned int key_len = (sa->x->aead->alg_key_len + 7) / 8 - 4;
 	struct mlx_accel_core_dma_buf *buf = NULL;
@@ -314,19 +312,19 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa,
 		memcpy(cmd->key + 16, sa->x->aead->alg_key, key_len);
 
 	/* serialize fifo and mlx_accel_core_sendmsg */
-	spin_lock_irqsave(&dev->fifo_sa_cmds_lock, flags);
+	spin_lock_irqsave(&sa->dev->fifo_sa_cmds_lock, flags);
 	pr_debug("adding to fifo!\n");
-	fifo_full = kfifo_put(&dev->fifo_sa_cmds, sa);
-	spin_unlock_irqrestore(&dev->fifo_sa_cmds_lock, flags);
+	fifo_full = kfifo_put(&sa->dev->fifo_sa_cmds, sa);
+	spin_unlock_irqrestore(&sa->dev->fifo_sa_cmds_lock, flags);
 
 	if (!fifo_full)
 		goto err_buf;
 
-	mlx_accel_core_sendmsg(dev->conn, buf);
+	mlx_accel_core_sendmsg(sa->dev->conn, buf);
 	/* After this point buf will be delete in mlx_accel_core */
 
 	/* wait for sa_add response and handle the response */
-	res = wait_event_killable(dev->wq, sa->status != ADD_SA_PENDING);
+	res = wait_event_killable(sa->dev->wq, sa->status != ADD_SA_PENDING);
 	if (res != 0) {
 		pr_warn("add_sa returned before receiving response\n");
 		goto out;
