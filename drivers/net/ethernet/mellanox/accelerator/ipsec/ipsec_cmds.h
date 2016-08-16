@@ -84,34 +84,6 @@ struct dummy_dword {
 	__be16 reserved;
 } __packed;
 
-enum fpga_cmds {
-	CMD_ADD_SA			= 1,
-	CMD_UPDATE_SA		= 2,
-	CMD_DEL_SA			= 3
-};
-
-enum fpga_del_sa_status {
-	DEL_SA_SUCCESS			= 0x80,
-	DEL_SA_FAIL_NOT_FOUND	= 0x81
-};
-
-/* [BP]: TODO - Test all return codes in mlx_xfrm_add_state */
-enum fpga_add_sa_status {
-	ADD_SA_PENDING			= -1,
-	ADD_SA_SUCCESS			= 0,
-	ADD_SA_FAIL_CAPACITY	= 1,
-	ADD_SA_FAIL_CONFLICT	= 2
-};
-
-enum fpga_response {
-	EVENT_ADD_SA_RESPONSE			= 0x81,
-	EVENT_ADD_SA_ERR_RESPONSE		= 0xC1,
-	EVENT_UPDATE_SA_RESPONSE		= 0x82,
-	EVENT_UPDATE_SA_ERR_RESPONSE	= 0xC2,
-	EVENT_DEL_SA_RESPONSE			= 0x83,
-	EVENT_DEL_SA_ERR_RESPONSE		= 0xC3
-};
-
 enum direction {
 	RX_DIRECTION = 0,
 	TX_DIRECTION = 1
@@ -132,33 +104,6 @@ enum auth_identifier {
 #define IPSEC_BYPASS_ADDR	0x0
 #define IPSEC_BYPASS_BIT	0x400000
 
-#ifdef MLX_IPSEC_SADB_RDMA
-
-/* [BP]: TODO - There should be another command for IPv6 */
-struct sa_cmd_v4 {
-	__be32 cmd;
-	u8 key[32];
-	__be32 sip;
-	__be32 sip_mask; /* must be 255.255.255.255 */
-	__be32 dip;
-	__be32 dip_mask; /* must be 255.255.255.255 */
-	__be32 spi;
-	__be32 salt;
-	__be32 sw_sa_handle;
-	__be16 sport; /* unused */
-	__be16 dport; /* unused */
-	u8 ip_proto;
-	u8 enc_auth_mode;
-	u8 enable;
-	u8 pad;
-};
-
-#else
-
-#define IPSEC_FLUSH_CACHE_ADDR	0x144
-#define IPSEC_FLUSH_CACHE_BIT	0x100
-#define SADB_SLOT_SIZE		0x80
-
 struct __attribute__((__packed__)) sadb_entry {
 	u8 key[32];
 	__be32 sip;
@@ -177,8 +122,6 @@ struct __attribute__((__packed__)) sadb_entry {
 	u8 pad;
 };
 
-#endif	/*  MLX_IPSEC_SADB_RDMA */
-
 #define SADB_DIR_SX      BIT(7)
 #define SADB_SA_VALID    BIT(6)
 #define SADB_SPI_EN      BIT(5)
@@ -188,15 +131,44 @@ struct __attribute__((__packed__)) sadb_entry {
 #define SADB_TUNNEL      BIT(1)
 #define SADB_TUNNEL_EN   BIT(0)
 
-struct fpga_reply_generic {
-	__be32 opcode;
-	__be32 sw_sa_id;
-	__be32 hw_sa_id;
+enum ipsec_response_syndrome {
+	IPSEC_RESPONSE_SUCCESS = 0,
+	IPSEC_RESPONSE_ILLEGAL_REQUEST = 1,
+	IPSEC_RESPONSE_SADB_ISSUE = 2,
+	IPSEC_RESPONSE_WRITE_RESPONSE_ISSUE = 3,
+	IPSEC_SA_PENDING = 0xff,
 };
 
-struct fpga_reply_add_sa {
-	struct fpga_reply_generic generic;
-	__be32 status;
+#ifdef MLX_IPSEC_SADB_RDMA
+
+enum ipsec_hw_cmd {
+	IPSEC_CMD_ADD_SA = 0,
+	IPSEC_CMD_DEL_SA = 1,
 };
+
+struct sa_cmd_v4 {
+	__be32 cmd;
+	struct sadb_entry entry;
+};
+
+struct ipsec_hw_response {
+#ifdef BUG_846981_FIXED
+	__be32 syndrome;
+	__be32 sw_sa_handle;
+#endif
+	u8 rsvd[24];
+#ifndef BUG_846981_FIXED
+	__be32 sw_sa_handle;
+	__be32 syndrome;
+#endif
+};
+
+#else
+
+#define IPSEC_FLUSH_CACHE_ADDR	0x144
+#define IPSEC_FLUSH_CACHE_BIT	0x100
+#define SADB_SLOT_SIZE		0x80
+
+#endif	/*  MLX_IPSEC_SADB_RDMA */
 
 #endif /* MLX_IPSEC_CMDS_H */

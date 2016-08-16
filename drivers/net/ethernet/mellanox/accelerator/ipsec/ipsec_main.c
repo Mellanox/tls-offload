@@ -58,24 +58,15 @@ static int __init mlx_ipsec_init(void)
 {
 	int err = 0;
 
-	err = mlx_ipsec_hw_init();
-	if (err) {
-		pr_warn("mlx_ipsec_init error in mlx_ipsec_wq_init %d\n", err);
-		goto out;
-	}
-
 	err = register_netdevice_notifier(&mlx_ipsec_netdev_notifier);
 	if (err) {
 		pr_warn("mlx_ipsec_init error in register_netdevice_notifier %d\n",
 				err);
-		goto out_wq;
+		goto out;
 	}
 
 	mlx_accel_core_client_register(&mlx_ipsec_client);
-	goto out;
 
-out_wq:
-	mlx_ipsec_hw_deinit();
 out:
 	return err;
 }
@@ -87,7 +78,6 @@ static void __exit mlx_ipsec_exit(void)
 	 */
 	mlx_accel_core_client_unregister(&mlx_ipsec_client);
 	unregister_netdevice_notifier(&mlx_ipsec_netdev_notifier);
-	mlx_ipsec_hw_deinit();
 }
 
 module_init(mlx_ipsec_init);

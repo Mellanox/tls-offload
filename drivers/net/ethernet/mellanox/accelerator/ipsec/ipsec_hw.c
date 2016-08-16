@@ -36,34 +36,6 @@
 #include <crypto/internal/geniv.h>
 #include <crypto/aead.h>
 
-#ifndef MLX_IPSEC_SADB_RDMA
-/* [IT]: TODO get rid of this work queue:
- * Use async add/del SA operations over RDMA/RC-QP
- * Get rid of mutex lock in add/del sa flows
- * all add/del SA should work in atomic context
- */
-static struct workqueue_struct *mlx_ipsec_workq;
-#endif
-
-int mlx_ipsec_hw_init(void)
-{
-#ifndef MLX_IPSEC_SADB_RDMA
-	mlx_ipsec_workq = create_workqueue("mlx_ipsec");
-	if (!mlx_ipsec_workq)
-		return -ENOMEM;
-#endif
-	return 0;
-}
-
-void mlx_ipsec_hw_deinit(void)
-{
-#ifndef MLX_IPSEC_SADB_RDMA
-	flush_workqueue(mlx_ipsec_workq);
-	destroy_workqueue(mlx_ipsec_workq);
-	mlx_ipsec_workq = NULL;
-#endif
-}
-
 static enum auth_identifier
 mlx_ipsec_get_auth_identifier(struct xfrm_state *x)
 {
@@ -100,7 +72,56 @@ mlx_ipsec_get_crypto_identifier(struct xfrm_state *x)
 	}
 }
 
+static void mlx_ipsec_build_hw_entry(struct mlx_ipsec_sa_entry *sa,
+				     struct sadb_entry *hw_entry)
+{
+	unsigned int crypto_data_len = (sa->x->aead->alg_key_len + 7) / 8;
+	unsigned int key_len = crypto_data_len - 4; /* 4 bytes salt at end */
+	struct crypto_aead *aead = sa->x->data;
+	struct aead_geniv_ctx *geniv_ctx = crypto_aead_ctx(aead);
+	int ivsize = crypto_aead_ivsize(aead);
+
+	memset(hw_entry, 0, sizeof(*hw_entry));
+	memcpy(&hw_entry->key, sa->x->aead->alg_key, key_len);
+	/* Duplicate 128 bit key twice according to HW layout */
+	if (key_len == 16)
+		memcpy(&hw_entry->key[16], sa->x->aead->alg_key, key_len);
+	memcpy(&hw_entry->salt_iv, geniv_ctx->salt, ivsize);
+	hw_entry->enable |= SADB_SA_VALID | SADB_SPI_EN;
+	hw_entry->sip = sa->x->props.saddr.a4;
+	hw_entry->sip_mask = inet_make_mask(sa->x->sel.prefixlen_s);
+	hw_entry->dip = sa->x->id.daddr.a4;
+	hw_entry->dip_mask = inet_make_mask(sa->x->sel.prefixlen_d);
+	hw_entry->spi = sa->x->id.spi;
+	hw_entry->salt = *((__be32 *)(sa->x->aead->alg_key + key_len));
+	hw_entry->sw_sa_handle = htonl(sa->sw_sa_id);
+	hw_entry->sport = htons(sa->x->sel.sport);
+	hw_entry->enable |= sa->x->sel.sport_mask ? SADB_SPORT_EN : 0;
+	hw_entry->dport = htons(sa->x->sel.dport);
+	hw_entry->enable |= sa->x->sel.dport_mask ? SADB_DPORT_EN : 0;
+	hw_entry->ip_proto = sa->x->id.proto;
+	if (hw_entry->ip_proto)
+		hw_entry->enable |= SADB_IP_PROTO_EN;
+	hw_entry->enc_auth_mode = mlx_ipsec_get_auth_identifier(sa->x) << 4;
+	hw_entry->enc_auth_mode |= mlx_ipsec_get_crypto_identifier(sa->x);
+	if (!(sa->x->xso.flags & XFRM_OFFLOAD_INBOUND))
+		hw_entry->enable |= SADB_DIR_SX;
+	if (sa->x->props.mode)
+		hw_entry->enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
+}
+
 #ifndef MLX_IPSEC_SADB_RDMA
+
+static u64 mlx_ipsec_sadb_addr(struct mlx_ipsec_sa_entry *sa)
+{
+	unsigned long sa_index;
+
+	sa_index = (ntohl(sa->x->id.daddr.a4) ^ ntohl(sa->x->id.spi)) & 0xFFFFF;
+	pr_debug("sa DIP %08x SPI %08x -> Index %lu\n",
+		 sa->x->id.daddr.a4, sa->x->id.spi, sa_index);
+	return mlx_accel_core_ddr_base_get(sa->dev->accel_device) +
+	       (sa_index * SADB_SLOT_SIZE);
+}
 
 static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 {
@@ -127,47 +148,13 @@ static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
 
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 {
-	unsigned int key_len = (sa->x->aead->alg_key_len + 7) / 8;
-	unsigned int crypto_data_len = key_len - 4; /* 4 bytes salt at end */
 	struct sadb_entry hw_entry;
-	unsigned long sa_index;
-	u64 sa_addr;
+	u64 sa_addr = mlx_ipsec_sadb_addr(sa);
 	int res;
-	struct crypto_aead *aead = (struct crypto_aead *)sa->x->data;
-	struct aead_geniv_ctx *geniv_ctx = (struct aead_geniv_ctx *)
-					   aead->base.__crt_ctx;
-	int ivsize = crypto_aead_ivsize(aead);
 
-	pr_debug("sa IP %08x SPI %08x\n", sa->x->id.daddr.a4, sa->x->id.spi);
-	sa_index = (ntohl(sa->x->id.daddr.a4) ^ ntohl(sa->x->id.spi)) & 0xFFFFF;
-	sa_addr = mlx_accel_core_ddr_base_get(sa->dev->accel_device) +
-		  (sa_index * SADB_SLOT_SIZE);
-	pr_debug("sa Index %lu Address %llx\n", sa_index, sa_addr);
+	pr_debug("sa Address %llx\n", sa_addr);
 
-	memset(&hw_entry, 0, sizeof(hw_entry));
-	memcpy(&hw_entry.key, sa->x->aead->alg_key, crypto_data_len);
-	memcpy(&hw_entry.salt_iv, geniv_ctx->salt, ivsize);
-	hw_entry.enable |= SADB_SA_VALID | SADB_SPI_EN;
-	hw_entry.sip = sa->x->props.saddr.a4;
-	hw_entry.sip_mask = inet_make_mask(sa->x->sel.prefixlen_s);
-	hw_entry.dip = sa->x->id.daddr.a4;
-	hw_entry.dip_mask = inet_make_mask(sa->x->sel.prefixlen_d);
-	hw_entry.spi = sa->x->id.spi;
-	hw_entry.salt = *((__be32 *)(sa->x->aead->alg_key + crypto_data_len));
-	hw_entry.sw_sa_handle = htonl(sa->sw_sa_id);
-	hw_entry.sport = htons(sa->x->sel.sport);
-	hw_entry.enable |= sa->x->sel.sport_mask ? SADB_SPORT_EN : 0;
-	hw_entry.dport = htons(sa->x->sel.dport);
-	hw_entry.enable |= sa->x->sel.dport_mask ? SADB_DPORT_EN : 0;
-	hw_entry.ip_proto = sa->x->id.proto;
-	if (hw_entry.ip_proto)
-		hw_entry.enable |= SADB_IP_PROTO_EN;
-	hw_entry.enc_auth_mode = mlx_ipsec_get_auth_identifier(sa->x) << 4;
-	hw_entry.enc_auth_mode |= mlx_ipsec_get_crypto_identifier(sa->x);
-	if (!(sa->x->xso.flags & XFRM_OFFLOAD_INBOUND))
-		hw_entry.enable |= SADB_DIR_SX;
-	if (sa->x->props.mode)
-		hw_entry.enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
+	mlx_ipsec_build_hw_entry(sa, &hw_entry);
 
 	res = mlx_accel_core_mem_write(sa->dev->accel_device, sizeof(hw_entry),
 				       sa_addr, &hw_entry,
@@ -183,82 +170,26 @@ out:
 	return res;
 }
 
-struct my_work {
-	struct work_struct work;
-	unsigned long sa_index;
-	struct net_device *netdev;
-	struct mlx_ipsec_sa_entry *sa;
-	u8 xso_flags;
-};
-
-static void mlx_xfrm_del_state_work(struct work_struct *work)
+void mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
 {
-	struct my_work *mywork = container_of(work, struct my_work, work);
-	u64 sa_addr;
-	struct mlx_ipsec_dev *dev;
 	struct sadb_entry hw_entry;
-	int res = 0;
-	unsigned long flags;
+	u64 sa_addr;
+	int res;
 
-	dev = mlx_ipsec_find_dev_by_netdev(mywork->netdev);
-	if (dev) {
-		sa_addr = mlx_accel_core_ddr_base_get(dev->accel_device) +
-			  (mywork->sa_index * 4);
-		pr_debug("del_sa Index %lu Address %llx\n", mywork->sa_index,
-			 sa_addr);
+	if (sa->dev) {
+		sa_addr = mlx_ipsec_sadb_addr(sa);
+		pr_debug("del_sa Address %llx\n", sa_addr);
 
 		memset(&hw_entry, 0, sizeof(hw_entry));
 
-		res = mlx_accel_core_mem_write(dev->accel_device,
+		res = mlx_accel_core_mem_write(sa->dev->accel_device,
 					       sizeof(hw_entry), sa_addr,
 					       &hw_entry,
 					       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
 		if (res != sizeof(hw_entry))
 			pr_warn("Deleting SA in HW memory failed %d\n", res);
-		mlx_ipsec_flush_cache(dev);
+		mlx_ipsec_flush_cache(sa->dev);
 	}
-
-	if (mywork->xso_flags & XFRM_OFFLOAD_INBOUND) {
-		spin_lock_irqsave(
-			&dev->sw_sa_id2xfrm_state_lock,
-			flags);
-		hash_del_rcu(&mywork->sa->hlist);
-		spin_unlock_irqrestore(
-			&dev->sw_sa_id2xfrm_state_lock,
-			flags);
-		synchronize_rcu();
-	}
-
-	kfree(mywork->sa);
-	module_put(THIS_MODULE);
-
-	kfree(work);
-}
-
-int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
-{
-	struct net_device *netdev = sa->x->xso.dev;
-	unsigned long sa_index;
-	struct my_work *work;
-	int res = 0;
-
-	sa_index = (sa->x->id.daddr.a4 ^ sa->x->id.spi) & 0xFFFFF;
-
-	work = kzalloc(sizeof(*work), GFP_ATOMIC);
-	if (!work) {
-		res = -ENOMEM;
-		goto out;
-	}
-
-	INIT_WORK(&work->work, mlx_xfrm_del_state_work);
-	work->netdev = netdev;
-	work->sa_index = sa_index;
-	work->xso_flags = sa->x->xso.flags;
-	work->sa = sa;
-
-	queue_work(mlx_ipsec_workq, &work->work);
-out:
-	return res;
 }
 
 void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
@@ -270,7 +201,6 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 {
-	unsigned int key_len = (sa->x->aead->alg_key_len + 7) / 8 - 4;
 	struct mlx_accel_core_dma_buf *buf = NULL;
 	struct sa_cmd_v4 *cmd;
 	int fifo_full;
@@ -285,31 +215,11 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 	}
 
 	buf->data_size = sizeof(*cmd);
-	cmd = (struct sa_cmd_v4 *)buf->data;
-	cmd->cmd = htonl(CMD_ADD_SA);
+	buf->data = buf + 1;
+	cmd = buf->data;
+	cmd->cmd = htonl(IPSEC_CMD_ADD_SA);
 
-	cmd->enable |= SADB_SA_VALID | SADB_SPI_EN;
-	cmd->sip = htonl(sa->x->props.saddr.a4);
-	cmd->sip_mask = inet_make_mask(32);
-	cmd->dip = htonl(sa->x->id.daddr.a4);
-	cmd->dip_mask = inet_make_mask(32);
-	cmd->spi = sa->x->id.spi;
-	cmd->salt = *((__be32 *)(sa->x->aead->alg_key + key_len));
-	cmd->sw_sa_handle = htonl(sa->sw_sa_id);
-	/* TODO: implement UDP encapsulation support to enable port selection */
-	cmd->ip_proto = sa->x->id.proto;
-	if (cmd->ip_proto)
-		cmd->enable |= SADB_IP_PROTO_EN;
-	cmd->enc_auth_mode = mlx_ipsec_get_auth_identifier(sa->x) << 4;
-	cmd->enc_auth_mode |= mlx_ipsec_get_crypto_identifier(sa->x);
-	if (!(sa->x->xso.flags & XFRM_OFFLOAD_INBOUND))
-		cmd->enable |= SADB_DIR_SX;
-	if (sa->x->props.mode)
-		cmd->enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
-	memcpy(cmd->key, sa->x->aead->alg_key, key_len);
-	/* Duplicate 128 bit key twice according to HW layout */
-	if (key_len == 16)
-		memcpy(cmd->key + 16, sa->x->aead->alg_key, key_len);
+	mlx_ipsec_build_hw_entry(sa, &cmd->entry);
 
 	/* serialize fifo and mlx_accel_core_sendmsg */
 	spin_lock_irqsave(&sa->dev->fifo_sa_cmds_lock, flags);
@@ -324,14 +234,14 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 	/* After this point buf will be delete in mlx_accel_core */
 
 	/* wait for sa_add response and handle the response */
-	res = wait_event_killable(sa->dev->wq, sa->status != ADD_SA_PENDING);
+	res = wait_event_killable(sa->dev->wq, sa->status != IPSEC_SA_PENDING);
 	if (res != 0) {
 		pr_warn("add_sa returned before receiving response\n");
 		goto out;
 	}
 
 	res = sa->status;
-	if (sa->status != ADD_SA_SUCCESS)
+	if (sa->status != IPSEC_RESPONSE_SUCCESS)
 		pr_warn("add_sa failed with erro %08x\n", sa->status);
 	goto out;
 
@@ -341,28 +251,36 @@ out:
 	return res;
 }
 
-int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
+void mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
 {
-	module_put(THIS_MODULE);
-	return 0;
+	/* TODO: send DEL_SA message */
 }
 
 static void mlx_ipsec_handle_add_sa(struct mlx_ipsec_dev *dev,
 				    struct mlx_ipsec_sa_entry *sa_entry,
-				    struct fpga_reply_add_sa *add_sa_reply)
+				    struct ipsec_hw_response *resp)
 {
-	sa_entry->status = ntohl(add_sa_reply->status);
+	if (ntohl(resp->syndrome) != IPSEC_RESPONSE_SUCCESS) {
+		pr_warn("Error syndrome from FPGA: %u\n",
+			ntohl(resp->syndrome));
+	}
+	sa_entry->status = ntohl(resp->syndrome);
 	wake_up_all(&dev->wq);
 }
 
 void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 {
 	struct mlx_ipsec_dev *dev = cb_arg;
-	struct fpga_reply_generic *reply =
-		(struct fpga_reply_generic *)buf->data;
+	struct ipsec_hw_response *resp = buf->data;
 	struct mlx_ipsec_sa_entry *sa_entry;
 
-	pr_debug("mlx_ipsec_qp_recv_cb() opcode %08x\n", ntohl(reply->opcode));
+	if (buf->data_size < sizeof(*resp)) {
+		pr_warn("Short receive from FPGA IPSec: %zu < %lu bytes\n",
+			buf->data_size, sizeof(*resp));
+		return;
+	}
+
+	pr_debug("mlx_ipsec recv_cb syndrome %08x\n", ntohl(resp->syndrome));
 
 	/* [BP]: This should never fail - consider reset if it does */
 	if (!kfifo_get(&dev->fifo_sa_cmds, &sa_entry)) {
@@ -370,21 +288,12 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 		return;
 	}
 
-	if (sa_entry->sw_sa_id != ntohl(reply->sw_sa_id)) {
+	if (sa_entry->sw_sa_id != ntohl(resp->sw_sa_handle)) {
 		pr_warn("mismatch sw_sa_id in FIFO %d vs %d\n",
-			sa_entry->sw_sa_id, reply->sw_sa_id);
+			sa_entry->sw_sa_id, resp->sw_sa_handle);
 	}
 
-	switch (ntohl(reply->opcode)) {
-	case EVENT_ADD_SA_RESPONSE:
-		mlx_ipsec_handle_add_sa(dev, sa_entry,
-					(struct fpga_reply_add_sa *)buf->data);
-
-		break;
-	default:
-		pr_warn("Unknown opcode from FPGA %08x\n",
-			ntohl(reply->opcode));
-	}
+	mlx_ipsec_handle_add_sa(dev, sa_entry, resp);
 }
 
 #endif /* MLX_IPSEC_SADB_RDMA */

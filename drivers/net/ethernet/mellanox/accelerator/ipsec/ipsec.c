@@ -196,7 +196,7 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 		spin_unlock_irqrestore(&dev->sw_sa_id2xfrm_state_lock, flags);
 	}
 
-	sa_entry->status = ADD_SA_PENDING;
+	sa_entry->status = IPSEC_SA_PENDING;
 	res = mlx_ipsec_hw_sadb_add(sa_entry);
 	if (res)
 		goto err_hash_rcu;
@@ -226,26 +226,34 @@ out:
 static void mlx_xfrm_del_state(struct xfrm_state *x)
 {
 	struct mlx_ipsec_sa_entry *sa_entry;
-	int res;
 
-	if (x->xso.offload_handle) {
-		sa_entry = (struct mlx_ipsec_sa_entry *)x->xso.offload_handle;
+	if (!x->xso.offload_handle)
+		return;
 
-		WARN_ON(sa_entry->x != x);
-		res = mlx_ipsec_hw_sadb_del(sa_entry);
-		if (res)
-			pr_warn("Delete SADB entry from HW failed %d\n", res);
+	sa_entry = (struct mlx_ipsec_sa_entry *)x->xso.offload_handle;
+	WARN_ON(sa_entry->x != x);
 
-		/* Todo: Need to delete from rcu hashtable, kfree and
-		 * module_put. But synch_rcu might sleep, and this is atomic
-		 * context
-		 */
-	}
+	if (x->xso.flags & XFRM_OFFLOAD_INBOUND)
+		hash_del_rcu(&sa_entry->hlist);
 }
 
 static void mlx_xfrm_free_state(struct xfrm_state *x)
 {
-	/* [AY/IT] TODO: workaround until take patches. */
+	struct mlx_ipsec_sa_entry *sa_entry;
+
+	if (!x->xso.offload_handle)
+		return;
+
+	sa_entry = (struct mlx_ipsec_sa_entry *)x->xso.offload_handle;
+	WARN_ON(sa_entry->x != x);
+
+	mlx_ipsec_hw_sadb_del(sa_entry);
+
+	if (x->xso.flags & XFRM_OFFLOAD_INBOUND)
+		synchronize_rcu();
+
+	kfree(sa_entry);
+	module_put(THIS_MODULE);
 }
 
 static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
@@ -591,8 +599,8 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	dev->accel_device = accel_device;
 
 	/* [BP]: TODO: Move these constants to a header */
-	init_attr.rx_size = 128;
-	init_attr.tx_size = 32;
+	init_attr.rx_size = 8;
+	init_attr.tx_size = 8;
 	init_attr.recv_cb = mlx_ipsec_hw_qp_recv_cb;
 	init_attr.cb_arg = dev;
 	/* [AY]: TODO: fix port 1 issue */
@@ -602,6 +610,11 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 		pr_err("mlx_ipsec_add_one(): Got error while creating connection %d\n",
 				ret);
 		goto err_dev;
+	}
+	ret = mlx_accel_core_connect(dev->conn);
+	if (ret) {
+		pr_err("Failed to connect IPSec QP: %d\n", ret);
+		goto err_conn;
 	}
 
 	netdev = accel_device->ib_dev->get_netdev(accel_device->ib_dev,

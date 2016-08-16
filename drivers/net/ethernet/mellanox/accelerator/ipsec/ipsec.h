@@ -67,7 +67,7 @@ struct mlx_ipsec_sa_entry {
 	unsigned int hw_sa_id;	/* unused */
 	struct hlist_node hlist;
 	struct xfrm_state *x;
-	enum fpga_add_sa_status status;
+	enum ipsec_response_syndrome status;
 	struct mlx_ipsec_dev *dev;
 };
 
