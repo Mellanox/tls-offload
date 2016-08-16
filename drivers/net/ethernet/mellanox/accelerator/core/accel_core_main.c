@@ -33,7 +33,6 @@
 
 #include <linux/module.h>
 #include <linux/etherdevice.h>
-#include <linux/mlx5/vport.h>
 #include <rdma/ib_mad.h>
 
 #include "accel_core.h"
@@ -219,35 +218,6 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	core_conn_attr.rx_size = MLX_ACCEL_TID_COUNT;
 	core_conn_attr.recv_cb = mlx_accel_trans_recv;
 	core_conn_attr.cb_arg = accel_device;
-	err = mlx5_query_nic_vport_mac_address(accel_device->hw_dev, 0,
-					       core_conn_attr.local_mac);
-	if (err) {
-		pr_err("Failed to query local MAC: %d\n", err);
-		goto err_pd;
-	}
-	core_conn_attr.local_gid.raw[0] = 0xfe;
-	core_conn_attr.local_gid.raw[1] = 0x80;
-	core_conn_attr.local_gid.raw[8] = core_conn_attr.local_mac[0] ^ 0x02;
-	core_conn_attr.local_gid.raw[9] = core_conn_attr.local_mac[1];
-	core_conn_attr.local_gid.raw[10] = core_conn_attr.local_mac[2];
-	core_conn_attr.local_gid.raw[11] = 0xff;
-	core_conn_attr.local_gid.raw[12] = 0xfe;
-	core_conn_attr.local_gid.raw[13] = core_conn_attr.local_mac[3];
-	core_conn_attr.local_gid.raw[14] = core_conn_attr.local_mac[4];
-	core_conn_attr.local_gid.raw[15] = core_conn_attr.local_mac[5];
-#ifndef QP_SIMULATOR
-	core_conn_attr.vlan = true;
-	core_conn_attr.vlan_id = 0;
-#endif
-	pr_debug("Local gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[0]),
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[1]),
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[2]),
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[3]),
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[4]),
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[5]),
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[6]),
-		 ntohs(((__be16 *)&core_conn_attr.local_gid)[7]));
 
 	accel_device->core_conn = mlx_accel_core_rdma_conn_create(accel_device,
 							&core_conn_attr, true);

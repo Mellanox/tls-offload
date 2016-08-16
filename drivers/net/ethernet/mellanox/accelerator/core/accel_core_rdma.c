@@ -35,6 +35,7 @@
 #include <linux/etherdevice.h>
 #include <linux/mlx5_ib/driver.h>
 #include <linux/mlx5/driver.h>
+#include <linux/mlx5/vport.h>
 #include <rdma/ib_mad.h>
 
 static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn);
@@ -353,6 +354,7 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	int err;
 	struct mlx_accel_core_conn *ret = NULL;
 	struct mlx_accel_core_conn *conn = NULL;
+	union ib_gid *gid = NULL;
 
 	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn) {
@@ -377,13 +379,45 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	conn->recv_cb = conn_init_attr->recv_cb;
 	conn->cb_arg = conn_init_attr->cb_arg;
 
+	err = mlx5_query_nic_vport_mac_address(accel_device->hw_dev, 0,
+					       conn->fpga_qpc.remote_mac);
+	if (err) {
+		pr_err("Failed to query local MAC: %d\n", err);
+		goto err;
+	}
+
+	conn->fpga_qpc.remote_ip.s6_addr[0] = 0xfe;
+	conn->fpga_qpc.remote_ip.s6_addr[1] = 0x80;
+	conn->fpga_qpc.remote_ip.s6_addr[8] = conn->fpga_qpc.remote_mac[0] ^
+					      0x02;
+	conn->fpga_qpc.remote_ip.s6_addr[9] = conn->fpga_qpc.remote_mac[1];
+	conn->fpga_qpc.remote_ip.s6_addr[10] = conn->fpga_qpc.remote_mac[2];
+	conn->fpga_qpc.remote_ip.s6_addr[11] = 0xff;
+	conn->fpga_qpc.remote_ip.s6_addr[12] = 0xfe;
+	conn->fpga_qpc.remote_ip.s6_addr[13] = conn->fpga_qpc.remote_mac[3];
+	conn->fpga_qpc.remote_ip.s6_addr[14] = conn->fpga_qpc.remote_mac[4];
+	conn->fpga_qpc.remote_ip.s6_addr[15] = conn->fpga_qpc.remote_mac[5];
+
+	pr_debug("Local gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[0]),
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[1]),
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[2]),
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[3]),
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[4]),
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[5]),
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[6]),
+		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[7]));
+
+	gid = (union ib_gid *)&conn->fpga_qpc.remote_ip;
 	err = mlx5_ib_reserved_gid_add(accel_device->ib_dev, accel_device->port,
 				       IB_GID_TYPE_ROCE_UDP_ENCAP,
-				       &conn_init_attr->local_gid,
-				       conn_init_attr->local_mac,
-				       conn_init_attr->vlan,
-				       conn_init_attr->vlan_id,
-				       &conn->sgid_index);
+				       gid, conn->fpga_qpc.remote_mac,
+#ifdef QP_SIMULATOR
+				       false,
+#else
+				       true,
+#endif
+				       0, &conn->sgid_index);
 	if (err) {
 		pr_warn("Failed to add reserved GID: %d\n", err);
 		ret = ERR_PTR(err);
@@ -407,13 +441,9 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	conn->fpga_qpc.remote_qpn = conn->qp->qp_num;
 	conn->fpga_qpc.rnr_retry = 7;
 	conn->fpga_qpc.retry_count = 7;
-	conn->fpga_qpc.vlan_id = conn_init_attr->vlan_id;
+	conn->fpga_qpc.vlan_id = 0;
 	conn->fpga_qpc.next_rcv_psn = 1;
 	conn->fpga_qpc.next_send_psn = 0;
-
-	ether_addr_copy(conn->fpga_qpc.remote_mac, conn_init_attr->local_mac);
-	memcpy(&conn->fpga_qpc.remote_ip, &conn_init_attr->local_gid,
-	       sizeof(conn->fpga_qpc.remote_ip));
 
 	err = mlx5_fpga_create_qp(accel_device->hw_dev,
 				  &conn->fpga_qpc,
@@ -423,6 +453,8 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 		ret = ERR_PTR(err);
 		goto err_create_res;
 	}
+
+	pr_debug("FPGA QPN is %u\n", conn->fpga_qpn);
 	ret = conn;
 	goto out;
 
