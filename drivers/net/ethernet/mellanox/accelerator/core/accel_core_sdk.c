@@ -148,28 +148,10 @@ int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 }
 EXPORT_SYMBOL(mlx_accel_core_connect);
 
-/* [BP]: TODO - add a return value and another argument @retry.
- * The return value will return failure only if the post_send call failed.
- * The argument @retry, is a boolean telling whether the functing could return
- * a failure. If @retry != 0 then the function should add a pending message if
- * post_send fails. (@retry is required for the TLS module) */
-void mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
-		struct mlx_accel_core_dma_buf *buf)
+int mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
+			   struct mlx_accel_core_dma_buf *buf)
 {
-	unsigned long flags;
-
-	/* TODO: see if the list_empty without lock is safe here */
-	if (!list_empty(&conn->pending_msgs) ||
-			mlx_accel_core_rdma_post_send(conn, buf)) {
-		spin_lock_irqsave(&conn->pending_lock, flags);
-		if (list_empty(&conn->pending_msgs)) {
-			mlx_accel_core_rdma_post_send(conn, buf);
-			goto unlock;
-		}
-		list_add_tail(&buf->list, &conn->pending_msgs);
-unlock:
-		spin_unlock_irqrestore(&conn->pending_lock, flags);
-	}
+	return mlx_accel_core_rdma_post_send(conn, buf);
 }
 EXPORT_SYMBOL(mlx_accel_core_sendmsg);
 

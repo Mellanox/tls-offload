@@ -155,8 +155,8 @@ void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn);
 
 int mlx_accel_core_connect(struct mlx_accel_core_conn *conn);
 
-void mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
-			    struct mlx_accel_core_dma_buf *buf);
+int mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
+			   struct mlx_accel_core_dma_buf *buf);
 
 u64 mlx_accel_core_ddr_size_get(struct mlx_accel_core_device *dev);
 u64 mlx_accel_core_ddr_base_get(struct mlx_accel_core_device *dev);
