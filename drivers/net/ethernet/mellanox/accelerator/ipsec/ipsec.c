@@ -196,7 +196,6 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 		spin_unlock_irqrestore(&dev->sw_sa_id2xfrm_state_lock, flags);
 	}
 
-	sa_entry->status = IPSEC_SA_PENDING;
 	res = mlx_ipsec_hw_sadb_add(sa_entry);
 	if (res)
 		goto err_hash_rcu;

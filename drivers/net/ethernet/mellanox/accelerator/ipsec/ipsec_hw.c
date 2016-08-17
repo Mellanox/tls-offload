@@ -71,27 +71,39 @@ mlx_ipsec_get_crypto_identifier(struct xfrm_state *x)
 }
 
 static void mlx_ipsec_build_hw_entry(struct mlx_ipsec_sa_entry *sa,
-				     struct sadb_entry *hw_entry)
+				     struct sadb_entry *hw_entry,
+				     bool valid)
 {
-	unsigned int crypto_data_len = (sa->x->aead->alg_key_len + 7) / 8;
-	unsigned int key_len = crypto_data_len - 4; /* 4 bytes salt at end */
-	struct crypto_aead *aead = sa->x->data;
-	struct aead_geniv_ctx *geniv_ctx = crypto_aead_ctx(aead);
-	int ivsize = crypto_aead_ivsize(aead);
+	unsigned int crypto_data_len;
+	unsigned int key_len;
+	struct crypto_aead *aead;
+	struct aead_geniv_ctx *geniv_ctx;
+	int ivsize;
 
 	memset(hw_entry, 0, sizeof(*hw_entry));
-	memcpy(&hw_entry->key, sa->x->aead->alg_key, key_len);
-	/* Duplicate 128 bit key twice according to HW layout */
-	if (key_len == 16)
-		memcpy(&hw_entry->key[16], sa->x->aead->alg_key, key_len);
-	memcpy(&hw_entry->salt_iv, geniv_ctx->salt, ivsize);
+
+	if (valid) {
+		crypto_data_len = (sa->x->aead->alg_key_len + 7) / 8;
+		key_len = crypto_data_len - 4; /* 4 bytes salt at end */
+		aead = sa->x->data;
+		geniv_ctx = crypto_aead_ctx(aead);
+		ivsize = crypto_aead_ivsize(aead);
+
+		memcpy(&hw_entry->key, sa->x->aead->alg_key, key_len);
+		/* Duplicate 128 bit key twice according to HW layout */
+		if (key_len == 16)
+			memcpy(&hw_entry->key[16], sa->x->aead->alg_key,
+			       key_len);
+		memcpy(&hw_entry->salt_iv, geniv_ctx->salt, ivsize);
+		hw_entry->salt = *((__be32 *)(sa->x->aead->alg_key + key_len));
+	}
+
 	hw_entry->enable |= SADB_SA_VALID | SADB_SPI_EN;
 	hw_entry->sip = sa->x->props.saddr.a4;
 	hw_entry->sip_mask = inet_make_mask(sa->x->sel.prefixlen_s);
 	hw_entry->dip = sa->x->id.daddr.a4;
 	hw_entry->dip_mask = inet_make_mask(sa->x->sel.prefixlen_d);
 	hw_entry->spi = sa->x->id.spi;
-	hw_entry->salt = *((__be32 *)(sa->x->aead->alg_key + key_len));
 	hw_entry->sw_sa_handle = htonl(sa->sw_sa_id);
 	hw_entry->sport = htons(sa->x->sel.sport);
 	hw_entry->enable |= sa->x->sel.sport_mask ? SADB_SPORT_EN : 0;
@@ -152,7 +164,7 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 
 	pr_debug("sa Address %llx\n", sa_addr);
 
-	mlx_ipsec_build_hw_entry(sa, &hw_entry);
+	mlx_ipsec_build_hw_entry(sa, &hw_entry, true);
 
 	res = mlx_accel_core_mem_write(sa->dev->accel_device, sizeof(hw_entry),
 				       sa_addr, &hw_entry,
@@ -197,7 +209,7 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 
 #else /* MLX_IPSEC_SADB_RDMA */
 
-int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
+static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 {
 	struct mlx_accel_core_dma_buf *buf = NULL;
 	struct sa_cmd_v4 *cmd;
@@ -213,13 +225,13 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 	buf->data_size = sizeof(*cmd);
 	buf->data = buf + 1;
 	cmd = buf->data;
-	cmd->cmd = htonl(IPSEC_CMD_ADD_SA);
+	cmd->cmd = htonl(cmd_id);
 
-	mlx_ipsec_build_hw_entry(sa, &cmd->entry);
+	mlx_ipsec_build_hw_entry(sa, &cmd->entry, cmd_id == IPSEC_CMD_ADD_SA);
 
-	/* serialize fifo and mlx_accel_core_sendmsg */
+	/* Serialize fifo access */
+	pr_debug("adding to fifo: sa %p ID 0x%08x\n", sa, sa->sw_sa_id);
 	spin_lock_irqsave(&sa->dev->fifo_sa_cmds_lock, flags);
-	pr_debug("adding to fifo!\n");
 	res = kfifo_put(&sa->dev->fifo_sa_cmds, sa);
 	spin_unlock_irqrestore(&sa->dev->fifo_sa_cmds_lock, flags);
 
@@ -228,18 +240,20 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 		goto err_buf;
 	}
 
+	sa->status = IPSEC_SA_PENDING;
 	mlx_accel_core_sendmsg(sa->dev->conn, buf);
 	/* After this point buf will be freed in mlx_accel_core */
 
 	res = wait_event_killable(sa->dev->wq, sa->status != IPSEC_SA_PENDING);
 	if (res != 0) {
-		pr_warn("add_sa returned before receiving response\n");
+		pr_warn("Failure waiting for IPSec command response from HW\n");
 		goto out;
 	}
 
 	res = sa->status;
 	if (sa->status != IPSEC_RESPONSE_SUCCESS)
-		pr_warn("add_sa failed with erro %08x\n", sa->status);
+		pr_warn("IPSec command %u failed with erro %08x\n",
+			cmd_id, sa->status);
 	goto out;
 
 err_buf:
@@ -248,21 +262,14 @@ out:
 	return res;
 }
 
-void mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
+int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 {
-	/* TODO: send DEL_SA message */
+	return mlx_ipsec_hw_cmd(sa, IPSEC_CMD_ADD_SA);
 }
 
-static void mlx_ipsec_handle_add_sa(struct mlx_ipsec_dev *dev,
-				    struct mlx_ipsec_sa_entry *sa_entry,
-				    struct ipsec_hw_response *resp)
+void mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
 {
-	if (ntohl(resp->syndrome) != IPSEC_RESPONSE_SUCCESS) {
-		pr_warn("Error syndrome from FPGA: %u\n",
-			ntohl(resp->syndrome));
-	}
-	sa_entry->status = ntohl(resp->syndrome);
-	wake_up_all(&dev->wq);
+	mlx_ipsec_hw_cmd(sa, IPSEC_CMD_DEL_SA);
 }
 
 void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
@@ -277,20 +284,28 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 		return;
 	}
 
-	pr_debug("mlx_ipsec recv_cb syndrome %08x\n", ntohl(resp->syndrome));
+	pr_debug("mlx_ipsec recv_cb syndrome %08x sa_id %x\n",
+		 ntohl(resp->syndrome), ntohl(resp->sw_sa_handle));
 
 	/* [BP]: This should never fail - consider reset if it does */
 	if (!kfifo_get(&dev->fifo_sa_cmds, &sa_entry)) {
 		pr_warn("sa_hw2sw_id FIFO empty on recv callback\n");
 		return;
 	}
+	pr_debug("Got from FIFO: sa %p ID 0x%08x\n",
+		 sa_entry, sa_entry->sw_sa_id);
 
 	if (sa_entry->sw_sa_id != ntohl(resp->sw_sa_handle)) {
-		pr_warn("mismatch sw_sa_id in FIFO %d vs %d\n",
-			sa_entry->sw_sa_id, resp->sw_sa_handle);
+		pr_warn("mismatch sw_sa_id. FIFO 0x%08x vs resp 0x%08x\n",
+			sa_entry->sw_sa_id, ntohl(resp->sw_sa_handle));
 	}
 
-	mlx_ipsec_handle_add_sa(dev, sa_entry, resp);
+	if (ntohl(resp->syndrome) != IPSEC_RESPONSE_SUCCESS) {
+		pr_warn("Error syndrome from FPGA: %u\n",
+			ntohl(resp->syndrome));
+	}
+	sa_entry->status = ntohl(resp->syndrome);
+	wake_up_all(&dev->wq);
 }
 
 #endif /* MLX_IPSEC_SADB_RDMA */
