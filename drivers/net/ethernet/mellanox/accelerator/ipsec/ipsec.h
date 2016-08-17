@@ -82,8 +82,8 @@ struct mlx_ipsec_dev {
 			MLX_SA_HW2SW_FIFO_SIZE);
 	DECLARE_HASHTABLE(sw_sa_id2xfrm_state_table,
 			MLX_IPSEC_SA_HASH_TABLE_BITS);
-	spinlock_t fifo_sa_cmds_lock;
-	spinlock_t sw_sa_id2xfrm_state_lock;
+	spinlock_t fifo_sa_cmds_lock; /* Protects fifo_sa_cmds */
+	spinlock_t sw_sa_id2xfrm_state_lock; /* Protects sw_sa_id2xfrm_state */
 	atomic_t next_sw_sa_id;
 	wait_queue_head_t wq;
 	u32 ipsec_caps[MLX5_ST_SZ_DW(ipsec_extended_cap)];

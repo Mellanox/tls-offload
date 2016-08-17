@@ -41,7 +41,6 @@ mlx_ipsec_get_auth_identifier(struct xfrm_state *x)
 {
 	unsigned int key_len = (x->aead->alg_key_len + 7) / 8 - 4;
 
-	/* [BP]: TODO stop assuming it is AES GCM */
 	switch (key_len) {
 	case 16:
 		return IPSEC_OFFLOAD_AUTH_AES_GCM_128;
@@ -59,7 +58,6 @@ mlx_ipsec_get_crypto_identifier(struct xfrm_state *x)
 {
 	unsigned int key_len = (x->aead->alg_key_len + 7) / 8 - 4;
 
-	/* [BP]: TODO stop assuming it is AES GCM */
 	switch (key_len) {
 	case 16:
 		return IPSEC_OFFLOAD_CRYPTO_AES_GCM_128;
@@ -203,12 +201,10 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 {
 	struct mlx_accel_core_dma_buf *buf = NULL;
 	struct sa_cmd_v4 *cmd;
-	int fifo_full;
 	int res = 0;
 	unsigned long flags;
 
-	buf = kzalloc(sizeof(*buf) +
-			sizeof(*cmd), GFP_ATOMIC);
+	buf = kzalloc(sizeof(*buf) + sizeof(*cmd), GFP_ATOMIC);
 	if (!buf) {
 		res = -ENOMEM;
 		goto out;
@@ -224,16 +220,17 @@ int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 	/* serialize fifo and mlx_accel_core_sendmsg */
 	spin_lock_irqsave(&sa->dev->fifo_sa_cmds_lock, flags);
 	pr_debug("adding to fifo!\n");
-	fifo_full = kfifo_put(&sa->dev->fifo_sa_cmds, sa);
+	res = kfifo_put(&sa->dev->fifo_sa_cmds, sa);
 	spin_unlock_irqrestore(&sa->dev->fifo_sa_cmds_lock, flags);
 
-	if (!fifo_full)
+	if (!res) {
+		dev_warn(&sa->dev->netdev->dev, "IPSec command FIFO is full\n");
 		goto err_buf;
+	}
 
 	mlx_accel_core_sendmsg(sa->dev->conn, buf);
-	/* After this point buf will be delete in mlx_accel_core */
+	/* After this point buf will be freed in mlx_accel_core */
 
-	/* wait for sa_add response and handle the response */
 	res = wait_event_killable(sa->dev->wq, sa->status != IPSEC_SA_PENDING);
 	if (res != 0) {
 		pr_warn("add_sa returned before receiving response\n");
