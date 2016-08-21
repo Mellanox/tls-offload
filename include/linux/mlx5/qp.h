@@ -224,7 +224,10 @@ enum {
 };
 
 struct mlx5_wqe_eth_seg {
-	u8              rsvd0[4];
+	u8              swp_outer_l4_offset;
+	u8              swp_outer_l3_offset;
+	u8              swp_inner_l4_offset;
+	u8              swp_inner_l3_offset;
 	u8              cs_flags;
 	u8              rsvd1;
 	__be16          mss;

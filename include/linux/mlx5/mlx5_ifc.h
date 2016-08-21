@@ -2415,7 +2415,8 @@ struct mlx5_ifc_sqc_bits {
 	u8	   min_wqe_inline_mode[0x3];
 	u8         state[0x4];
 	u8         reg_umr[0x1];
-	u8         reserved_at_d[0x13];
+	u8         allow_swp[0x1];
+	u8         reserved_at_d[0x12];
 
 	u8         reserved_at_20[0x8];
 	u8         user_index[0x18];
