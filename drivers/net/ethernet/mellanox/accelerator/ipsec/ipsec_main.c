@@ -57,6 +57,8 @@ static int __init mlx_ipsec_init(void)
 {
 	int err = 0;
 
+	mlx_ipsec_init_inverse_table();
+
 	err = register_netdevice_notifier(&mlx_ipsec_netdev_notifier);
 	if (err) {
 		pr_warn("mlx_ipsec_init error in register_netdevice_notifier %d\n",

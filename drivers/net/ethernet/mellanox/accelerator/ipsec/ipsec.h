@@ -105,4 +105,6 @@ int mlx_ipsec_get_count(struct net_device *netdev);
 int mlx_ipsec_get_strings(struct net_device *netdev, uint8_t *data);
 int mlx_ipsec_get_stats(struct net_device *netdev, u64 *data);
 
+void mlx_ipsec_init_inverse_table(void);
+
 #endif	/* __IPSEC_H__ */

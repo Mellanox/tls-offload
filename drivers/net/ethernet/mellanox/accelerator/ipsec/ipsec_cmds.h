@@ -48,19 +48,16 @@ struct rcv_pet_content {
 } __packed;
 
 enum send_pet_syndrome {
-	PET_SYNDROME_OFFLOAD_REQUIRED		= 0x8,
-	PET_SYNDROME_OFFLOAD_WITH_LSO_TCP_REQUIRED	= 0x9,
-	PET_SYNDROME_OFFLOAD_WITH_LSO_IPV4_REQUIRED	= 0xA,
-	PET_SYNDROME_OFFLOAD_WITH_LSO_IPV6_REQUIRED	= 0xB,
+	PET_SYNDROME_OFFLOAD = 0x8,
+	PET_SYNDROME_OFFLOAD_WITH_LSO_TCP = 0x9,
+	PET_SYNDROME_OFFLOAD_WITH_LSO_IPV4 = 0xA,
+	PET_SYNDROME_OFFLOAD_WITH_LSO_IPV6 = 0xB,
 };
 
 struct send_pet_content {
-	/* The next two fields are meaningful only when LSO adjustments are
-	 * enabled (by the syndrome field))
-	 */
-	__be16 mss_inverse;	/* 1/MSS in 16bit fixed point */
-	__be16 seq;		/* LSBs of the first TCP seq in the packet */
-	unsigned char reserved;
+	__be16 mss_inv;		/* 1/MSS in 16bit fixed point, only for LSO */
+	__be16 seq;		/* LSBs of the first TCP seq, only for LSO */
+	u8     esp_next_proto;  /* Next protocol of ESP */
 } __packed;
 
 struct pet {

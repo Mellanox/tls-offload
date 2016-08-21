@@ -44,8 +44,12 @@ static void mlx_xfrm_del_state(struct xfrm_state *x);
 static void mlx_xfrm_free_state(struct xfrm_state *x);
 static int mlx_ipsec_dev_crypto(struct sk_buff *skb);
 static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb);
-static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb);
+static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *, bool *swp);
 static u16             mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw);
+
+#define MAX_LSO_MSS 2048
+/* Pre-calculated (Q0.16) fixed-point inverse 1/x function */
+static __be16 inverse_table[MAX_LSO_MSS];
 
 static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_state_add	= mlx_xfrm_add_state,
@@ -326,13 +330,13 @@ static void remove_dummy_dword(struct sk_buff *skb)
 	skb->mac_header += sizeof(struct dummy_dword);
 }
 
-static int insert_pet(struct sk_buff *skb)
+static struct pet *insert_pet(struct sk_buff *skb)
 {
 	struct ethhdr *eth;
 	struct pet *pet;
 
 	if (skb_cow_head(skb, sizeof(struct pet)))
-		return -ENOMEM;
+		return ERR_PTR(-ENOMEM);
 
 	eth = (struct ethhdr *)skb_push(skb, sizeof(struct pet));
 	skb->mac_header -= sizeof(struct pet);
@@ -342,10 +346,9 @@ static int insert_pet(struct sk_buff *skb)
 
 	eth->h_proto = cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE);
 
-	pet->syndrome = PET_SYNDROME_OFFLOAD_REQUIRED;
 	memset(pet->content.raw, 0, sizeof(pet->content.raw));
 
-	return 0;
+	return pet;
 }
 
 static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
@@ -361,6 +364,8 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 					    ip_skb_dst_mtu(skb->sk, skb));
 			return 0;
 		}
+		if (skb->dev->features & NETIF_F_GSO_ESP)
+			skb->sp->flags |= SKB_CRYPTO_OFFLOAD;
 	} else {
 		if (skb->len > dst_mtu(dst->path)) {
 			/* This packet is about to be IP-fragmented */
@@ -384,9 +389,16 @@ static u16 mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw)
 		return mtu - mtu_diff;
 }
 
-static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
+static __be16 mlx_ipsec_mss_inv(struct sk_buff *skb)
 {
+	return inverse_table[skb_shinfo(skb)->gso_size];
+}
+
+static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb, bool *swp)
+{
+	struct tcphdr *tcph;
 	struct xfrm_state *x;
+	struct pet *pet;
 	int iv_offset;
 	__be64 seqno;
 
@@ -412,11 +424,16 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 
 	if (x->xso.offload_handle &&
 	    skb->protocol == htons(ETH_P_IP)) {
-		if (insert_pet(skb)) {
-			pr_warn("insert_pet failed!!\n");
+		pet = insert_pet(skb);
+		if (IS_ERR(pet)) {
+			pr_warn("insert_pet failed: %ld\n", PTR_ERR(pet));
 			kfree_skb(skb);
 			skb = NULL;
+			goto out;
 		}
+		*swp = true;
+
+		/* Place the SN in the IV field */
 		seqno = cpu_to_be64(XFRM_SKB_CB(skb)->seq.output.low +
 			    ((u64)XFRM_SKB_CB(skb)->seq.output.hi << 32));
 		iv_offset = skb->transport_header + sizeof(struct ip_esp_hdr)
@@ -664,9 +681,13 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	list_add(&dev->accel_dev_list, &mlx_ipsec_devs);
 	mutex_unlock(&mlx_ipsec_mutex);
 
-	/* Add NETIF_F_HW_ESP feature */
 	dev->netdev->xfrmdev_ops = &mlx_xfrmdev_ops;
-	dev->netdev->wanted_features |= NETIF_F_HW_ESP;
+	if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, esp)) {
+		dev->netdev->wanted_features |= NETIF_F_HW_ESP;
+		if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, lso))
+			dev->netdev->wanted_features |= NETIF_F_GSO_ESP;
+	}
+
 	rtnl_lock();
 	netdev_change_features(dev->netdev);
 	rtnl_unlock();
@@ -722,4 +743,13 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 		netdev_change_features(netdev);
 		rtnl_unlock();
 	}
+}
+
+void mlx_ipsec_init_inverse_table(void)
+{
+	u32 mss;
+
+	inverse_table[1] = 0xFFFF;
+	for (mss = 2; mss < MAX_LSO_MSS; mss++)
+		inverse_table[mss] = htons(((1ULL << 32) / mss) >> 16);
 }
