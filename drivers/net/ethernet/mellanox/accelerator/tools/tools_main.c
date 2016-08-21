@@ -36,7 +36,7 @@
 #include "tools_char.h"
 
 MODULE_AUTHOR("Ilan Tayari <ilant@mellanox.com>");
-MODULE_DESCRIPTION("Mellanox FPGA Accelerator Tools Driver");
+MODULE_DESCRIPTION("Mellanox Innova Tools Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
@@ -92,7 +92,6 @@ static int __init mlx_accel_tools_init(void)
 	if (ret)
 		return ret;
 	mlx_accel_core_client_register(&mlx_accel_tools_client);
-	/* TODO: Handle errors */
 	return 0;
 }
 
