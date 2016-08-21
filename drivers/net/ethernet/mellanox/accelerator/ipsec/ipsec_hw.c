@@ -252,7 +252,7 @@ static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 
 	res = sa->status;
 	if (sa->status != IPSEC_RESPONSE_SUCCESS)
-		pr_warn("IPSec command %u failed with erro %08x\n",
+		pr_warn("IPSec command %u failed with error %08x\n",
 			cmd_id, sa->status);
 	goto out;
 

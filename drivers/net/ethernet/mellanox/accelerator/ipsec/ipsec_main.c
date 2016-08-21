@@ -36,10 +36,9 @@
 #include "ipsec.h"
 #include "ipsec_hw.h"
 
-
-/* [BP]: TODO - change these details */
 MODULE_AUTHOR("Boris Pismenny <borisp@mellanox.com>");
-MODULE_DESCRIPTION("Mellanox IPsec FPGA Accelerator Driver");
+MODULE_AUTHOR("Ilan Tayari <ilant@mellanox.com>");
+MODULE_DESCRIPTION("Mellanox Innova IPsec Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION(DRIVER_VERSION);
 
