@@ -45,7 +45,7 @@ LIST_HEAD(mlx_accel_core_clients);
 DEFINE_MUTEX(mlx_accel_core_mutex);
 
 MODULE_AUTHOR("Ilan Tayari <ilant@mellanox.com>");
-MODULE_DESCRIPTION("Mellanox FPGA Accelerator Core Driver");
+MODULE_DESCRIPTION("Mellanox Innova Core Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
