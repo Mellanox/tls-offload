@@ -432,6 +432,28 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb)
 		iv_offset = skb->transport_header + sizeof(struct ip_esp_hdr)
 					- skb_headroom(skb);
 		skb_store_bits(skb, iv_offset, &seqno, 8);
+
+		/* TODO: Not good - if packet is not linearized we need to
+		 * take this from trailer-page instead
+		 */
+		pet->content.send.esp_next_proto = *(skb_tail_pointer(skb) - 1);
+
+		if (skb_is_gso(skb)) {
+			/* Add LSO PET indication */
+			tcph = inner_tcp_hdr(skb);
+			pet->syndrome = PET_SYNDROME_OFFLOAD_WITH_LSO_TCP;
+			pet->content.send.mss_inv = mlx_ipsec_mss_inv(skb);
+			pet->content.send.seq = htons(tcph->seq & 0xFFFF);
+		} else {
+			pet->syndrome = PET_SYNDROME_OFFLOAD;
+		}
+
+		/* Remove trailer */
+		/* TODO: Not good - if packet is not linearized we need to
+		 * take this from trailer-page instead
+		 */
+		skb->len -= skb_dst(skb)->trailer_len;
+		skb->tail -= skb_dst(skb)->trailer_len;
 	}
 out:
 	return skb;
