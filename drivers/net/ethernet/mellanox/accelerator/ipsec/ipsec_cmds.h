@@ -120,6 +120,7 @@ struct __attribute__((__packed__)) sadb_entry {
 	u8 enc_auth_mode;
 	u8 enable;
 	u8 pad;
+	__be16 tfclen;
 };
 
 #define SADB_DIR_SX      BIT(7)

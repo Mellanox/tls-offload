@@ -163,6 +163,10 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 		dev_info(&netdev->dev, "Cannot offload xfrm states with AEAD key length other than 128/256 bit\n");
 		return -EINVAL;
 	}
+	if (x->tfcpad) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states without tfc padding\n");
+		return -EINVAL;
+	}
 	pr_debug("add_sa(): key_len %d\n",
 			(x->aead->alg_key_len + 7) / 8 - 4);
 
