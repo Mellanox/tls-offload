@@ -167,8 +167,14 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 		dev_info(&netdev->dev, "Cannot offload xfrm states without tfc padding\n");
 		return -EINVAL;
 	}
-	pr_debug("add_sa(): key_len %d\n",
-			(x->aead->alg_key_len + 7) / 8 - 4);
+	if (!x->geniv) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states without geniv\n");
+		return -EINVAL;
+	}
+	if (strcmp(x->geniv, "seqiv")) {
+		dev_info(&netdev->dev, "Cannot offload xfrm states with geniv other than seqiv\n");
+		return -EINVAL;
+	}
 
 	dev = mlx_ipsec_find_dev_by_netdev(netdev);
 	if (!dev) {
