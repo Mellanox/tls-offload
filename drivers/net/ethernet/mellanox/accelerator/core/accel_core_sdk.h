@@ -53,9 +53,11 @@ struct mlx_accel_core_device {
 	struct mlx5_core_dev *hw_dev;
 	struct ib_device *ib_dev;
 	char name[MLX_ACCEL_DEVICE_NAME_MAX];
-	unsigned int properties; /* accelerator properties the device support */
 	unsigned int id;
 	u8 port;
+	enum mlx_accel_fpga_status state;
+	enum mlx_accel_fpga_image last_admin_image;
+	enum mlx_accel_fpga_image last_oper_image;
 
 	struct list_head list;
 	struct list_head client_connections;
@@ -77,8 +79,25 @@ struct mlx_accel_core_device {
 };
 
 struct mlx_accel_core_client {
+	/* Informs the client that a core device was created.
+	 * The device is not yet operational at this stage
+	 * This callback is optional
+	 */
+	void (*create)(struct mlx_accel_core_device *);
+	/* Informs the client that a core device is ready and operational.
+	 * Any SBU-specific initialization should happen at this stage
+	 * @return 0 on success, nonzero error value otherwise
+	 */
 	int  (*add)(struct mlx_accel_core_device *);
+	/* Informs the client that a core device is not operational anymore.
+	 * SBU-specific cleanup should happen at this stage
+	 * This callback is called once for every successful call to add()
+	 */
 	void (*remove)(struct mlx_accel_core_device *);
+	/* Informs the client that a core device is being destroyed.
+	 * The device is not operational at this stage
+	 */
+	void (*destroy)(struct mlx_accel_core_device *);
 
 	char name[MLX_CLIENT_NAME_MAX];
 	unsigned int properties; /* accelerator properties the client support */
@@ -142,11 +161,14 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client);
 int mlx_accel_core_client_ops_register(struct net_device *netdev,
 				       struct mlx5e_accel_client_ops *ops);
 void mlx_accel_core_client_ops_unregister(struct net_device *netdev);
+int mlx_accel_core_device_reload(struct mlx_accel_core_device *accel_device,
+				 enum mlx_accel_fpga_image image);
+int mlx_accel_core_flash_select(struct mlx_accel_core_device *accel_device,
+				enum mlx_accel_fpga_image image);
 
 struct mlx_accel_core_conn *
 mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
-			   struct mlx_accel_core_conn_init_attr *
-			   conn_init_attr);
+			   struct mlx_accel_core_conn_init_attr *attr);
 void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn);
 
 int mlx_accel_core_connect(struct mlx_accel_core_conn *conn);

@@ -44,11 +44,15 @@ struct mlx_accel_client_data {
 	struct list_head  list;
 	struct mlx_accel_core_client *client;
 	void *data;
+	bool added;
 };
 
-void mlx_accel_client_context_add(struct mlx_accel_core_device *device,
-				  struct mlx_accel_core_client *client);
-void mlx_accel_client_context_del(struct mlx_accel_client_data *context);
+struct mlx_accel_client_data *
+mlx_accel_client_context_create(struct mlx_accel_core_device *device,
+				struct mlx_accel_core_client *client);
+void mlx_accel_client_context_destroy(struct mlx_accel_core_device *device,
+				      struct mlx_accel_client_data *context);
+void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device);
 
 /* RDMA */
 struct mlx_accel_core_conn *

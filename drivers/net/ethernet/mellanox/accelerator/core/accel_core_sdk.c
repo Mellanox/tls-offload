@@ -47,16 +47,24 @@ extern struct mutex mlx_accel_core_mutex;
 void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 {
 	struct mlx_accel_core_device *accel_device;
+	struct mlx_accel_client_data *context;
 
 	pr_info("mlx_accel_core_client_register called for %s\n", client->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
 
-	list_for_each_entry(accel_device, &mlx_accel_core_devices, list)
-		if (accel_device->core_conn)
-			mlx_accel_client_context_add(accel_device, client);
-
 	list_add_tail(&client->list, &mlx_accel_core_clients);
+
+	list_for_each_entry(accel_device, &mlx_accel_core_devices, list) {
+		context = mlx_accel_client_context_create(accel_device, client);
+		if (!context)
+			continue;
+		if (accel_device->state != MLX_ACCEL_FPGA_STATUS_SUCCESS)
+			continue;
+		if (client->add(accel_device))
+			continue;
+		context->added = true;
+	}
 
 	mutex_unlock(&mlx_accel_core_mutex);
 }
@@ -64,7 +72,6 @@ EXPORT_SYMBOL(mlx_accel_core_client_register);
 
 void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 {
-	struct mlx_accel_core_client *curr_client, *tmp;
 	struct mlx_accel_core_device *accel_device;
 	struct mlx_accel_client_data *context, *tmp_context;
 
@@ -80,21 +87,16 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 			pr_debug("Unregister client %p. context %p device %p client %p\n",
 				 client, context, accel_device,
 				 context->client);
-			if (context->client == client) {
+			if (context->client != client)
+				continue;
+			if (context->added)
 				client->remove(accel_device);
-				mlx_accel_client_context_del(context);
-				break;
-			}
-		}
-	}
-
-	list_for_each_entry_safe(curr_client, tmp,
-				 &mlx_accel_core_clients, list) {
-		if (curr_client == client) {
-			list_del(&client->list);
+			mlx_accel_client_context_destroy(accel_device, context);
 			break;
 		}
 	}
+
+	list_del(&client->list);
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 EXPORT_SYMBOL(mlx_accel_core_client_unregister);
@@ -121,13 +123,19 @@ EXPORT_SYMBOL(mlx_accel_core_client_ops_unregister);
 
 struct mlx_accel_core_conn *
 mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
-		struct mlx_accel_core_conn_init_attr *conn_init_attr)
+		struct mlx_accel_core_conn_init_attr *attr)
 {
+	struct mlx_accel_core_conn *ret;
+
 	pr_info("mlx_accel_core_conn_create called for %s\n",
 		accel_device->name);
 
-	return mlx_accel_core_rdma_conn_create(accel_device,
-					conn_init_attr, false);
+	ret = mlx_accel_core_rdma_conn_create(accel_device, attr, false);
+	if (IS_ERR(ret))
+		return ret;
+
+	list_add_tail(&ret->list, &accel_device->client_connections);
+	return ret;
 }
 EXPORT_SYMBOL(mlx_accel_core_conn_create);
 
@@ -136,6 +144,7 @@ void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn)
 	pr_info("mlx_accel_core_conn_destroy called for %s\n",
 			conn->accel_device->name);
 
+	list_del(&conn->list);
 	mlx_accel_core_rdma_conn_destroy(conn);
 }
 EXPORT_SYMBOL(mlx_accel_core_conn_destroy);
@@ -302,11 +311,12 @@ void mlx_accel_core_client_data_set(struct mlx_accel_core_device *accel_device,
 {
 	struct mlx_accel_client_data *context;
 
-	list_for_each_entry(context, &accel_device->client_data_list, list)
-		if (context->client == client) {
-			context->data = data;
-			return;
-		}
+	list_for_each_entry(context, &accel_device->client_data_list, list) {
+		if (context->client != client)
+			continue;
+		context->data = data;
+		return;
+	}
 
 	pr_warn("No client context found for %s/%s\n",
 		accel_device->name, client->name);
@@ -319,11 +329,12 @@ void *mlx_accel_core_client_data_get(struct mlx_accel_core_device *accel_device,
 	struct mlx_accel_client_data *context;
 	void *ret = NULL;
 
-	list_for_each_entry(context, &accel_device->client_data_list, list)
-		if (context->client == client) {
-			ret = context->data;
-			goto out;
-		}
+	list_for_each_entry(context, &accel_device->client_data_list, list) {
+		if (context->client != client)
+			continue;
+		ret = context->data;
+		goto out;
+	}
 	pr_warn("No client context found for %s/%s\n",
 		accel_device->name, client->name);
 
@@ -364,3 +375,61 @@ int mlx_accel_get_sbu_caps(struct mlx_accel_core_device *dev, int size,
 	return ret;
 }
 EXPORT_SYMBOL(mlx_accel_get_sbu_caps);
+
+int mlx_accel_core_device_reload(struct mlx_accel_core_device *accel_device,
+				 enum mlx_accel_fpga_image image)
+{
+	int err;
+
+	switch (accel_device->state) {
+	case MLX_ACCEL_FPGA_STATUS_NONE:
+		return -ENODEV;
+	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
+		return -EBUSY;
+	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
+		mlx_accel_device_teardown(accel_device);
+		break;
+	case MLX_ACCEL_FPGA_STATUS_FAILURE:
+		break;
+	}
+	if (image <= MLX_ACCEL_IMAGE_MAX) {
+		err = mlx5_fpga_load(accel_device->hw_dev, image);
+		if (err) {
+			dev_err(&accel_device->hw_dev->pdev->dev,
+				"Failed to request FPGA load: %d\n", err);
+		}
+	} else {
+		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
+					MLX5_FPGA_CTRL_OP_RESET);
+		if (err) {
+			dev_err(&accel_device->hw_dev->pdev->dev,
+				"Failed to request FPGA reset: %d\n", err);
+		}
+	}
+	accel_device->state = MLX_ACCEL_FPGA_STATUS_IN_PROGRESS;
+	return err;
+}
+EXPORT_SYMBOL(mlx_accel_core_device_reload);
+
+int mlx_accel_core_flash_select(struct mlx_accel_core_device *accel_device,
+				enum mlx_accel_fpga_image image)
+{
+	int err;
+
+	switch (accel_device->state) {
+	case MLX_ACCEL_FPGA_STATUS_NONE:
+		return -ENODEV;
+	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
+	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
+	case MLX_ACCEL_FPGA_STATUS_FAILURE:
+		break;
+	}
+
+	err = mlx5_fpga_image_select(accel_device->hw_dev, image);
+	if (err) {
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to select FPGA flash image: %d\n", err);
+	}
+	return err;
+}
+EXPORT_SYMBOL(mlx_accel_core_flash_select);

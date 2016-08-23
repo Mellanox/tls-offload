@@ -49,16 +49,34 @@ MODULE_DESCRIPTION("Mellanox Innova Core Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
-void mlx_accel_client_context_del(struct mlx_accel_client_data *context)
+static const char * const mlx_accel_fpga_error_string[] = {
+	"Corrupted DDR",
+	"Flash Timeout",
+	"Internal Link Error",
+	"Watchdog HW Failure",
+	"I2C Failure",
+	"Image Changed",
+};
+
+static const char * const mlx_accel_fpga_qp_error_string[] = {
+	"Retry Counter Expired",
+	"RNR Expired",
+};
+
+void mlx_accel_client_context_destroy(struct mlx_accel_core_device *device,
+				      struct mlx_accel_client_data *context)
 {
 	pr_debug("Deleting client context %p of client %p\n",
 		 context, context->client);
+	if (context->client->destroy)
+		context->client->destroy(device);
 	list_del(&context->list);
 	kfree(context);
 }
 
-void mlx_accel_client_context_add(struct mlx_accel_core_device *device,
-				  struct mlx_accel_core_client *client)
+struct mlx_accel_client_data *
+mlx_accel_client_context_create(struct mlx_accel_core_device *device,
+				struct mlx_accel_core_client *client)
 {
 	struct mlx_accel_client_data *context;
 
@@ -69,18 +87,20 @@ void mlx_accel_client_context_add(struct mlx_accel_core_device *device,
 	context = kmalloc(sizeof(*context), GFP_KERNEL);
 	if (!context) {
 		pr_err("Failed to allocate accel device client context\n");
-		return;
+		return NULL;
 	}
 
 	context->client = client;
 	context->data   = NULL;
+	context->added  = false;
 	list_add(&context->list, &device->client_data_list);
 
 	pr_debug("Adding client context %p device %p client %p\n",
 		 context, device, client);
 
-	if (client->add(device))
-		mlx_accel_client_context_del(context);
+	if (client->create)
+		client->create(device);
+	return context;
 }
 
 static inline struct mlx_accel_core_device *
@@ -155,18 +175,19 @@ static struct mlx_accel_core_device *mlx_accel_device_alloc(void)
 	if (!accel_device)
 		return NULL;
 
-	accel_device->properties = 0;	/* TODO: get the FPGA properties */
+	accel_device->state = MLX_ACCEL_FPGA_STATUS_NONE;
 	accel_device->id = atomic_add_return(1, &mlx_accel_device_id);
 	INIT_LIST_HEAD(&accel_device->client_data_list);
+	INIT_LIST_HEAD(&accel_device->client_connections);
 	list_add_tail(&accel_device->list, &mlx_accel_core_devices);
 	accel_device->port = 1;
 	return accel_device;
 }
 
-static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
+static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_core_conn_init_attr core_conn_attr;
-	struct mlx_accel_core_client *client;
+	struct mlx_accel_client_data *client_context;
 #ifdef DEBUG
 	__be16 *fpga_ip;
 #endif
@@ -178,14 +199,16 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 
 	err = mlx_accel_fpga_qp_device_init(accel_device);
 	if (err) {
-		pr_err("Failed to initialize FPGA QP CrSpace: %d\n", err);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to initialize FPGA QP: %d\n", err);
 		goto out;
 	}
 
 	err = ib_find_pkey(accel_device->ib_dev, accel_device->port,
 			   IB_DEFAULT_PKEY_FULL, &accel_device->pkey_index);
 	if (err) {
-		pr_err("Failed to query pkey: %d\n", err);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to query pkey: %d\n", err);
 		goto err_fpga_dev;
 	}
 	pr_debug("pkey %x index is %u\n", IB_DEFAULT_PKEY_FULL,
@@ -193,14 +216,16 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 
 	err = mlx_accel_trans_device_init(accel_device);
 	if (err) {
-		pr_err("Failed to initialize transaction machine: %d\n", err);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to initialize transaction machine: %d\n", err);
 		goto err_fpga_dev;
 	}
 
 	accel_device->pd = ib_alloc_pd(accel_device->ib_dev);
 	if (IS_ERR(accel_device->pd)) {
 		err = PTR_ERR(accel_device->pd);
-		pr_err("Failed to create PD: %d\n", err);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to create PD: %d\n", err);
 		goto err_trans;
 	}
 
@@ -209,7 +234,8 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 					 IB_ACCESS_REMOTE_WRITE);
 	if (IS_ERR(accel_device->mr)) {
 		err = PTR_ERR(accel_device->mr);
-		pr_err("Failed to create MR: %d\n", err);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to create MR: %d\n", err);
 		goto err_pd;
 	}
 
@@ -223,38 +249,68 @@ static int mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 							&core_conn_attr, true);
 	if (IS_ERR(accel_device->core_conn)) {
 		err = PTR_ERR(accel_device->core_conn);
-		pr_err("Failed to create core RC QP: %d\n", err);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to create core RC QP: %d\n", err);
 		accel_device->core_conn = NULL;
 		goto err_mr;
 	}
 
 #ifdef DEBUG
-	pr_debug("Local QPN is %u\n", accel_device->core_conn->qp->qp_num);
+	dev_dbg(&accel_device->hw_dev->pdev->dev,
+		"Local QPN is %u\n", accel_device->core_conn->qp->qp_num);
 	fpga_ip = (__be16 *)&accel_device->core_conn->fpga_qpc.fpga_ip;
-	pr_debug("FPGA device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-		 ntohs(fpga_ip[0]),
-		 ntohs(fpga_ip[1]),
-		 ntohs(fpga_ip[2]),
-		 ntohs(fpga_ip[3]),
-		 ntohs(fpga_ip[4]),
-		 ntohs(fpga_ip[5]),
-		 ntohs(fpga_ip[6]),
-		 ntohs(fpga_ip[7]));
-	pr_debug("FPGA QPN is %u\n", accel_device->core_conn->fpga_qpn);
+	dev_dbg(&accel_device->hw_dev->pdev->dev,
+		"FPGA device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+		ntohs(fpga_ip[0]), ntohs(fpga_ip[1]),
+		ntohs(fpga_ip[2]), ntohs(fpga_ip[3]),
+		ntohs(fpga_ip[4]), ntohs(fpga_ip[5]),
+		ntohs(fpga_ip[6]), ntohs(fpga_ip[7]));
+	dev_dbg(&accel_device->hw_dev->pdev->dev,
+		"FPGA QPN is %u\n", accel_device->core_conn->fpga_qpn);
 #endif
 
 #ifdef QP_SIMULATOR
-	pr_notice("**** QP Simulator mode; Waiting for QP setup ****\n");
+	dev_ntc(&accel_device->hw_dev->pdev->dev,
+		"**** QP Simulator mode; Waiting for QP setup ****\n");
 #else
 	err = mlx_accel_core_rdma_connect(accel_device->core_conn);
 	if (err) {
-		pr_err("Failed to connect core RC QP to FPGA QP: %d\n", err);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to connect core RC QP to FPGA QP: %d\n", err);
 		goto err_core_conn;
 	}
 #endif
 
-	list_for_each_entry(client, &mlx_accel_core_clients, list)
-		mlx_accel_client_context_add(accel_device, client);
+	if (accel_device->last_oper_image == MLX_ACCEL_IMAGE_USER) {
+		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
+					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
+		if (err) {
+			dev_err(&accel_device->hw_dev->pdev->dev,
+				"Failed to set SBU bypass on: %d\n", err);
+			goto err_core_conn;
+		}
+		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
+					MLX5_FPGA_CTRL_OP_RESET_SB);
+		if (err) {
+			dev_err(&accel_device->hw_dev->pdev->dev,
+				"Failed to reset SBU: %d\n", err);
+			goto err_core_conn;
+		}
+		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
+					MLX5_FPGA_CTRL_OP_SB_BYPASS_OFF);
+		if (err) {
+			dev_err(&accel_device->hw_dev->pdev->dev,
+				"Failed to set SBU bypass off: %d\n", err);
+			goto err_core_conn;
+		}
+
+		list_for_each_entry(client_context,
+				    &accel_device->client_data_list, list) {
+			if (client_context->client->add(accel_device))
+				continue;
+			client_context->added = true;
+		}
+	}
 
 	goto out;
 
@@ -272,22 +328,32 @@ err_trans:
 err_fpga_dev:
 	mlx_accel_fpga_qp_device_deinit(accel_device);
 out:
-	return err;
+	accel_device->state = err ? MLX_ACCEL_FPGA_STATUS_FAILURE :
+				    MLX_ACCEL_FPGA_STATUS_SUCCESS;
 }
 
-static void mlx_accel_device_deinit(struct mlx_accel_core_device *accel_device)
+void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 {
 	int err = 0;
-	struct mlx_accel_client_data *client_context, *tmp;
+	struct mlx_accel_client_data *client_context;
+
+	list_for_each_entry(client_context,
+			    &accel_device->client_data_list, list) {
+		if (!client_context->added)
+			continue;
+		client_context->client->remove(accel_device);
+		client_context->added = false;
+	}
+	WARN_ON(!list_empty(&accel_device->client_connections));
+
+	err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
+				MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
+	if (err) {
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to re-set SBU bypass on: %d\n", err);
+	}
 
 	if (accel_device->core_conn) {
-		list_for_each_entry_safe(client_context, tmp,
-					 &accel_device->client_data_list,
-					 list) {
-			client_context->client->remove(accel_device);
-			mlx_accel_client_context_del(client_context);
-		}
-
 		mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
 		accel_device->core_conn = NULL;
 		err = ib_dereg_mr(accel_device->mr);
@@ -299,6 +365,62 @@ static void mlx_accel_device_deinit(struct mlx_accel_core_device *accel_device)
 		mlx_accel_trans_device_deinit(accel_device);
 		mlx_accel_fpga_qp_device_deinit(accel_device);
 	}
+}
+
+static void mlx_accel_device_check(struct mlx_accel_core_device *accel_device)
+{
+	int err;
+	enum mlx_accel_fpga_status status;
+
+	err = mlx5_fpga_query(accel_device->hw_dev,
+			      &status, &accel_device->last_admin_image,
+			      &accel_device->last_oper_image);
+	if (err) {
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to query FPGA status: %d\n", err);
+		return;
+	}
+
+	switch (status) {
+	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
+		mlx_accel_device_init(accel_device);
+		break;
+	case MLX_ACCEL_FPGA_STATUS_FAILURE:
+		accel_device->state = MLX_ACCEL_FPGA_STATUS_FAILURE;
+		dev_info(&accel_device->hw_dev->pdev->dev,
+			 "FPGA device has failed\n");
+		break;
+	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
+		accel_device->state = MLX_ACCEL_FPGA_STATUS_IN_PROGRESS;
+		dev_info(&accel_device->hw_dev->pdev->dev,
+			 "FPGA device is not ready yet\n");
+		break;
+	default:
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"FPGA status unknown: %u\n", status);
+		break;
+	}
+}
+
+static void mlx_accel_device_start(struct mlx_accel_core_device *accel_device)
+{
+	struct mlx_accel_core_client *client;
+
+	list_for_each_entry(client, &mlx_accel_core_clients, list)
+		mlx_accel_client_context_create(accel_device, client);
+
+	mlx_accel_device_check(accel_device);
+}
+
+static void mlx_accel_device_stop(struct mlx_accel_core_device *accel_device)
+{
+	struct mlx_accel_client_data *context, *tmp;
+
+	list_for_each_entry_safe(context, tmp, &accel_device->client_data_list,
+				 list)
+		mlx_accel_client_context_destroy(accel_device, context);
+
+	accel_device->state = MLX_ACCEL_FPGA_STATUS_NONE;
 }
 
 static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
@@ -319,7 +441,7 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
 
 	/* An accel device is ready once it has both IB and HW devices */
 	if ((accel_device->ib_dev) && (accel_device->hw_dev))
-		mlx_accel_device_init(accel_device);
+		mlx_accel_device_start(accel_device);
 
 out:
 	mutex_unlock(&mlx_accel_core_mutex);
@@ -346,7 +468,8 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 	}
 
 	if (accel_device->hw_dev) {
-		mlx_accel_device_deinit(accel_device);
+		mlx_accel_device_teardown(accel_device);
+		mlx_accel_device_stop(accel_device);
 		accel_device->ib_dev = NULL;
 	} else {
 		list_del(&accel_device->list);
@@ -378,7 +501,7 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 
 	/* An accel device is ready once it has both IB and HW devices */
 	if ((accel_device->hw_dev) && (accel_device->ib_dev))
-		mlx_accel_device_init(accel_device);
+		mlx_accel_device_start(accel_device);
 
 out_unlock:
 	mutex_unlock(&mlx_accel_core_mutex);
@@ -397,7 +520,8 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 	mutex_lock(&mlx_accel_core_mutex);
 
 	if (accel_device->ib_dev) {
-		mlx_accel_device_deinit(accel_device);
+		mlx_accel_device_teardown(accel_device);
+		mlx_accel_device_stop(accel_device);
 		accel_device->hw_dev = NULL;
 	} else {
 		list_del(&accel_device->list);
@@ -407,25 +531,43 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 	mutex_unlock(&mlx_accel_core_mutex);
 }
 
+static const char *mlx_accel_error_string(u8 syndrome)
+{
+	if (syndrome < ARRAY_SIZE(mlx_accel_fpga_error_string))
+		return mlx_accel_fpga_error_string[syndrome];
+	return "Unknown";
+}
+
+static const char *mlx_accel_qp_error_string(u8 syndrome)
+{
+	if (syndrome < ARRAY_SIZE(mlx_accel_fpga_qp_error_string))
+		return mlx_accel_fpga_qp_error_string[syndrome];
+	return "Unknown";
+}
+
 static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
 				 u8 syndrome)
 {
-	switch (syndrome) {
-	case MLX5_FPGA_ERROR_EVENT_SYNDROME_CORRUPTED_DDR:
-		dev_warn(&accel_device->hw_dev->pdev->dev,
-			 "FPGA Error: Corrupted DDR\n");
-		break;
-	case MLX5_FPGA_ERROR_EVENT_SYNDROME_FLASH_TIMEOUT:
-		dev_warn(&accel_device->hw_dev->pdev->dev,
-			 "FPGA Error: Flash Timeout\n");
-		break;
-	case MLX5_FPGA_ERROR_EVENT_SYNDROME_INTERNAL_LINK_ERROR:
-		dev_warn(&accel_device->hw_dev->pdev->dev,
-			 "FPGA Error: Internal Link Error\n");
-		break;
-	default:
+	switch (accel_device->state) {
+	case MLX_ACCEL_FPGA_STATUS_NONE:
+	case MLX_ACCEL_FPGA_STATUS_FAILURE:
 		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Unknown FPGA Error syndrome %u\n", syndrome);
+			"Unexpected FPGA event %u: %s\n",
+			syndrome, mlx_accel_error_string(syndrome));
+		break;
+	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
+		if (syndrome != MLX5_FPGA_ERROR_EVENT_SYNDROME_IMAGE_CHANGED)
+			dev_warn(&accel_device->hw_dev->pdev->dev,
+				 "FPGA Error while loading %u: %s\n",
+				 syndrome, mlx_accel_error_string(syndrome));
+		mlx_accel_device_check(accel_device);
+		break;
+	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
+		mlx_accel_device_teardown(accel_device);
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"FPGA Error %u: %s\n",
+			syndrome, mlx_accel_error_string(syndrome));
+		accel_device->state = MLX_ACCEL_FPGA_STATUS_FAILURE;
 		break;
 	}
 }
@@ -433,23 +575,9 @@ static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
 static void mlx_accel_fpga_qp_error(struct mlx_accel_core_device *accel_device,
 				    u8 syndrome, u32 fpga_qpn)
 {
-	switch (syndrome) {
-	case MLX5_FPGA_QP_ERROR_EVENT_SYNDROME_RETRY_COUNTER_EXPIRED:
-		dev_warn(&accel_device->ib_dev->dev,
-			 "FPGA Error on QP %u: Retry counter expired\n",
-			 fpga_qpn);
-		break;
-	case MLX5_FPGA_QP_ERROR_EVENT_SYNDROME_RNR_EXPIRED:
-		dev_warn(&accel_device->ib_dev->dev,
-			 "FPGA Error on QP %u: RnR Expired\n",
-			 fpga_qpn);
-		break;
-	default:
-		dev_err(&accel_device->ib_dev->dev,
-			"Unknown FPGA Error on QP %u syndrome %u\n",
-			fpga_qpn, syndrome);
-		break;
-	}
+	dev_warn(&accel_device->ib_dev->dev,
+		 "FPGA Error %u on QP %u: %s\n",
+		 syndrome, fpga_qpn, mlx_accel_qp_error_string(syndrome));
 }
 
 static void mlx_accel_hw_dev_event_one(struct mlx5_core_dev *mdev,
