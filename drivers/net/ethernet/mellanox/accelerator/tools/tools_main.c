@@ -40,43 +40,47 @@ MODULE_DESCRIPTION("Mellanox Innova Tools Driver");
 MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
-static int
-mlx_accel_tools_add_one(struct mlx_accel_core_device *accel_device);
-static void
-mlx_accel_tools_remove_one(struct mlx_accel_core_device *accel_device);
+static void mlx_accel_tools_create(struct mlx_accel_core_device *accel_device);
+static int mlx_accel_tools_add(struct mlx_accel_core_device *accel_device);
+static void mlx_accel_tools_remove(struct mlx_accel_core_device *accel_device);
+static void mlx_accel_tools_destroy(struct mlx_accel_core_device *accel_device);
 
 static struct mlx_accel_core_client mlx_accel_tools_client = {
-	.name   = MLX_ACCEL_TOOLS_DRIVER_NAME,
-	.add    = mlx_accel_tools_add_one,
-	.remove = mlx_accel_tools_remove_one,
+	.name = MLX_ACCEL_TOOLS_DRIVER_NAME,
+	.create = mlx_accel_tools_create,
+	.add = mlx_accel_tools_add,
+	.remove = mlx_accel_tools_remove,
+	.destroy = mlx_accel_tools_destroy,
 };
 
-static int mlx_accel_tools_add_one(struct mlx_accel_core_device *accel_device)
+static void mlx_accel_tools_create(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_tools_dev *dev = NULL;
-	int ret = 0;
 
 	pr_debug("mlx_accel_tools_add_one called for %s\n", accel_device->name);
 
 	dev = mlx_accel_tools_alloc(accel_device);
-	if (!dev) {
-		ret = -ENOMEM;
-		goto out;
-	}
+	if (!dev)
+		return;
 
 	mlx_accel_core_client_data_set(accel_device,
 				       &mlx_accel_tools_client, dev);
-
-out:
-	return ret;
 }
 
-static void
-mlx_accel_tools_remove_one(struct mlx_accel_core_device *accel_device)
+static int mlx_accel_tools_add(struct mlx_accel_core_device *accel_device)
+{
+	return 0;
+}
+
+static void mlx_accel_tools_remove(struct mlx_accel_core_device *accel_device)
+{
+}
+
+static void mlx_accel_tools_destroy(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_tools_dev *dev;
 
-	pr_debug("mlx_accel_tools_remove_one called for %s\n",
+	pr_debug("mlx_accel_tools_destroy called for %s\n",
 		 accel_device->name);
 
 	dev = mlx_accel_core_client_data_get(accel_device,

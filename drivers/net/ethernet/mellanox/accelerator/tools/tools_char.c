@@ -36,7 +36,6 @@
 #include <linux/stat.h>
 #include <linux/fs.h>
 #include <linux/mlx5/accel/tools_chardev.h>
-#include <linux/mlx5/driver.h>
 
 #define CHUNK_SIZE (32 * 1024)
 
@@ -168,7 +167,7 @@ long tools_char_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 	int err = 0;
 	struct file_context *context = filep->private_data;
 	struct mlx_accel_fpga_query query;
-	struct mlx5_core_dev *dev = context->sb_dev->accel_device->hw_dev;
+	struct mlx_accel_core_device *dev = context->sb_dev->accel_device;
 
 	if (!dev)
 		return -ENXIO;
@@ -188,10 +187,11 @@ long tools_char_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 			err = -EINVAL;
 			break;
 		}
-		err = mlx5_fpga_load(dev, arg);
+		err = mlx_accel_core_device_reload(dev, arg);
 		break;
 	case IOCTL_FPGA_RESET:
-		err = mlx5_fpga_reset(dev);
+		err = mlx_accel_core_device_reload(dev,
+						   MLX_ACCEL_IMAGE_MAX + 1);
 		break;
 	case IOCTL_FPGA_IMAGE_SEL:
 		if (arg > MLX_ACCEL_IMAGE_MAX) {
@@ -199,11 +199,12 @@ long tools_char_ioctl(struct file *filep, unsigned int cmd, unsigned long arg)
 			err = -EINVAL;
 			break;
 		}
-		err = mlx5_fpga_image_select(dev, arg);
+		err = mlx_accel_core_flash_select(dev, arg);
 		break;
 	case IOCTL_FPGA_QUERY:
-		err = mlx5_fpga_query(dev, &query.status, &query.admin_image,
-				      &query.oper_image);
+		query.status = dev->state;
+		query.admin_image = dev->last_admin_image;
+		query.oper_image = dev->last_oper_image;
 		if (err)
 			break;
 
