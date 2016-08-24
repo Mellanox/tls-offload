@@ -992,7 +992,7 @@ int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps);
 int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 			 u8 *buf, bool write);
 int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image);
-int mlx5_fpga_reset(struct mlx5_core_dev *dev);
+int mlx5_fpga_ctrl_op(struct mlx5_core_dev *dev, u8 op);
 int mlx5_fpga_image_select(struct mlx5_core_dev *dev,
 			   enum mlx_accel_fpga_image image);
 int mlx5_fpga_query(struct mlx5_core_dev *dev,

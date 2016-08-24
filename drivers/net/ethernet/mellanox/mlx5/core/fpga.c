@@ -92,11 +92,15 @@ int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image)
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_load);
 
-int mlx5_fpga_reset(struct mlx5_core_dev *dev)
+int mlx5_fpga_ctrl_op(struct mlx5_core_dev *dev, u8 op)
 {
-	return mlx5_fpga_ctrl_write(dev, MLX5_FPGA_CTRL_OP_RESET, 0);
+	if (op > MLX5_FPGA_CTRL_OP_IMAGE_SEL) {
+		pr_warn("Skipping undelivered FPGA_CTRL op %u\n", op);
+		return 0;
+	}
+	return mlx5_fpga_ctrl_write(dev, op, 0);
 }
-EXPORT_SYMBOL_GPL(mlx5_fpga_reset);
+EXPORT_SYMBOL_GPL(mlx5_fpga_ctrl_op);
 
 int mlx5_fpga_image_select(struct mlx5_core_dev *dev,
 			   enum mlx_accel_fpga_image image)
