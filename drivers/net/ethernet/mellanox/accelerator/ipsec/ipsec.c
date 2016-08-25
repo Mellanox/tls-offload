@@ -180,9 +180,6 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 
 	sa_entry->hw_sa_id = UNASSIGNED_SA_ID;
 	sa_entry->sw_sa_id = atomic_inc_return(&dev->next_sw_sa_id);
-	/* WA HW bug - sw sa ID isn't respected, and instead set to sa_index */
-	sa_entry->sw_sa_id = (ntohl(x->id.daddr.a4) ^ ntohl(x->id.spi)) &
-			     0xFFFFF;
 	sa_entry->x = x;
 	sa_entry->dev = dev;
 
