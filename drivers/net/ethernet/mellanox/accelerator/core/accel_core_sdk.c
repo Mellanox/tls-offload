@@ -35,6 +35,7 @@
 #include <linux/err.h>
 #include <linux/completion.h>
 #include <rdma/ib_verbs.h>
+#include <linux/mlx5/device.h>
 
 #include "accel_core.h"
 #include "accel_core_xfer.h"
@@ -157,13 +158,13 @@ EXPORT_SYMBOL(mlx_accel_core_sendmsg);
 
 u64 mlx_accel_core_ddr_size_get(struct mlx_accel_core_device *dev)
 {
-	return 0x400000000ULL;
+	return (u64)MLX5_CAP_FPGA(dev->hw_dev, fpga_ddr_size) << 10;
 }
 EXPORT_SYMBOL(mlx_accel_core_ddr_size_get);
 
 u64 mlx_accel_core_ddr_base_get(struct mlx_accel_core_device *dev)
 {
-	return 0x400000000ULL;
+	return MLX5_CAP64_FPGA(dev->hw_dev, fpga_ddr_start_addr);
 }
 EXPORT_SYMBOL(mlx_accel_core_ddr_base_get);
 
