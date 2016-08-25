@@ -175,6 +175,7 @@ static struct mlx_accel_core_device *mlx_accel_device_alloc(void)
 	if (!accel_device)
 		return NULL;
 
+	mutex_init(&accel_device->mutex);
 	accel_device->state = MLX_ACCEL_FPGA_STATUS_NONE;
 	accel_device->id = atomic_add_return(1, &mlx_accel_device_id);
 	INIT_LIST_HEAD(&accel_device->client_data_list);
@@ -346,11 +347,13 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 	}
 	WARN_ON(!list_empty(&accel_device->client_connections));
 
-	err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
-				MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
-	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to re-set SBU bypass on: %d\n", err);
+	if (accel_device->state == MLX_ACCEL_FPGA_STATUS_SUCCESS) {
+		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
+					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
+		if (err) {
+			dev_err(&accel_device->hw_dev->pdev->dev,
+				"Failed to re-set SBU bypass on: %d\n", err);
+		}
 	}
 
 	if (accel_device->core_conn) {
@@ -409,18 +412,23 @@ static void mlx_accel_device_start(struct mlx_accel_core_device *accel_device)
 	list_for_each_entry(client, &mlx_accel_core_clients, list)
 		mlx_accel_client_context_create(accel_device, client);
 
+	mutex_lock(&accel_device->mutex);
 	mlx_accel_device_check(accel_device);
+	mutex_unlock(&accel_device->mutex);
 }
 
 static void mlx_accel_device_stop(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_client_data *context, *tmp;
 
+	mutex_lock(&accel_device->mutex);
+	mlx_accel_device_teardown(accel_device);
+	accel_device->state = MLX_ACCEL_FPGA_STATUS_NONE;
+	mutex_unlock(&accel_device->mutex);
+
 	list_for_each_entry_safe(context, tmp, &accel_device->client_data_list,
 				 list)
 		mlx_accel_client_context_destroy(accel_device, context);
-
-	accel_device->state = MLX_ACCEL_FPGA_STATUS_NONE;
 }
 
 static void mlx_accel_ib_dev_add_one(struct ib_device *dev)
@@ -468,7 +476,6 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *dev,
 	}
 
 	if (accel_device->hw_dev) {
-		mlx_accel_device_teardown(accel_device);
 		mlx_accel_device_stop(accel_device);
 		accel_device->ib_dev = NULL;
 	} else {
@@ -520,7 +527,6 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 	mutex_lock(&mlx_accel_core_mutex);
 
 	if (accel_device->ib_dev) {
-		mlx_accel_device_teardown(accel_device);
 		mlx_accel_device_stop(accel_device);
 		accel_device->hw_dev = NULL;
 	} else {
@@ -548,6 +554,7 @@ static const char *mlx_accel_qp_error_string(u8 syndrome)
 static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
 				 u8 syndrome)
 {
+	mutex_lock(&accel_device->mutex);
 	switch (accel_device->state) {
 	case MLX_ACCEL_FPGA_STATUS_NONE:
 	case MLX_ACCEL_FPGA_STATUS_FAILURE:
@@ -570,6 +577,7 @@ static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
 		accel_device->state = MLX_ACCEL_FPGA_STATUS_FAILURE;
 		break;
 	}
+	mutex_unlock(&accel_device->mutex);
 }
 
 static void mlx_accel_fpga_qp_error(struct mlx_accel_core_device *accel_device,

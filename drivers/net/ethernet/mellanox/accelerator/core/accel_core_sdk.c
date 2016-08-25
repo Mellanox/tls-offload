@@ -59,11 +59,11 @@ void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 		context = mlx_accel_client_context_create(accel_device, client);
 		if (!context)
 			continue;
-		if (accel_device->state != MLX_ACCEL_FPGA_STATUS_SUCCESS)
-			continue;
-		if (client->add(accel_device))
-			continue;
-		context->added = true;
+		mutex_lock(&accel_device->mutex);
+		if (accel_device->state == MLX_ACCEL_FPGA_STATUS_SUCCESS)
+			if (!client->add(accel_device))
+				context->added = true;
+		mutex_unlock(&accel_device->mutex);
 	}
 
 	mutex_unlock(&mlx_accel_core_mutex);
@@ -89,8 +89,10 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 				 context->client);
 			if (context->client != client)
 				continue;
+			mutex_lock(&accel_device->mutex);
 			if (context->added)
 				client->remove(accel_device);
+			mutex_unlock(&accel_device->mutex);
 			mlx_accel_client_context_destroy(accel_device, context);
 			break;
 		}
@@ -381,11 +383,14 @@ int mlx_accel_core_device_reload(struct mlx_accel_core_device *accel_device,
 {
 	int err;
 
+	mutex_lock(&accel_device->mutex);
 	switch (accel_device->state) {
 	case MLX_ACCEL_FPGA_STATUS_NONE:
-		return -ENODEV;
+		err = -ENODEV;
+		goto unlock;
 	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
-		return -EBUSY;
+		err = -EBUSY;
+		goto unlock;
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
 		mlx_accel_device_teardown(accel_device);
 		break;
@@ -407,6 +412,8 @@ int mlx_accel_core_device_reload(struct mlx_accel_core_device *accel_device,
 		}
 	}
 	accel_device->state = MLX_ACCEL_FPGA_STATUS_IN_PROGRESS;
+unlock:
+	mutex_unlock(&accel_device->mutex);
 	return err;
 }
 EXPORT_SYMBOL(mlx_accel_core_device_reload);
@@ -416,9 +423,11 @@ int mlx_accel_core_flash_select(struct mlx_accel_core_device *accel_device,
 {
 	int err;
 
+	mutex_lock(&accel_device->mutex);
 	switch (accel_device->state) {
 	case MLX_ACCEL_FPGA_STATUS_NONE:
-		return -ENODEV;
+		err = -ENODEV;
+		goto unlock;
 	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
 	case MLX_ACCEL_FPGA_STATUS_FAILURE:
@@ -430,6 +439,8 @@ int mlx_accel_core_flash_select(struct mlx_accel_core_device *accel_device,
 		dev_err(&accel_device->hw_dev->pdev->dev,
 			"Failed to select FPGA flash image: %d\n", err);
 	}
+unlock:
+	mutex_unlock(&accel_device->mutex);
 	return err;
 }
 EXPORT_SYMBOL(mlx_accel_core_flash_select);

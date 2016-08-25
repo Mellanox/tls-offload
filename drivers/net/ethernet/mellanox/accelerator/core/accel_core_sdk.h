@@ -55,6 +55,7 @@ struct mlx_accel_core_device {
 	char name[MLX_ACCEL_DEVICE_NAME_MAX];
 	unsigned int id;
 	u8 port;
+	struct mutex mutex; /* Protects state transitions */
 	enum mlx_accel_fpga_status state;
 	enum mlx_accel_fpga_image last_admin_image;
 	enum mlx_accel_fpga_image last_oper_image;
