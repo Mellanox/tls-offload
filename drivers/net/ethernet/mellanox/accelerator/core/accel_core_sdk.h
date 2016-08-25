@@ -101,7 +101,6 @@ struct mlx_accel_core_client {
 	void (*destroy)(struct mlx_accel_core_device *);
 
 	char name[MLX_CLIENT_NAME_MAX];
-	unsigned int properties; /* accelerator properties the client support */
 
 	struct list_head list;
 };
