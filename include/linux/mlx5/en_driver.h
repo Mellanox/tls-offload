@@ -46,6 +46,10 @@ struct mlx5e_accel_client_ops {
 	struct sk_buff  *(*rx_handler)(struct sk_buff *skb);
 	struct sk_buff  *(*tx_handler)(struct sk_buff *skb,
 				       struct mlx5e_swp_info *swp);
+	netdev_features_t (*feature_chk)(struct sk_buff *skb,
+					 struct net_device *netdev,
+					 netdev_features_t features,
+					 bool *done);
 	u16 (*mtu_handler)(u16 mtu, bool hw_sw_);
 	int (*get_count)(struct net_device *netdev);
 	int (*get_strings)(struct net_device *netdev, uint8_t *data);

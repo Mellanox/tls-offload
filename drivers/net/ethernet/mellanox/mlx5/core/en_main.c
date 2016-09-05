@@ -156,6 +156,7 @@ static int mlx5e_accel_get_stats(struct net_device *netdev, u64 *data)
 static struct mlx5e_accel_client_ops accel_ops_default = {
 	.rx_handler  = mlx5e_accel_rx_handler,
 	.tx_handler  = mlx5e_accel_tx_handler,
+	.feature_chk = mlx5e_accel_feature_chk,
 	.mtu_handler = mlx5e_accel_mtu_handler,
 	.get_count   = mlx5e_accel_get_count,
 	.get_strings = mlx5e_accel_get_strings,
@@ -3206,13 +3207,20 @@ static netdev_features_t mlx5e_features_check(struct sk_buff *skb,
 					      struct net_device *netdev,
 					      netdev_features_t features)
 {
+	struct mlx5e_accel_client_ops *accel_client_ops;
 	struct mlx5e_priv *priv = netdev_priv(netdev);
+	bool done = false;
 
 	features = vlan_features_check(skb, features);
 	features = vxlan_features_check(skb, features);
 
+	rcu_read_lock();
+	accel_client_ops = rcu_dereference(priv->accel_client_ops);
+	features = accel_client_ops->feature_chk(skb, netdev, features, &done);
+	rcu_read_unlock();
+
 	/* Validate if the tunneled packet is being offloaded by HW */
-	if (skb->encapsulation &&
+	if (!done && skb->encapsulation &&
 	    (features & NETIF_F_CSUM_MASK || features & NETIF_F_GSO_MASK))
 		return mlx5e_vxlan_features_check(priv, skb, features);
 
@@ -3555,6 +3563,7 @@ mlx5e_register_accel_ops(struct net_device *dev,
 
 	WARN_ON(!ops->mtu_handler || !ops->tx_handler || !ops->rx_handler);
 	WARN_ON(!ops->get_count || !ops->get_strings || !ops->get_stats);
+	WARN_ON(!ops->feature_chk);
 
 	rcu_read_lock();
 	accel_client_ops = rcu_dereference(priv->accel_client_ops);
