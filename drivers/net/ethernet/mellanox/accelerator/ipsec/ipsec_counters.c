@@ -64,7 +64,13 @@ static int mlx_ipsec_counters_count(struct mlx_ipsec_dev *dev)
 int mlx_ipsec_get_count(struct net_device *netdev)
 {
 	struct mlx_ipsec_dev *dev = mlx_ipsec_find_dev_by_netdev(netdev);
-	u32 num_ipsec_cnt = mlx_ipsec_counters_count(dev);
+	u32 num_ipsec_cnt;
+
+	if (!dev) {
+		dev_warn(&netdev->dev, "mlx_ipsec_get_count: no dev\n");
+		return 0;
+	}
+	num_ipsec_cnt = mlx_ipsec_counters_count(dev);
 
 	dev_dbg(&netdev->dev, "get_count: num_ipsec_counters=%d\n",
 		num_ipsec_cnt);
@@ -75,7 +81,13 @@ int mlx_ipsec_get_strings(struct net_device *netdev, uint8_t *data)
 {
 	int i;
 	struct mlx_ipsec_dev *dev = mlx_ipsec_find_dev_by_netdev(netdev);
-	u32 num_ipsec_cnt = mlx_ipsec_counters_count(dev);
+	u32 num_ipsec_cnt;
+
+	if (!dev) {
+		dev_warn(&netdev->dev, "mlx_ipsec_get_strings: no dev\n");
+		return 0;
+	}
+	num_ipsec_cnt = mlx_ipsec_counters_count(dev);
 
 	for (i = 0; i < num_ipsec_cnt; i++)
 		strcpy(data + (i * ETH_GSTRING_LEN), ipsec_stats_desc[i]);
@@ -87,8 +99,15 @@ int mlx_ipsec_get_stats(struct net_device *netdev, u64 *data)
 {
 	int ret;
 	struct mlx_ipsec_dev *dev = mlx_ipsec_find_dev_by_netdev(netdev);
-	u32 num_ipsec_cnt = mlx_ipsec_counters_count(dev);
-	u64 addr = (u64)MLX5_GET(ipsec_extended_cap, dev->ipsec_caps,
+	u32 num_ipsec_cnt;
+	u64 addr;
+
+	if (!dev) {
+		dev_warn(&netdev->dev, "mlx_ipsec_get_stats: no dev\n");
+		return 0;
+	}
+	num_ipsec_cnt = mlx_ipsec_counters_count(dev);
+	addr = (u64)MLX5_GET(ipsec_extended_cap, dev->ipsec_caps,
 						ipsec_counters_start_addr);
 
 	ret = mlx_accel_core_mem_read(dev->accel_device,
