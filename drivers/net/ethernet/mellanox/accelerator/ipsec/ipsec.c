@@ -37,6 +37,7 @@
 #include "ipsec_hw.h"
 #include <linux/netdevice.h>
 #include <linux/mlx5/qp.h>
+#include <crypto/aead.h>
 
 static LIST_HEAD(mlx_ipsec_devs);
 static DEFINE_MUTEX(mlx_ipsec_mutex);
@@ -371,8 +372,8 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 					    ip_skb_dst_mtu(skb->sk, skb));
 			return 0;
 		}
-		if (skb->dev->features & NETIF_F_GSO_ESP)
-			skb->sp->flags |= SKB_CRYPTO_OFFLOAD;
+		dev_dbg(&dst->dev->dev, "Accepting GSO packet of len %u\n",
+			skb->len);
 	} else {
 		if (skb->len > dst_mtu(dst->path)) {
 			/* This packet is about to be IP-fragmented */
@@ -416,10 +417,59 @@ static netdev_features_t mlx_ipsec_feature_chk(struct sk_buff *skb,
 	return features;
 }
 
+static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x,
+			   u8 *proto)
+{
+	skb_frag_t *frag;
+	u8 *vaddr;
+	u8 *trailer;
+	unsigned char last_frag;
+	struct crypto_aead *aead = x->data;
+	int alen = crypto_aead_authsize(aead);
+	int plen;
+	unsigned int trailer_len = alen;
+	struct iphdr *iphdr = (struct iphdr *)skb_network_header(skb);
+
+	if (skb_is_nonlinear(skb) && skb_shinfo(skb)->nr_frags) {
+		last_frag = skb_shinfo(skb)->nr_frags - 1;
+		frag = &skb_shinfo(skb)->frags[last_frag];
+
+		skb_frag_ref(skb, last_frag);
+		vaddr = kmap_atomic(skb_frag_page(frag));
+
+		trailer = vaddr + frag->page_offset;
+		plen = trailer[skb_frag_size(frag) - alen - 2];
+		dev_dbg(&skb->dev->dev, "   Last frag page addr %p offset %u size %u\n",
+			vaddr, frag->page_offset, frag->size);
+		print_hex_dump_bytes("Last frag ", DUMP_PREFIX_OFFSET,
+				     trailer, frag->size);
+
+		*proto = trailer[skb_frag_size(frag) - alen - 1];
+
+		kunmap_atomic(vaddr);
+		skb_frag_unref(skb, last_frag);
+
+		dev_dbg(&skb->dev->dev, "   Frag pad len is %u bytes; alen is %u\n",
+			plen, alen);
+	} else {
+		plen = *(skb_tail_pointer(skb) - alen - 2);
+		*proto = *(skb_tail_pointer(skb) - alen - 1);
+		dev_dbg(&skb->dev->dev, "   Pad len is %u bytes; alen is %u\n",
+			plen, alen);
+	}
+	trailer_len += plen + 2;
+
+	dev_dbg(&skb->dev->dev, "   Removing trailer %u bytes\n", trailer_len);
+	pskb_trim(skb, skb->len - trailer_len);
+	iphdr->tot_len = htons(ntohs(iphdr->tot_len) - trailer_len);
+	iphdr->check = htons(~(~ntohs(iphdr->check) - trailer_len));
+}
+
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 					    struct mlx5e_swp_info *swp_info)
 {
 	struct tcphdr *tcph;
+	struct ip_esp_hdr *esph;
 	struct iphdr *iiph;
 	struct xfrm_state *x;
 	struct pet *pet;
@@ -482,27 +532,25 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 					- skb_headroom(skb);
 		skb_store_bits(skb, iv_offset, &seqno, 8);
 
-		/* TODO: Not good - if packet is not linearized we need to
-		 * take this from trailer-page instead
-		 */
-		pet->content.send.esp_next_proto = *(skb_tail_pointer(skb) - 1);
-
 		if (skb_is_gso(skb)) {
 			/* Add LSO PET indication */
+			esph = (struct ip_esp_hdr *)skb_transport_header(skb);
 			tcph = inner_tcp_hdr(skb);
+			dev_dbg(&skb->dev->dev, "   Offloading GSO packet of len %u; mss %u; TCP sp %u dp %u seq 0x%x ESP seq 0x%x\n",
+				skb->len, skb_shinfo(skb)->gso_size,
+				ntohs(tcph->source), ntohs(tcph->dest),
+				ntohl(tcph->seq), ntohl(esph->seq_no));
 			pet->syndrome = PET_SYNDROME_OFFLOAD_WITH_LSO_TCP;
 			pet->content.send.mss_inv = mlx_ipsec_mss_inv(skb);
-			pet->content.send.seq = htons(tcph->seq & 0xFFFF);
+			pet->content.send.seq = htons(ntohl(tcph->seq) &
+						0xFFFF);
+			pet->content.send.esp_next_proto = skb->sp->proto;
 		} else {
 			pet->syndrome = PET_SYNDROME_OFFLOAD;
+			remove_trailer(skb, x,
+				       &pet->content.send.esp_next_proto);
 		}
 
-		/* Remove trailer */
-		/* TODO: Not good - if packet is not linearized we need to
-		 * take this from trailer-page instead
-		 */
-		skb->len -= skb_dst(skb)->trailer_len;
-		skb->tail -= skb_dst(skb)->trailer_len;
 	}
 out:
 	dev_dbg(&skb->dev->dev, "<< tx_handler\n");
