@@ -36,6 +36,7 @@
 #include "ipsec_sysfs.h"
 #include "ipsec_hw.h"
 #include <linux/netdevice.h>
+#include <linux/mlx5/qp.h>
 
 static LIST_HEAD(mlx_ipsec_devs);
 static DEFINE_MUTEX(mlx_ipsec_mutex);
@@ -44,7 +45,8 @@ static void mlx_xfrm_del_state(struct xfrm_state *x);
 static void mlx_xfrm_free_state(struct xfrm_state *x);
 static int mlx_ipsec_dev_crypto(struct sk_buff *skb);
 static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb);
-static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *, bool *swp);
+static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *,
+					    struct mlx5e_swp_info *swp_info);
 static u16             mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw);
 static netdev_features_t mlx_ipsec_feature_chk(struct sk_buff *skb,
 					       struct net_device *netdev,
@@ -414,21 +416,28 @@ static netdev_features_t mlx_ipsec_feature_chk(struct sk_buff *skb,
 	return features;
 }
 
-static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb, bool *swp)
+static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
+					    struct mlx5e_swp_info *swp_info)
 {
 	struct tcphdr *tcph;
+	struct iphdr *iiph;
 	struct xfrm_state *x;
 	struct pet *pet;
 	int iv_offset;
 	__be64 seqno;
 
-	pr_debug("mlx_ipsec_tx_handler started\n");
+	dev_dbg(&skb->dev->dev, ">> tx_handler %u bytes\n", skb->len);
 
-	if (!skb->sp)
+	if (!skb->sp) {
+		dev_dbg(&skb->dev->dev, "   no sp\n");
 		goto out;
+	}
 
-	if (!(skb->sp->flags & SKB_CRYPTO_OFFLOAD))
-		goto out;
+	if (!skb_is_gso(skb))
+		if (!(skb->sp->flags & SKB_CRYPTO_OFFLOAD)) {
+			dev_dbg(&skb->dev->dev, "   no crypto offload\n");
+			goto out;
+		}
 
 	if (skb->sp->len != 1) {
 		pr_warn_ratelimited("Cannot offload crypto for a bundle of %u XFRM states\n",
@@ -451,7 +460,20 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb, bool *swp)
 			skb = NULL;
 			goto out;
 		}
-		*swp = true;
+
+		/* Offsets are in 2-byte words, counting from start of frame */
+		swp_info->outer_l3_ofs = skb_network_offset(skb) / 2;
+		swp_info->inner_l3_ofs = skb_inner_network_offset(skb) / 2;
+		iiph = (struct iphdr *)skb_inner_network_header(skb);
+		switch (iiph->protocol) {
+		case IPPROTO_UDP:
+			swp_info->swp_flags |= MLX5_ETH_WQE_SWP_INNER_L4_UDP;
+			/* Fall through */
+		case IPPROTO_TCP:
+			swp_info->inner_l4_ofs =
+				skb_inner_transport_offset(skb) / 2;
+			break;
+		}
 
 		/* Place the SN in the IV field */
 		seqno = cpu_to_be64(XFRM_SKB_CB(skb)->seq.output.low +
@@ -483,6 +505,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb, bool *swp)
 		skb->tail -= skb_dst(skb)->trailer_len;
 	}
 out:
+	dev_dbg(&skb->dev->dev, "<< tx_handler\n");
 	return skb;
 }
 
