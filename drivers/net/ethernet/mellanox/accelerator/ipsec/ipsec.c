@@ -46,6 +46,10 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb);
 static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb);
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *, bool *swp);
 static u16             mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw);
+static netdev_features_t mlx_ipsec_feature_chk(struct sk_buff *skb,
+					       struct net_device *netdev,
+					       netdev_features_t features,
+					       bool *done);
 
 #define MAX_LSO_MSS 2048
 /* Pre-calculated (Q0.16) fixed-point inverse 1/x function */
@@ -61,6 +65,7 @@ static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 static struct mlx5e_accel_client_ops mlx_ipsec_client_ops = {
 	.rx_handler   = mlx_ipsec_rx_handler,
 	.tx_handler   = mlx_ipsec_tx_handler,
+	.feature_chk  = mlx_ipsec_feature_chk,
 	.mtu_handler  = mlx_ipsec_mtu_handler,
 	.get_count    = mlx_ipsec_get_count,
 	.get_strings  = mlx_ipsec_get_strings,
@@ -394,6 +399,21 @@ static __be16 mlx_ipsec_mss_inv(struct sk_buff *skb)
 	return inverse_table[skb_shinfo(skb)->gso_size];
 }
 
+static netdev_features_t mlx_ipsec_feature_chk(struct sk_buff *skb,
+					       struct net_device *netdev,
+					       netdev_features_t features,
+					       bool *done)
+{
+	struct xfrm_state *x;
+
+	if (skb->sp && skb->sp->len) {
+		x = skb->sp->xvec[0];
+		if (x && x->xso.offload_handle)
+			*done = true;
+	}
+	return features;
+}
+
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb, bool *swp)
 {
 	struct tcphdr *tcph;
@@ -684,8 +704,11 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	dev->netdev->xfrmdev_ops = &mlx_xfrmdev_ops;
 	if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, esp)) {
 		dev->netdev->wanted_features |= NETIF_F_HW_ESP;
-		if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, lso))
+		if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, lso)) {
+			dev_dbg(&dev->netdev->dev, "ESP GSO capability turned on\n");
 			dev->netdev->wanted_features |= NETIF_F_GSO_ESP;
+			dev->netdev->hw_enc_features |= NETIF_F_GSO_ESP;
+		}
 	}
 
 	rtnl_lock();
@@ -693,6 +716,8 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	rtnl_unlock();
 
 	mlx_ipsec_set_clear_bypass(dev, false);
+	dev_info(&dev->netdev->dev, "mlx_ipsec added on device %s\n",
+		 accel_device->name);
 	goto out;
 
 err_ops_register:
@@ -722,7 +747,9 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 
 	list_for_each_entry(dev, &mlx_ipsec_devs, accel_dev_list) {
 		if (dev->accel_device == accel_device) {
-			dev->netdev->wanted_features &= ~NETIF_F_HW_ESP;
+			dev->netdev->wanted_features &= ~(NETIF_F_HW_ESP |
+							  NETIF_F_GSO_ESP);
+			dev->netdev->hw_enc_features &= ~NETIF_F_GSO_ESP;
 			netdev = dev->netdev;
 #ifdef MLX_IPSEC_SADB_RDMA
 			mlx_accel_core_conn_destroy(dev->conn);
