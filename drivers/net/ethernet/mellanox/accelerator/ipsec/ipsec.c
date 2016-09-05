@@ -285,8 +285,6 @@ static void remove_pet(struct sk_buff *skb, struct pet *pet)
 	struct ethhdr *old_eth;
 	struct ethhdr *new_eth;
 
-	pr_debug("remove_pet started\n");
-
 	memcpy(pet, skb->data, sizeof(*pet));
 	old_eth = (struct ethhdr *)(skb->data - sizeof(struct ethhdr));
 	new_eth = (struct ethhdr *)(skb_pull_inline(skb, sizeof(struct pet)) -
@@ -304,8 +302,6 @@ static void remove_dummy_dword(struct sk_buff *skb)
 	unsigned char *new;
 	unsigned int iphdr_len = iphdr->ihl * 4;
 
-	pr_debug("remove_dummy_dword started\n");
-
 	/* We expect IP header right after the PET
 	 * with no IP options, all other are not offloaded for now
 	 */
@@ -314,11 +310,6 @@ static void remove_dummy_dword(struct sk_buff *skb)
 			be16_to_cpu(skb->protocol));
 	if (iphdr_len > sizeof(struct iphdr))
 		pr_warn("expected ETH_P_IP without IP options\n");
-
-#ifdef DEBUG
-	print_hex_dump_bytes("pkt with dummy dword ", DUMP_PREFIX_OFFSET,
-			     skb->data, skb->len);
-#endif
 
 	if (iphdr->protocol != IPPROTO_DUMMY_DWORD)
 		return;
@@ -340,7 +331,6 @@ static int insert_pet(struct sk_buff *skb)
 	struct ethhdr *eth;
 	struct pet *pet;
 
-	pr_debug("insert_pet started\n");
 	if (skb_cow_head(skb, sizeof(struct pet)))
 		return -ENOMEM;
 
@@ -464,19 +454,17 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 	struct pet pet;
 	struct xfrm_offload_state *xos;
 	struct mlx_ipsec_dev *dev;
+	struct net_device *netdev = skb->dev;
 	struct xfrm_state *xs;
 
-	/* [BP]: TODO - process incoming PET here */
-	if (skb->protocol != cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE)) {
-		pr_debug("mlx_ipsec_rx_handler: got normal packet\n");
+	if (skb->protocol != cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE))
 		goto out;
-	}
-	pr_debug("mlx_ipsec_rx_handler: processing PET\n");
 
+	dev_dbg(&netdev->dev, ">> rx_handler %u bytes\n", skb->len);
 	remove_pet(skb, &pet);
-	pr_debug("size %lu, etherType %04X, syndrome %02x, sw_sa_id %x\n",
-		 sizeof(pet), be16_to_cpu(pet.ethertype), pet.syndrome,
-		 be32_to_cpu(pet.content.rcv.sa_id));
+	dev_dbg(&netdev->dev, "   RX PET: size %lu, etherType %04X, syndrome %02x, sw_sa_id %x\n",
+		sizeof(pet), be16_to_cpu(pet.ethertype), pet.syndrome,
+		be32_to_cpu(pet.content.rcv.sa_id));
 
 	skb->protocol = pet.ethertype;
 
@@ -489,10 +477,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 		goto drop;
 	}
 
-	/* [BP]: TODO - this should use a mutex.
-	 * But, we can't do this under interrupt context.
-	 */
-	dev = find_mlx_ipsec_dev_by_netdev(skb->dev);
+	dev = find_mlx_ipsec_dev_by_netdev(netdev);
 	xs = mlx_sw_sa_id_to_xfrm_state(dev,
 			be32_to_cpu(pet.content.rcv.sa_id));
 
@@ -522,9 +507,10 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 
 drop:
 	kfree_skb(skb);
-	pr_debug("mlx_ipsec_rx_handler: dropping packet\n");
+	dev_dbg(&netdev->dev, "   rx_handler: dropping packet\n");
 	skb = NULL;
 out:
+	dev_dbg(&netdev->dev, "<< rx_handler\n");
 	return skb;
 }
 
