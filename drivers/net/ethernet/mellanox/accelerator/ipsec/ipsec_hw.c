@@ -80,6 +80,8 @@ static void mlx_ipsec_build_hw_entry(struct mlx_ipsec_sa_entry *sa,
 	struct aead_geniv_ctx *geniv_ctx;
 	int ivsize;
 
+	BUILD_BUG_ON((sizeof(struct sadb_entry) & 3) != 0);
+
 	memset(hw_entry, 0, sizeof(*hw_entry));
 
 	if (valid) {
