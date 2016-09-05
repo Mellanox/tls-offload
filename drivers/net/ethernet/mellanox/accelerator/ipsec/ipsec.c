@@ -551,6 +551,13 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 				       &pet->content.send.esp_next_proto);
 		}
 
+		dev_dbg(&skb->dev->dev, "   TX PKT len %u linear %u bytes + %u bytes in %u frags\n",
+			skb->len, skb_headlen(skb), skb->data_len,
+			skb->data_len ? skb_shinfo(skb)->nr_frags : 0);
+		dev_dbg(&skb->dev->dev, "   TX PET syndrome %u proto %u mss_inv %04x seq %04x\n",
+			pet->syndrome, pet->content.send.esp_next_proto,
+			ntohs(pet->content.send.mss_inv),
+			ntohs(pet->content.send.seq));
 	}
 out:
 	dev_dbg(&skb->dev->dev, "<< tx_handler\n");
