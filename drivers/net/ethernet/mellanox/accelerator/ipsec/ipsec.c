@@ -576,7 +576,9 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	int i;
 	struct mlx_ipsec_dev *dev = NULL;
 	struct net_device *netdev = NULL;
+#ifdef MLX_IPSEC_SADB_RDMA
 	struct mlx_accel_core_conn_init_attr init_attr = {0};
+#endif
 
 	pr_debug("mlx_ipsec_add_one called for %s\n", accel_device->name);
 
@@ -611,6 +613,7 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	atomic_set(&dev->next_sw_sa_id, 0);
 	dev->accel_device = accel_device;
 
+#ifdef MLX_IPSEC_SADB_RDMA
 	/* [BP]: TODO: Move these constants to a header */
 	init_attr.rx_size = 8;
 	init_attr.tx_size = 8;
@@ -629,9 +632,9 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 		pr_err("Failed to connect IPSec QP: %d\n", ret);
 		goto err_conn;
 	}
-
+#endif
 	netdev = accel_device->ib_dev->get_netdev(accel_device->ib_dev,
-			dev->conn->port_num);
+						  accel_device->port);
 	if (!netdev) {
 		pr_err("mlx_ipsec_add_one(): Failed to retrieve net device from ib device\n");
 		ret = -EINVAL;
@@ -676,7 +679,9 @@ err_ops_register:
 err_netdev:
 	dev_put(netdev);
 err_conn:
+#ifdef MLX_IPSEC_SADB_RDMA
 	mlx_accel_core_conn_destroy(dev->conn);
+#endif
 err_dev:
 	kfree(dev);
 out:
@@ -698,7 +703,9 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 		if (dev->accel_device == accel_device) {
 			dev->netdev->wanted_features &= ~NETIF_F_HW_ESP;
 			netdev = dev->netdev;
+#ifdef MLX_IPSEC_SADB_RDMA
 			mlx_accel_core_conn_destroy(dev->conn);
+#endif
 			mlx_ipsec_set_clear_bypass(dev, true);
 			mlx_accel_core_client_ops_unregister(netdev);
 			mlx_ipsec_free(dev);
