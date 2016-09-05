@@ -121,6 +121,7 @@ struct __attribute__((__packed__)) sadb_entry {
 	u8 enable;
 	u8 pad;
 	__be16 tfclen;
+	__be16 pad2;
 };
 
 #define SADB_DIR_SX      BIT(7)
@@ -153,15 +154,9 @@ struct sa_cmd_v4 {
 };
 
 struct ipsec_hw_response {
-#ifdef BUG_846981_FIXED
 	__be32 syndrome;
 	__be32 sw_sa_handle;
-#endif
 	u8 rsvd[24];
-#ifndef BUG_846981_FIXED
-	__be32 sw_sa_handle;
-	__be32 syndrome;
-#endif
 };
 
 #else
