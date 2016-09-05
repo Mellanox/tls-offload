@@ -217,7 +217,7 @@ static inline void mlx5e_insert_vlan(void *start, struct sk_buff *skb, u16 ihs,
 }
 
 static netdev_tx_t mlx5e_sq_xmit(struct mlx5e_sq *sq, struct sk_buff *skb,
-				 bool sw_parser)
+				 struct mlx5e_swp_info *swp_info)
 {
 	struct mlx5_wq_cyc       *wq   = &sq->wq;
 
@@ -282,17 +282,11 @@ static netdev_tx_t mlx5e_sq_xmit(struct mlx5e_sq *sq, struct sk_buff *skb,
 		num_bytes = max_t(unsigned int, skb->len, ETH_ZLEN);
 	}
 
-	if (sw_parser) {
-		/* Offsets are in 2-byte words, counting from start of frame */
-		if (skb->encapsulation) {
-			eseg->swp_inner_l3_offset =
-				skb_inner_network_offset(skb) / 2;
-			eseg->swp_inner_l4_offset =
-				skb_inner_transport_offset(skb) / 2;
-		}
-		eseg->swp_outer_l3_offset = skb_network_offset(skb) / 2;
-		eseg->swp_outer_l4_offset = skb_transport_offset(skb) / 2;
-	}
+	eseg->swp_outer_l3_offset = swp_info->outer_l3_ofs;
+	eseg->swp_outer_l4_offset = swp_info->outer_l4_ofs;
+	eseg->swp_inner_l3_offset = swp_info->inner_l3_ofs;
+	eseg->swp_inner_l4_offset = swp_info->inner_l4_ofs;
+	eseg->swp_flags = swp_info->swp_flags;
 
 	wi->num_bytes = num_bytes;
 
@@ -408,11 +402,11 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct mlx5e_priv *priv = netdev_priv(dev);
 	struct mlx5e_sq *sq = NULL;
 	struct mlx5e_accel_client_ops *accel_client_ops;
-	bool sw_parser = false;
+	struct mlx5e_swp_info swp_info = {0};
 
 	rcu_read_lock();
 	accel_client_ops = rcu_dereference(priv->accel_client_ops);
-	skb = accel_client_ops->tx_handler(skb, &sw_parser);
+	skb = accel_client_ops->tx_handler(skb, &swp_info);
 	if (!skb) {
 		rcu_read_unlock();
 		dev_kfree_skb_any(skb);
@@ -422,7 +416,7 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 
 	sq = priv->txq_to_sq_map[skb_get_queue_mapping(skb)];
 
-	return mlx5e_sq_xmit(sq, skb, sw_parser);
+	return mlx5e_sq_xmit(sq, skb, &swp_info);
 }
 
 bool mlx5e_poll_tx_cq(struct mlx5e_cq *cq, int napi_budget)

@@ -34,10 +34,19 @@
 #ifndef MLX5_EN_DRIVER_H
 #define MLX5_EN_DRIVER_H
 
+struct mlx5e_swp_info {
+	u8 outer_l4_ofs;
+	u8 outer_l3_ofs;
+	u8 inner_l4_ofs;
+	u8 inner_l3_ofs;
+	u8 swp_flags;
+};
+
 struct mlx5e_accel_client_ops {
 	struct sk_buff  *(*rx_handler)(struct sk_buff *skb);
-	struct sk_buff  *(*tx_handler)(struct sk_buff *skb, bool *swp);
-	u16              (*mtu_handler)(u16 mtu, bool hw_sw_);
+	struct sk_buff  *(*tx_handler)(struct sk_buff *skb,
+				       struct mlx5e_swp_info *swp);
+	u16 (*mtu_handler)(u16 mtu, bool hw_sw_);
 	int (*get_count)(struct net_device *netdev);
 	int (*get_strings)(struct net_device *netdev, uint8_t *data);
 	int (*get_stats)(struct net_device *netdev, u64 *data);

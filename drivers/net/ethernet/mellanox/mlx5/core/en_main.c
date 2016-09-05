@@ -114,7 +114,16 @@ static void mlx5e_set_rq_priv_params(struct mlx5e_priv *priv)
 	mlx5e_set_rq_type_params(priv, rq_type);
 }
 
-static struct sk_buff *mlx5e_accel_tx_handler(struct sk_buff *skb, bool *swp)
+static netdev_features_t mlx5e_accel_feature_chk(struct sk_buff *skb,
+						 struct net_device *netdev,
+						 netdev_features_t features,
+						 bool *done)
+{
+	return features;
+}
+
+static struct sk_buff *mlx5e_accel_tx_handler(struct sk_buff *skb,
+					      struct mlx5e_swp_info *swp)
 {
 	return skb;
 }
