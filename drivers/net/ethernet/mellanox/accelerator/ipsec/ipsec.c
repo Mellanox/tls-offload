@@ -150,16 +150,20 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 		dev_info(&netdev->dev, "Cannot offload compressed xfrm states\n");
 		return -EINVAL;
 	}
-	if (x->props.flags != 0) {
-		dev_info(&netdev->dev, "Cannot offload xfrm states with flags\n");
+	if (x->props.flags & XFRM_STATE_ESN) {
+		dev_info(&netdev->dev, "Cannot offload ESN xfrm states\n");
 		return -EINVAL;
 	}
 	if (x->props.family != AF_INET) {
 		dev_info(&netdev->dev, "Only IPv4 xfrm state may be offloaded\n");
 		return -EINVAL;
 	}
-	if (x->props.extra_flags != 0) {
-		dev_info(&netdev->dev, "Cannot offload xfrm states with extra flags\n");
+	if (x->id.proto != IPPROTO_ESP) {
+		dev_info(&netdev->dev, "Only ESP xfrm state may be offloaded\n");
+		return -EINVAL;
+	}
+	if (x->encap) {
+		dev_info(&netdev->dev, "Encapsulated xfrm state may not be offloaded\n");
 		return -EINVAL;
 	}
 	if (!x->aead) {
