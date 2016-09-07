@@ -785,7 +785,8 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 
 	dev->netdev->xfrmdev_ops = &mlx_xfrmdev_ops;
 	if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, esp)) {
-		dev->netdev->wanted_features |= NETIF_F_HW_ESP;
+		dev->netdev->wanted_features |= NETIF_F_HW_ESP |
+						NETIF_F_HW_ESP_TX_CSUM;
 		if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, lso)) {
 			dev_dbg(&dev->netdev->dev, "ESP GSO capability turned on\n");
 			dev->netdev->wanted_features |= NETIF_F_GSO_ESP;
@@ -830,7 +831,7 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 	list_for_each_entry(dev, &mlx_ipsec_devs, accel_dev_list) {
 		if (dev->accel_device == accel_device) {
 			dev->netdev->wanted_features &= ~(NETIF_F_HW_ESP |
-							  NETIF_F_GSO_ESP);
+				NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
 			dev->netdev->hw_enc_features &= ~NETIF_F_GSO_ESP;
 			netdev = dev->netdev;
 #ifdef MLX_IPSEC_SADB_RDMA
