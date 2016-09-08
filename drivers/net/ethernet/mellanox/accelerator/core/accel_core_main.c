@@ -38,6 +38,7 @@
 #include "accel_core.h"
 #include "accel_core_trans.h"
 
+static struct workqueue_struct *mlx_accel_core_workq;
 atomic_t mlx_accel_device_id = ATOMIC_INIT(0);
 LIST_HEAD(mlx_accel_core_devices);
 LIST_HEAD(mlx_accel_core_clients);
@@ -50,6 +51,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 MODULE_VERSION("0.1");
 
 static const char * const mlx_accel_fpga_error_string[] = {
+	"Null Syndrome",
 	"Corrupted DDR",
 	"Flash Timeout",
 	"Internal Link Error",
@@ -59,9 +61,25 @@ static const char * const mlx_accel_fpga_error_string[] = {
 };
 
 static const char * const mlx_accel_fpga_qp_error_string[] = {
+	"Null Syndrome",
 	"Retry Counter Expired",
 	"RNR Expired",
 };
+
+int mlx_accel_core_workq_init(void)
+{
+	mlx_accel_core_workq = create_workqueue("mlx_accel_core");
+	if (!mlx_accel_core_workq)
+		return -ENOMEM;
+	return 0;
+}
+
+void mlx_accel_core_workq_deinit(void)
+{
+	flush_workqueue(mlx_accel_core_workq);
+	destroy_workqueue(mlx_accel_core_workq);
+	mlx_accel_core_workq = NULL;
+}
 
 void mlx_accel_client_context_destroy(struct mlx_accel_core_device *device,
 				      struct mlx_accel_client_data *context)
@@ -558,9 +576,19 @@ static const char *mlx_accel_qp_error_string(u8 syndrome)
 	return "Unknown";
 }
 
-static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
-				 u8 syndrome)
+struct my_work {
+	struct work_struct work;
+	struct mlx_accel_core_device *accel_device;
+	u8 syndrome;
+	u32 fpga_qpn;
+};
+
+static void mlx_accel_fpga_error(struct work_struct *work)
 {
+	struct my_work *mywork = container_of(work, struct my_work, work);
+	struct mlx_accel_core_device *accel_device = mywork->accel_device;
+	u8 syndrome = mywork->syndrome;
+
 	mutex_lock(&accel_device->mutex);
 	switch (accel_device->state) {
 	case MLX_ACCEL_FPGA_STATUS_NONE:
@@ -574,7 +602,8 @@ static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
 			dev_warn(&accel_device->hw_dev->pdev->dev,
 				 "FPGA Error while loading %u: %s\n",
 				 syndrome, mlx_accel_error_string(syndrome));
-		mlx_accel_device_check(accel_device);
+		else
+			mlx_accel_device_check(accel_device);
 		break;
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
 		mlx_accel_device_teardown(accel_device);
@@ -587,9 +616,13 @@ static void mlx_accel_fpga_error(struct mlx_accel_core_device *accel_device,
 	mutex_unlock(&accel_device->mutex);
 }
 
-static void mlx_accel_fpga_qp_error(struct mlx_accel_core_device *accel_device,
-				    u8 syndrome, u32 fpga_qpn)
+static void mlx_accel_fpga_qp_error(struct work_struct *work)
 {
+	struct my_work *mywork = container_of(work, struct my_work, work);
+	struct mlx_accel_core_device *accel_device = mywork->accel_device;
+	u8 syndrome = mywork->syndrome;
+	u32 fpga_qpn = mywork->fpga_qpn;
+
 	dev_warn(&accel_device->ib_dev->dev,
 		 "FPGA Error %u on QP %u: %s\n",
 		 syndrome, fpga_qpn, mlx_accel_qp_error_string(syndrome));
@@ -599,29 +632,34 @@ static void mlx_accel_hw_dev_event_one(struct mlx5_core_dev *mdev,
 				       void *context, enum mlx5_dev_event event,
 				       unsigned long param)
 {
+	struct my_work *work;
 	struct mlx_accel_core_device *accel_device =
 			(struct mlx_accel_core_device *)context;
 
-	pr_debug("mlx_accel_hw_dev_event_one called for %s with %d\n",
-		  accel_device->name, event);
+	work = kzalloc(sizeof(*work), GFP_ATOMIC);
+	if (!work)
+		return;
+
+	work->accel_device = accel_device;
 
 	switch (event) {
 	case MLX5_DEV_EVENT_FPGA_ERROR:
-		mlx_accel_fpga_error(accel_device,
-				     MLX5_GET(fpga_error_event,
-					      (void *)param, syndrome));
+		INIT_WORK(&work->work, mlx_accel_fpga_error);
+		work->syndrome = MLX5_GET(fpga_error_event,
+					(void *)param, syndrome);
 		break;
 	case MLX5_DEV_EVENT_FPGA_QP_ERROR:
-		mlx_accel_fpga_qp_error(accel_device,
-					MLX5_GET(fpga_qp_error_event,
-						 (void *)param, syndrome),
-					MLX5_GET(fpga_qp_error_event,
-						 (void *)param, fpga_qpn));
+		INIT_WORK(&work->work, mlx_accel_fpga_qp_error);
+		work->syndrome = MLX5_GET(fpga_qp_error_event,
+					(void *)param, syndrome);
+		work->fpga_qpn = MLX5_GET(fpga_qp_error_event,
+					(void *)param, fpga_qpn);
 		break;
 
 	default:
-		break;
+		return;
 	}
+	queue_work(mlx_accel_core_workq, &work->work);
 }
 
 static struct ib_client mlx_accel_ib_client = {
@@ -639,10 +677,17 @@ static struct mlx5_interface mlx_accel_hw_intf  = {
 static int __init mlx_accel_core_init(void)
 {
 	int rc;
+
+	rc = mlx_accel_core_workq_init();
+	if (rc) {
+		pr_err("mlx_accel_core failed to create event workq\n");
+		goto err;
+	}
+
 	rc = mlx5_register_interface(&mlx_accel_hw_intf);
 	if (rc) {
 		pr_err("mlx5_register_interface failed\n");
-		goto err;
+		goto err_workq;
 	}
 
 	rc = ib_register_client(&mlx_accel_ib_client);
@@ -652,8 +697,11 @@ static int __init mlx_accel_core_init(void)
 	}
 
 	return 0;
+
 err_register_intf:
 	mlx5_unregister_interface(&mlx_accel_hw_intf);
+err_workq:
+	mlx_accel_core_workq_deinit();
 err:
 	return rc;
 }
@@ -662,6 +710,7 @@ static void __exit mlx_accel_core_exit(void)
 {
 	ib_unregister_client(&mlx_accel_ib_client);
 	mlx5_unregister_interface(&mlx_accel_hw_intf);
+	mlx_accel_core_workq_deinit();
 }
 
 module_init(mlx_accel_core_init);
