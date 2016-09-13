@@ -385,7 +385,6 @@ static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
 					    skb->len, dst_mtu(dst->path));
 			return 0;
 		}
-		skb->sp->flags |= SKB_CRYPTO_OFFLOAD;
 	}
 
 	return 1;
@@ -486,12 +485,6 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 		dev_dbg(&skb->dev->dev, "   no sp\n");
 		goto out;
 	}
-
-	if (!skb_is_gso(skb))
-		if (!(skb->sp->flags & SKB_CRYPTO_OFFLOAD)) {
-			dev_dbg(&skb->dev->dev, "   no crypto offload\n");
-			goto out;
-		}
 
 	if (skb->sp->len != 1) {
 		pr_warn_ratelimited("Cannot offload crypto for a bundle of %u XFRM states\n",
