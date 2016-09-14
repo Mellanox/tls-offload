@@ -206,7 +206,7 @@ int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
 	fpga_qpc_to_mailbox(fpga_qpc,
 			    MLX5_ADDR_OF(fpga_create_qp_in, in, fpga_qpc));
 
-	ret = mlx5_cmd_exec_check_status(dev, in, sizeof(in), out, sizeof(out));
+	ret = mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 	if (ret)
 		goto out;
 
@@ -232,7 +232,7 @@ int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
 	fpga_qpc_to_mailbox(fpga_qpc,
 			    MLX5_ADDR_OF(fpga_modify_qp_in, in, fpga_qpc));
 
-	return mlx5_cmd_exec_check_status(dev, in, sizeof(in), out, sizeof(out));
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_modify_qp);
 
@@ -247,7 +247,7 @@ int mlx5_fpga_query_qp(struct mlx5_core_dev *dev,
 	MLX5_SET(fpga_query_qp_in, in, opcode, MLX5_CMD_OP_FPGA_QUERY_QP);
 	MLX5_SET(fpga_query_qp_in, in, fpga_qpn, fpga_qpn);
 
-	ret = mlx5_cmd_exec_check_status(dev, in, sizeof(in), out, sizeof(out));
+	ret = mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 	if (ret)
 		goto out;
 
@@ -267,7 +267,7 @@ int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn)
 	MLX5_SET(fpga_destroy_qp_in, in, opcode, MLX5_CMD_OP_FPGA_DESTROY_QP);
 	MLX5_SET(fpga_destroy_qp_in, in, fpga_qpn, fpga_qpn);
 
-	return mlx5_cmd_exec_check_status(dev, in, sizeof(in), out, sizeof(out));
+	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_destroy_qp);
 
@@ -284,7 +284,7 @@ int mlx5_fpga_query_qp_counters(struct mlx5_core_dev *dev, u32 fpga_qpn,
 	MLX5_SET(fpga_query_qp_counters_in, in, clear, clear);
 	MLX5_SET(fpga_query_qp_counters_in, in, fpga_qpn, fpga_qpn);
 
-	ret = mlx5_cmd_exec_check_status(dev, in, sizeof(in), out, sizeof(out));
+	ret = mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
 	if (ret)
 		goto out;
 
