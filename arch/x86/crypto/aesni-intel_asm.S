@@ -229,6 +229,9 @@ XMM2 XMM3 XMM4 XMMDst TMP6 TMP7 i i_seq operation
         MOVADQ     SHUF_MASK(%rip), %xmm14
 	mov	   arg7, %r10           # %r10 = AAD
 	mov	   arg8, %r12           # %r12 = aadLen
+	add        $3, %r12
+	and        $~3, %r12
+
 	mov	   %r12, %r11
 	pxor	   %xmm\i, %xmm\i
 
@@ -454,6 +457,9 @@ XMM2 XMM3 XMM4 XMMDst TMP6 TMP7 i i_seq operation
         MOVADQ     SHUF_MASK(%rip), %xmm14
 	mov	   arg7, %r10           # %r10 = AAD
 	mov	   arg8, %r12           # %r12 = aadLen
+	add        $3, %r12
+	and        $~3, %r12
+
 	mov	   %r12, %r11
 	pxor	   %xmm\i, %xmm\i
 _get_AAD_loop\num_initial_blocks\operation:
