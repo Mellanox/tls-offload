@@ -44,7 +44,7 @@ static DEFINE_MUTEX(mlx_ipsec_mutex);
 static int mlx_xfrm_add_state(struct xfrm_state *x);
 static void mlx_xfrm_del_state(struct xfrm_state *x);
 static void mlx_xfrm_free_state(struct xfrm_state *x);
-static int mlx_ipsec_dev_crypto(struct sk_buff *skb);
+static bool mlx_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x);
 static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb);
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *,
 					    struct mlx5e_swp_info *swp_info);
@@ -61,8 +61,8 @@ static __be16 inverse_table[MAX_LSO_MSS];
 static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_state_add	= mlx_xfrm_add_state,
 	.xdo_dev_state_delete	= mlx_xfrm_del_state,
-	.xdo_dev_state_free = mlx_xfrm_free_state,
-	.xdo_dev_crypto		= mlx_ipsec_dev_crypto,
+	.xdo_dev_state_free	= mlx_xfrm_free_state,
+	.xdo_dev_offload_ok	= mlx_ipsec_offload_ok,
 };
 
 static struct mlx5e_accel_client_ops mlx_ipsec_client_ops = {
@@ -363,31 +363,9 @@ static struct pet *insert_pet(struct sk_buff *skb)
 	return pet;
 }
 
-static int mlx_ipsec_dev_crypto(struct sk_buff *skb)
+static bool mlx_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x)
 {
-	struct dst_entry *dst = skb_dst(skb);
-
-	if (skb_is_gso(skb)) {
-		if (skb_gso_network_seglen(skb) >
-		    ip_skb_dst_mtu(skb->sk, skb)) {
-			/* This GSO packet is about to be IP-fragmented */
-			pr_info_ratelimited("Skipping offload of %u-seglen GSO packet on path mtu %u\n",
-					    skb_gso_network_seglen(skb),
-					    ip_skb_dst_mtu(skb->sk, skb));
-			return 0;
-		}
-		dev_dbg(&dst->dev->dev, "Accepting GSO packet of len %u\n",
-			skb->len);
-	} else {
-		if (skb->len > dst_mtu(dst->path)) {
-			/* This packet is about to be IP-fragmented */
-			pr_info_ratelimited("Skipping offload of %u-bytes packet on path mtu %u\n",
-					    skb->len, dst_mtu(dst->path));
-			return 0;
-		}
-	}
-
-	return 1;
+	return true;
 }
 
 static u16 mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw)
