@@ -1338,26 +1338,30 @@ static int do_test(const char *alg, u32 type, u32 mask, int m)
 		break;
 
 	case 152:
-		ret += tcrypt_test("rfc4543(gcm(aes))");
+		ret += tcrypt_test("rfc5288(gcm(aes))");
 		break;
 
 	case 153:
-		ret += tcrypt_test("cmac(aes)");
+		ret += tcrypt_test("rfc4543(gcm(aes))");
 		break;
 
 	case 154:
-		ret += tcrypt_test("cmac(des3_ede)");
+		ret += tcrypt_test("cmac(aes)");
 		break;
 
 	case 155:
-		ret += tcrypt_test("authenc(hmac(sha1),cbc(aes))");
+		ret += tcrypt_test("cmac(des3_ede)");
 		break;
 
 	case 156:
-		ret += tcrypt_test("authenc(hmac(md5),ecb(cipher_null))");
+		ret += tcrypt_test("authenc(hmac(sha1),cbc(aes))");
 		break;
 
 	case 157:
+		ret += tcrypt_test("authenc(hmac(md5),ecb(cipher_null))");
+		break;
+
+	case 158:
 		ret += tcrypt_test("authenc(hmac(sha1),ecb(cipher_null))");
 		break;
 	case 181:
