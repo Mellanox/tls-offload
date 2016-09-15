@@ -15193,6 +15193,8 @@ static struct cipher_testvec cast6_xts_dec_tv_template[] = {
 #define AES_GCM_DEC_TEST_VECTORS 8
 #define AES_GCM_4106_ENC_TEST_VECTORS 23
 #define AES_GCM_4106_DEC_TEST_VECTORS 23
+#define AES_GCM_5288_ENC_TEST_VECTORS 1
+#define AES_GCM_5288_DEC_TEST_VECTORS 1
 #define AES_GCM_4543_ENC_TEST_VECTORS 1
 #define AES_GCM_4543_DEC_TEST_VECTORS 2
 #define AES_CCM_ENC_TEST_VECTORS 8
@@ -21932,6 +21934,7 @@ static struct aead_testvec aes_gcm_rfc4106_dec_tv_template[] = {
 		.assoc  = "\x01\x01\x01\x01\x01\x01\x01\x01"
 			  "\x00\x00\x00\x00\x00\x00\x00\x00",
 		.alen   = 16,
+
 		.result = "\x01\x01\x01\x01\x01\x01\x01\x01"
 			  "\x01\x01\x01\x01\x01\x01\x01\x01",
 		.rlen   = 16,
@@ -22483,6 +22486,50 @@ static struct aead_testvec aes_gcm_rfc4106_dec_tv_template[] = {
 			  "\xC4\xE0\xD5\x8C\x86\xCD\x2B\xC0",
 		.ilen	= 48,
 	}
+};
+
+static struct aead_testvec aes_gcm_rfc5288_enc_tv_template[] = {
+	{
+		.key	= "\x34\x19\x96\x6e\xc5\x8c\x17\x9c"
+			  "\x56\x78\x5e\xbb\x30\x52\x21\x89"
+			  "\xea\xbc\x6e\x50",
+		.klen	= 20,
+		.iv	= "\x00\x00\x00\x00\x00\x00\x00\x01"
+			  "\x5f\x73\x65\x73",
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x01"
+			  "\x17\x03\x03\x00\x10\x00\x00\x00"
+			  "\x00\x00\x00\x00\x00",
+		.alen	= 21,
+		.input	= zeroed_string,
+		.ilen	= 16,
+		.result	= "\xa5\x2b\x6c\x6e\x2d\x78\x6f\x80"
+			  "\x0e\x65\x69\x70\x0a\xe8\x86\xed"
+			  "\x6d\x38\x29\x1d\x35\x3f\x62\xcf"
+			  "\x46\x9c\x19\x78\x00\x0d\x67\xaa",
+		.rlen	= 32,
+	}
+};
+
+static struct aead_testvec aes_gcm_rfc5288_dec_tv_template[] = {
+	{
+		.key	= "\x73\xf0\xfa\x44\x76\xf5\xd5\x17"
+			  "\x00\x12\x42\x85\xcb\x4f\x92\x1f"
+			  "\x7d\x63\x9f\xc6",
+		.klen	= 20,
+		.iv	= "\x00\x00\x00\x00\x00\x00\x00\x01"
+			  "\x74\x61\x73\x6b",
+		.assoc	= "\x00\x00\x00\x00\x00\x00\x00\x01"
+			  "\x17\x03\x03\x00\x10\x00\x00\x00"
+			  "\x00\x00\x00\x00\x00",
+		.alen	= 21,
+		.input	= "\x05\x56\x46\x23\x1c\x86\x5e\xd0"
+			  "\x12\x37\x2a\xa3\x65\x8b\x8c\x90"
+			  "\xab\xbd\xca\xda\xae\x6e\xc0\xb2"
+			  "\x91\x1b\x9b\x34\xe3\xea\x86\x8f",
+		.ilen	= 32,
+		.result	= zeroed_string,
+		.rlen	= 16,
+	},
 };
 
 static struct aead_testvec aes_gcm_rfc4543_enc_tv_template[] = {
