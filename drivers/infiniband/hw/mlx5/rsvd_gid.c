@@ -33,13 +33,14 @@
 #include <linux/mlx5_ib/driver.h>
 #include "mlx5_ib.h"
 
+#define MLX5_FPGA_MAX_NUM_QPS 2
 void mlx5_ib_reserved_gid_init(struct mlx5_ib_dev *dev)
 {
 	int ix;
 	unsigned int count = 0;
 
 	if (MLX5_CAP_GEN(dev->mdev, fpga))
-		count = MLX5_CAP_FPGA_SHELL(dev->mdev, max_num_qps);
+		count = MLX5_FPGA_MAX_NUM_QPS;
 
 	if (count > MLX5_MAX_RESERVED_GIDS)
 		count = MLX5_MAX_RESERVED_GIDS;
