@@ -169,13 +169,13 @@ EXPORT_SYMBOL(mlx_accel_core_sendmsg);
 
 u64 mlx_accel_core_ddr_size_get(struct mlx_accel_core_device *dev)
 {
-	return (u64)MLX5_CAP_FPGA(dev->hw_dev, fpga_ddr_size) << 10;
+	return (u64)MLX5_CAP_FPGA(dev, fpga_ddr_size) << 10;
 }
 EXPORT_SYMBOL(mlx_accel_core_ddr_size_get);
 
 u64 mlx_accel_core_ddr_base_get(struct mlx_accel_core_device *dev)
 {
-	return MLX5_CAP64_FPGA(dev->hw_dev, fpga_ddr_start_addr);
+	return MLX5_CAP64_FPGA(dev, fpga_ddr_start_addr);
 }
 EXPORT_SYMBOL(mlx_accel_core_ddr_base_get);
 
@@ -355,8 +355,8 @@ EXPORT_SYMBOL(mlx_accel_core_kobj);
 int mlx_accel_get_sbu_caps(struct mlx_accel_core_device *dev, int size,
 			   void *buf)
 {
-	u64 addr = MLX5_CAP64_FPGA(dev->hw_dev, sandbox_extended_caps_addr);
-	int cap_size = MLX5_CAP_FPGA(dev->hw_dev, sandbox_extended_caps_len);
+	u64 addr = MLX5_CAP64_FPGA(dev, sandbox_extended_caps_addr);
+	int cap_size = MLX5_CAP_FPGA(dev, sandbox_extended_caps_len);
 	int ret;
 
 	pr_debug("Reading %d bytes SBU caps from addr 0x%llx\n", size, addr);

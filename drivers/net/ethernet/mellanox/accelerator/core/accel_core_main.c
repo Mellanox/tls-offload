@@ -198,6 +198,13 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		 accel_device->ib_dev->name,
 		 accel_device->hw_dev->priv.name);
 
+	err = mlx5_fpga_caps(accel_device->hw_dev, accel_device->fpga_caps);
+	if (err) {
+		dev_err(&accel_device->hw_dev->pdev->dev,
+			"Failed to query FPGA capabilities: %d\n", err);
+		goto out;
+	}
+
 	err = mlx_accel_fpga_qp_device_init(accel_device);
 	if (err) {
 		dev_err(&accel_device->hw_dev->pdev->dev,
