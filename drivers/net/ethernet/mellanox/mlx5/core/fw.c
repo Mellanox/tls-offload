@@ -154,12 +154,6 @@ int mlx5_query_hca_caps(struct mlx5_core_dev *dev)
 			return err;
 	}
 
-	if (MLX5_CAP_GEN(dev, fpga)) {
-		err = mlx5_fpga_caps(dev, dev->fpga_caps);
-		if (err)
-			return err;
-	}
-
 	return 0;
 }
 
