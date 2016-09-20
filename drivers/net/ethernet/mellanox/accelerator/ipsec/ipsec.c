@@ -672,7 +672,7 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 
 	pr_debug("mlx_ipsec_add_one called for %s\n", accel_device->name);
 
-	if (MLX5_CAP_FPGA(accel_device->hw_dev, sandbox_product_id) !=
+	if (MLX5_CAP_FPGA(accel_device, sandbox_product_id) !=
 			MLX5_FPGA_CAP_SANDBOX_PRODUCT_ID_IPSEC) {
 		ret = -EINVAL;
 		goto out;
