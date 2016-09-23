@@ -71,6 +71,94 @@ static int esp4_gro_complete(struct sk_buff *skb, int nhoff)
 	return err;
 }
 
+static void esp4_gso_encap(struct xfrm_state *x, struct sk_buff *skb)
+{
+	struct ip_esp_hdr *esph;
+	struct iphdr *iph = ip_hdr(skb);
+	struct xfrm_offload *xo = xfrm_offload(skb);
+	int proto = iph->protocol;
+
+	skb_push(skb, -skb_network_offset(skb));
+	esph = ip_esp_hdr(skb);
+	*skb_mac_header(skb) = IPPROTO_ESP;
+
+	esph->spi = x->id.spi;
+	esph->seq_no = htonl(XFRM_SKB_CB(skb)->seq.output.low);
+
+	xo->proto = proto;
+}
+
+static struct sk_buff *esp4_gso_segment(struct sk_buff *skb,
+				        netdev_features_t features)
+{
+	__u32 seq;
+	int err = 0;
+	struct sk_buff *skb2;
+	struct xfrm_state *x;
+	struct ip_esp_hdr *esph;
+	struct crypto_aead *aead;
+	struct sk_buff *segs = ERR_PTR(-EINVAL);
+	netdev_features_t esp_features = features;
+	struct xfrm_offload *xo = xfrm_offload(skb);
+
+	if (!xo)
+		goto out;
+
+	seq = xo->seq.low;
+
+	x = skb->sp->xvec[skb->sp->len - 1];
+	aead = x->data;
+	esph = ip_esp_hdr(skb);
+
+	if (esph->spi != x->id.spi)
+		goto out;
+
+	if (!pskb_may_pull(skb, sizeof(*esph) + crypto_aead_ivsize(aead)))
+		goto out;
+
+	__skb_pull(skb, sizeof(*esph) + crypto_aead_ivsize(aead));
+
+	skb->encap_hdr_csum = 1;
+
+	if (!(features & NETIF_F_HW_ESP))
+		esp_features = features & ~(NETIF_F_SG | NETIF_F_CSUM_MASK);
+
+	segs = x->outer_mode->gso_segment(x, skb, esp_features);
+	if (IS_ERR_OR_NULL(segs))
+		goto out;
+
+	__skb_pull(skb, skb->data - skb_mac_header(skb));
+
+	skb2 = segs;
+	do {
+		struct sk_buff *nskb = skb2->next;
+
+		xo = xfrm_offload(skb2);
+		xo->flags |= XFRM_GSO_SEGMENT;
+		xo->seq.low = seq;
+		xo->seq.hi = xfrm_replay_seqhi(x, seq);
+
+		if(!(features & NETIF_F_HW_ESP))
+			xo->flags |= CRYPTO_FALLBACK;
+
+		x->outer_mode->xmit(x, skb2);
+
+		err = x->type_offload->xmit(x, skb2, esp_features);
+		if (err) {
+			kfree_skb_list(segs);
+			return ERR_PTR(err);
+		}
+
+		seq++;
+
+		skb_push(skb2, skb2->mac_len);
+		skb2 = nskb;
+	} while (skb2);
+
+out:
+	return segs;
+}
+
 static int esp_input_tail(struct xfrm_state *x, struct sk_buff *skb)
 {
 	struct crypto_aead *aead = x->data;
@@ -159,6 +247,7 @@ static const struct net_offload esp4_offload = {
 	.callbacks = {
 		.gro_receive = esp4_gro_receive,
 		.gro_complete = esp4_gro_complete,
+		.gso_segment = esp4_gso_segment,
 	},
 };
 
@@ -168,6 +257,7 @@ static const struct xfrm_type_offload esp_type_offload = {
 	.proto	     	= IPPROTO_ESP,
 	.input_tail	= esp_input_tail,
 	.xmit		= esp_xmit,
+	.encap		= esp4_gso_encap,
 };
 
 static int __init esp4_offload_init(void)

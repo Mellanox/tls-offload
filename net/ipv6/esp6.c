@@ -222,7 +222,6 @@ int esp6_output_head(struct xfrm_state *x, struct sk_buff *skb, __u8 proto, int 
 	struct ip_esp_hdr *esph;
 	struct sk_buff *trailer;
 
-	*skb_mac_header(skb) = IPPROTO_ESP;
 	esph = ip_esp_hdr(skb);
 
 	if (!skb_cloned(skb)) {
