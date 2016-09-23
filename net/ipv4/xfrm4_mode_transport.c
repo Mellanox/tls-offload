@@ -50,7 +50,8 @@ static int xfrm4_transport_input(struct xfrm_state *x, struct sk_buff *skb)
 		skb->network_header = skb->transport_header;
 	}
 	ip_hdr(skb)->tot_len = htons(skb->len + ihl);
-	skb_reset_transport_header(skb);
+	if (!skb_xfrm_gro(skb))
+		skb_reset_transport_header(skb);
 	return 0;
 }
 
