@@ -742,7 +742,10 @@ struct sk_buff {
 #ifdef CONFIG_NET_SWITCHDEV
 	__u8			offload_fwd_mark:1;
 #endif
-	/* 2, 4 or 5 bit hole */
+#ifdef CONFIG_XFRM_OFFLOAD
+	__u8			xfrm_gro:1;
+#endif
+	/* 1 to 5 bits hole */
 
 #ifdef CONFIG_NET_SCHED
 	__u16			tc_index;	/* traffic control index */
@@ -3686,6 +3689,15 @@ static inline struct sec_path *skb_sec_path(struct sk_buff *skb)
 	return skb->sp;
 #else
 	return NULL;
+#endif
+}
+
+static inline bool skb_xfrm_gro(struct sk_buff *skb)
+{
+#ifdef CONFIG_XFRM_OFFLOAD
+	return skb->xfrm_gro;
+#else
+	return false;
 #endif
 }
 
