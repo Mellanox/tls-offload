@@ -412,20 +412,21 @@ struct ubuf_info {
  * the end of the header data, ie. at skb->end.
  */
 struct skb_shared_info {
+	struct sk_buff	*frag_list;
+	struct skb_shared_hwtstamps hwtstamps;
+	u32		tskey;
+	__be32          ip6_frag_id;
+	unsigned int	gso_type;
 	unsigned char	nr_frags;
 	__u8		tx_flags;
 	unsigned short	gso_size;
 	/* Warning: this field is not always filled in (UFO)! */
 	unsigned short	gso_segs;
-	unsigned short  gso_type;
-	struct sk_buff	*frag_list;
-	struct skb_shared_hwtstamps hwtstamps;
-	u32		tskey;
-	__be32          ip6_frag_id;
 
 	/*
-	 * Warning : all fields before dataref are cleared in __alloc_skb()
+	 * Warning : all fields before _unused are cleared in __alloc_skb()
 	 */
+	unsigned short	_unused;
 	atomic_t	dataref;
 
 	/* Intermediate layers must ensure that destructor_arg
