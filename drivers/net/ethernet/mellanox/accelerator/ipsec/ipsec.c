@@ -38,6 +38,7 @@
 #include <linux/netdevice.h>
 #include <linux/mlx5/qp.h>
 #include <crypto/aead.h>
+#include <linux/highmem.h>
 
 static LIST_HEAD(mlx_ipsec_devs);
 static DEFINE_MUTEX(mlx_ipsec_mutex);
