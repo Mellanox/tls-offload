@@ -10,3 +10,9 @@ config MLX_ACCEL_CORE
 	  Core driver for low level functionality of the ConnectX-4 accelerator
 	  by Mellanox Technologies.
 
+config MLX_ACCEL_QP_SIMULATOR
+	bool
+	depends on MLX_ACCEL_CORE
+	default y
+	---help---
+	  Use QP based simulator instead of the actual FPGA.

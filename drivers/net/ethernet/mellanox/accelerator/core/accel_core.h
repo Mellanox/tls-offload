@@ -34,6 +34,9 @@
 #ifndef __MLX_ACCEL_CORE_H__
 #define __MLX_ACCEL_CORE_H__
 
+#ifdef CONFIG_MLX_ACCEL_QP_SIMULATOR
+#define QP_SIMULATOR
+#endif
 #include "accel_core_sdk.h"
 #include <linux/in6.h>
 
