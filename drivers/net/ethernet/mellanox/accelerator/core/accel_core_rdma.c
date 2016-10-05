@@ -354,7 +354,9 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	int err;
 	struct mlx_accel_core_conn *ret = NULL;
 	struct mlx_accel_core_conn *conn = NULL;
+#ifndef QP_SIMULATOR
 	union ib_gid *gid = NULL;
+#endif
 
 	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn) {
@@ -408,21 +410,22 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[6]),
 		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[7]));
 
+#ifndef QP_SIMULATOR
 	gid = (union ib_gid *)&conn->fpga_qpc.remote_ip;
 	err = mlx5_ib_reserved_gid_add(accel_device->ib_dev, accel_device->port,
 				       IB_GID_TYPE_ROCE_UDP_ENCAP,
 				       gid, conn->fpga_qpc.remote_mac,
-#ifdef QP_SIMULATOR
-				       false,
-#else
 				       true,
-#endif
 				       0, &conn->sgid_index);
 	if (err) {
 		pr_warn("Failed to add reserved GID: %d\n", err);
 		ret = ERR_PTR(err);
 		goto err;
 	}
+#else
+	conn->sgid_index = 1;
+#endif
+
 
 	err = mlx_accel_core_rdma_create_res(conn,
 					     conn_init_attr->tx_size,

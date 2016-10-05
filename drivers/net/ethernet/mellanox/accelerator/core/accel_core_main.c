@@ -217,12 +217,16 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		 accel_device->ib_dev->name,
 		 accel_device->hw_dev->priv.name);
 
+#ifdef QP_SIMULATOR
+	memset(accel_device->fpga_caps, 0, sizeof(*accel_device->fpga_caps));
+#else
 	err = mlx5_fpga_caps(accel_device->hw_dev, accel_device->fpga_caps);
 	if (err) {
 		dev_err(&accel_device->hw_dev->pdev->dev,
 			"Failed to query FPGA capabilities: %d\n", err);
 		goto out;
 	}
+#endif
 
 	err = mlx_accel_fpga_qp_device_init(accel_device);
 	if (err) {
@@ -231,6 +235,9 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		goto out;
 	}
 
+#ifdef QP_SIMULATOR
+	accel_device->pkey_index = 0;
+#else
 	err = ib_find_pkey(accel_device->ib_dev, accel_device->port,
 			   IB_DEFAULT_PKEY_FULL, &accel_device->pkey_index);
 	if (err) {
@@ -238,6 +245,7 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 			"Failed to query pkey: %d\n", err);
 		goto err_fpga_dev;
 	}
+#endif
 	pr_debug("pkey %x index is %u\n", IB_DEFAULT_PKEY_FULL,
 		 accel_device->pkey_index);
 
@@ -398,8 +406,13 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 
 static void mlx_accel_device_check(struct mlx_accel_core_device *accel_device)
 {
+	enum mlx_accel_fpga_status status = 0;
+#ifdef QP_SIMULATOR
+
+	accel_device->last_admin_image = 0;
+	accel_device->last_oper_image = 0;
+#else
 	int err;
-	enum mlx_accel_fpga_status status;
 
 	err = mlx5_fpga_query(accel_device->hw_dev,
 			      &status, &accel_device->last_admin_image,
@@ -409,6 +422,7 @@ static void mlx_accel_device_check(struct mlx_accel_core_device *accel_device)
 			"Failed to query FPGA status: %d\n", err);
 		return;
 	}
+#endif
 
 	switch (status) {
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
@@ -464,10 +478,12 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *ibdev)
 	struct mlx_accel_core_device *accel_device = NULL;
 	struct mlx5_core_dev *mdev =  mlx5_get_mdev_from_ibdev(ibdev);
 
+#ifndef QP_SIMULATOR
 	if (!MLX5_CAP_GEN(mdev, fpga)) {
 		dev_dbg(&ibdev->dev, "FPGA device not present\n");
 		return;
 	}
+#endif
 
 	dev_info(&ibdev->dev, "mlx_accel_ib_dev_add_one called\n");
 
@@ -525,10 +541,12 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 {
 	struct mlx_accel_core_device *accel_device = NULL;
 
+#ifndef QP_SIMULATOR
 	if (!MLX5_CAP_GEN(dev, fpga)) {
 		pr_debug("FPGA device not present for %s\n", dev->priv.name);
 		goto out;
 	}
+#endif
 
 	pr_info("mlx_accel_hw_dev_add_one called for %s\n", dev->priv.name);
 
@@ -548,7 +566,9 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 
 out_unlock:
 	mutex_unlock(&mlx_accel_core_mutex);
+#ifndef QP_SIMULATOR
 out:
+#endif
 	return accel_device;
 }
 
