@@ -411,6 +411,8 @@ static void mlx_accel_device_check(struct mlx_accel_core_device *accel_device)
 
 	switch (status) {
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
+		dev_info(&accel_device->hw_dev->pdev->dev,
+			 "FPGA image is ready\n");
 		mlx_accel_device_init(accel_device);
 		break;
 	case MLX_ACCEL_FPGA_STATUS_FAILURE:
@@ -593,9 +595,9 @@ static void mlx_accel_fpga_error(struct work_struct *work)
 	switch (accel_device->state) {
 	case MLX_ACCEL_FPGA_STATUS_NONE:
 	case MLX_ACCEL_FPGA_STATUS_FAILURE:
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Unexpected FPGA event %u: %s\n",
-			syndrome, mlx_accel_error_string(syndrome));
+		dev_warn(&accel_device->hw_dev->pdev->dev,
+			 "Unexpected FPGA event %u: %s\n",
+			 syndrome, mlx_accel_error_string(syndrome));
 		break;
 	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
 		if (syndrome != MLX5_FPGA_ERROR_EVENT_SYNDROME_IMAGE_CHANGED)
