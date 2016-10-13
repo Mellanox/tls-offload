@@ -59,6 +59,11 @@ struct aesni_rfc4106_gcm_ctx {
 	u8 nonce[4];
 };
 
+struct aesni_rfc4106_gcm_sync_ctx {
+	struct crypto_aead *child;
+	struct crypto_aead *fallback;
+};
+
 struct aesni_lrw_ctx {
 	struct lrw_table_ctx lrw_table;
 	u8 raw_aes_ctx[sizeof(struct crypto_aes_ctx) + AESNI_ALIGN - 1];
@@ -775,6 +780,47 @@ static int xts_decrypt(struct blkcipher_desc *desc, struct scatterlist *dst,
 #endif
 
 #ifdef CONFIG_X86_64
+static int rfc4106_sync_init(struct crypto_aead *aead)
+{
+	unsigned int reqsize;
+	struct crypto_aead *child;
+	struct crypto_aead *fallback;
+	struct aesni_rfc4106_gcm_sync_ctx *ctx = crypto_aead_ctx(aead);
+
+	fallback = crypto_alloc_aead("rfc4106(gcm(aes-asm))",
+				     0,
+				     CRYPTO_ALG_ASYNC);
+	if (IS_ERR(fallback))
+		return PTR_ERR(fallback);
+
+	child = crypto_alloc_aead("__driver-gcm-aes-aesni",
+				  CRYPTO_ALG_INTERNAL,
+				  CRYPTO_ALG_INTERNAL | CRYPTO_ALG_ASYNC);
+	if (IS_ERR(child)) {
+		crypto_free_aead(fallback);
+		return PTR_ERR(child);
+	}
+
+	reqsize = max_t(unsigned int, crypto_aead_reqsize(child),
+			crypto_aead_reqsize(fallback));
+
+	ctx->child = child;
+	ctx->fallback = fallback;
+
+	crypto_aead_set_reqsize(aead, reqsize);
+	return 0;
+}
+
+static void rfc4106_sync_exit(struct crypto_aead *aead)
+{
+	struct aesni_rfc4106_gcm_sync_ctx *ctx = crypto_aead_ctx(aead);
+	struct crypto_aead *child = ctx->child;
+	struct crypto_aead *fallback = ctx->fallback;
+
+	crypto_free_aead(child);
+	crypto_free_aead(fallback);
+}
+
 static int rfc4106_init(struct crypto_aead *aead)
 {
 	struct cryptd_aead *cryptd_tfm;
@@ -842,6 +888,21 @@ static int common_rfc4106_set_key(struct crypto_aead *aead, const u8 *key,
 	       rfc4106_set_hash_subkey(ctx->hash_subkey, key, key_len);
 }
 
+static int rfc4106_sync_set_key(struct crypto_aead *parent, const u8 *key,
+				unsigned int key_len)
+{
+	int err;
+	struct aesni_rfc4106_gcm_sync_ctx *ctx = crypto_aead_ctx(parent);
+	struct crypto_aead *child = ctx->child;
+	struct crypto_aead *fallback = ctx->fallback;
+
+	err = crypto_aead_setkey(child, key, key_len);
+	if (err)
+		return err;
+
+	return crypto_aead_setkey(fallback, key, key_len);
+}
+
 static int rfc4106_set_key(struct crypto_aead *parent, const u8 *key,
 			   unsigned int key_len)
 {
@@ -875,6 +936,21 @@ static int rfc4106_set_authsize(struct crypto_aead *parent,
 	struct cryptd_aead *cryptd_tfm = *ctx;
 
 	return crypto_aead_setauthsize(&cryptd_tfm->base, authsize);
+}
+
+static int rfc4106_sync_set_authsize(struct crypto_aead *parent,
+				     unsigned int authsize)
+{
+	int err;
+	struct aesni_rfc4106_gcm_sync_ctx *ctx = crypto_aead_ctx(parent);
+	struct crypto_aead *child = ctx->child;
+	struct crypto_aead *fallback = ctx->fallback;
+
+	err = crypto_aead_setauthsize(child, authsize);
+	if (err)
+		return err;
+
+	return crypto_aead_setauthsize(fallback, authsize);
 }
 
 static int helper_rfc4106_encrypt(struct aead_request *req)
@@ -1036,6 +1112,30 @@ static int helper_rfc4106_decrypt(struct aead_request *req)
 		kfree(assoc);
 	}
 	return retval;
+}
+
+static int rfc4106_sync_encrypt(struct aead_request *req)
+{
+	struct crypto_aead *aead = crypto_aead_reqtfm(req);
+	struct aesni_rfc4106_gcm_sync_ctx *ctx = crypto_aead_ctx(aead);
+	struct crypto_aead *child = ctx->child;
+	struct crypto_aead *fallback = ctx->fallback;
+
+	aead_request_set_tfm(req, irq_fpu_usable() ? child : fallback);
+
+	return crypto_aead_encrypt(req);
+}
+
+static int rfc4106_sync_decrypt(struct aead_request *req)
+{
+	struct crypto_aead *aead = crypto_aead_reqtfm(req);
+	struct aesni_rfc4106_gcm_sync_ctx *ctx = crypto_aead_ctx(aead);
+	struct crypto_aead *child = ctx->child;
+	struct crypto_aead *fallback = ctx->fallback;
+
+	aead_request_set_tfm(req, irq_fpu_usable() ? child : fallback);
+
+	return crypto_aead_decrypt(req);
 }
 
 static int rfc4106_encrypt(struct aead_request *req)
@@ -1387,6 +1487,24 @@ static struct aead_alg aesni_aead_algs[] = { {
 		.cra_flags		= CRYPTO_ALG_ASYNC,
 		.cra_blocksize		= 1,
 		.cra_ctxsize		= sizeof(struct cryptd_aead *),
+		.cra_module		= THIS_MODULE,
+	},
+}, {
+	.init			= rfc4106_sync_init,
+	.exit			= rfc4106_sync_exit,
+	.setkey			= rfc4106_sync_set_key,
+	.setauthsize		= rfc4106_sync_set_authsize,
+	.encrypt		= rfc4106_sync_encrypt,
+	.decrypt		= rfc4106_sync_decrypt,
+	.ivsize			= 8,
+	.maxauthsize		= 16,
+	.base = {
+		.cra_name		= "rfc4106(gcm(aes))",
+		.cra_driver_name	= "rfc4106-gcm-aesni-sync",
+		.cra_priority		= 350,
+		.cra_flags		= 0,
+		.cra_blocksize		= 1,
+		.cra_ctxsize		= sizeof(struct aesni_rfc4106_gcm_sync_ctx),
 		.cra_module		= THIS_MODULE,
 	},
 } };
