@@ -196,9 +196,7 @@ struct xfrm_state {
 	/* The functions for replay detection. */
 	const struct xfrm_replay *repl;
 
-	/* internal flag that only holds state for delayed aevent at the
-	 * moment
-	*/
+	/* internal flags */
 	u32			xflags;
 
 	/* Replay detection notification settings */
@@ -246,9 +244,10 @@ static inline struct net *xs_net(struct xfrm_state *x)
 	return read_pnet(&x->xs_net);
 }
 
-/* xflags - make enum if more show up */
+/* xflags */
 #define XFRM_TIME_DEFER	1
 #define XFRM_SOFT_EXPIRE 2
+#define XFRM_CRYPTO_SYNC 4
 
 enum {
 	XFRM_STATE_VOID,

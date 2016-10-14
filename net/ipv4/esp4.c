@@ -782,6 +782,7 @@ static int esp_init_aead(struct xfrm_state *x)
 {
 	char aead_name[CRYPTO_MAX_ALG_NAME];
 	struct crypto_aead *aead;
+	struct crypto_alg *alg;
 	int err;
 	u32 mask = 0;
 
@@ -800,6 +801,10 @@ static int esp_init_aead(struct xfrm_state *x)
 
 	x->data = aead;
 
+	alg = &crypto_aead_alg(aead)->base;
+	if (!(alg->cra_flags & CRYPTO_ALG_ASYNC))
+		x->xflags |= XFRM_CRYPTO_SYNC;
+
 	err = crypto_aead_setkey(aead, x->aead->alg_key,
 				 (x->aead->alg_key_len + 7) / 8);
 	if (err)
@@ -816,6 +821,7 @@ error:
 static int esp_init_authenc(struct xfrm_state *x)
 {
 	struct crypto_aead *aead;
+	struct crypto_alg *alg;
 	struct crypto_authenc_key_param *param;
 	struct rtattr *rta;
 	char *key;
@@ -858,6 +864,10 @@ static int esp_init_authenc(struct xfrm_state *x)
 		goto error;
 
 	x->data = aead;
+
+	alg = &crypto_aead_alg(aead)->base;
+	if (!(alg->cra_flags & CRYPTO_ALG_ASYNC))
+		x->xflags |= XFRM_CRYPTO_SYNC;
 
 	keylen = (x->aalg ? (x->aalg->alg_key_len + 7) / 8 : 0) +
 		 (x->ealg->alg_key_len + 7) / 8 + RTA_SPACE(sizeof(*param));

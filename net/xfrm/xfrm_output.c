@@ -97,7 +97,8 @@ static int xfrm_output_one(struct sk_buff *skb, int err)
 
 		spin_unlock_bh(&x->lock);
 
-		skb_dst_force(skb);
+		if (!(x->xflags & XFRM_CRYPTO_SYNC))
+			skb_dst_force(skb);
 
 		if (xfrm_offload(skb)) {
 			x->type_offload->encap(x, skb);

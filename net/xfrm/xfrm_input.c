@@ -333,8 +333,10 @@ lock:
 		XFRM_SKB_CB(skb)->seq.input.low = seq;
 		XFRM_SKB_CB(skb)->seq.input.hi = seq_hi;
 
-		skb_dst_force(skb);
-		dev_hold(skb->dev);
+		if (!(x->xflags & XFRM_CRYPTO_SYNC)) {
+			skb_dst_force(skb);
+			dev_hold(skb->dev);
+		}
 
 		if (crypto_done)
 			nexthdr = x->type_offload->input_tail(x, skb);
@@ -344,7 +346,8 @@ lock:
 		if (nexthdr == -EINPROGRESS)
 			return 0;
 resume:
-		dev_put(skb->dev);
+		if (!(x->xflags & XFRM_CRYPTO_SYNC))
+			dev_put(skb->dev);
 
 		spin_lock(&x->lock);
 		if (nexthdr <= 0) {
