@@ -58,6 +58,7 @@ struct dst_entry {
 #define DST_XFRM_TUNNEL		0x0080
 #define DST_XFRM_QUEUE		0x0100
 #define DST_METADATA		0x0200
+#define DST_XFRM_SYNC		0x0400
 
 	unsigned short		pending_confirm;
 
