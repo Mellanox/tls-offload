@@ -222,6 +222,14 @@ static int mlx5_query_port_roce(struct ib_device *device, u8 port_num,
 	return 0;
 }
 
+struct mlx5_core_dev *mlx5_get_mdev_from_ibdev(struct ib_device *ibdev)
+{
+	struct mlx5_ib_dev *dev = to_mdev(ibdev);
+
+	return dev->mdev;
+}
+EXPORT_SYMBOL(mlx5_get_mdev_from_ibdev);
+
 int mlx5_ib_set_roce_gid(struct mlx5_core_dev *dev, unsigned int index,
 			 enum ib_gid_type gid_type, const union ib_gid *gid,
 			 const u8 *mac, bool vlan, u16 vlan_id)

@@ -40,5 +40,6 @@ int mlx5_ib_reserved_gid_add(struct ib_device *ib_dev, u8 port,
 			     enum ib_gid_type gid_type, union ib_gid *gid,
 			     u8 *mac, bool vlan, u16 vlan_id, int *gid_index);
 void mlx5_ib_reserved_gid_del(struct ib_device *ib_dev, u8 port, int gid_index);
+struct mlx5_core_dev *mlx5_get_mdev_from_ibdev(struct ib_device *ibdev);
 
 #endif /* MLX5_IB_DRIVER_H */
