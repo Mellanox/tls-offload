@@ -1102,4 +1102,6 @@ static inline u16 mlx5_to_sw_pkey_sz(int pkey_sz)
 				MLX5_BY_PASS_NUM_DONT_TRAP_PRIOS +\
 				MLX5_BY_PASS_NUM_MULTICAST_PRIOS)
 
+/* TODO: Consider moving this to include/uapi/linux/if_ether.h */
+#define MLX_IPSEC_PET_ETHERTYPE	(0x8CE4)
 #endif /* MLX5_DEVICE_H */
