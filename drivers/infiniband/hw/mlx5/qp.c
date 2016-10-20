@@ -2125,17 +2125,25 @@ enum {
 	MLX5_PATH_FLAG_COUNTER	= 1 << 2,
 };
 
-static int ib_rate_to_mlx5(struct mlx5_ib_dev *dev, u8 rate)
+static int ib_rate_to_mlx5(struct mlx5_ib_dev *dev, u8 requested_rate)
 {
+	u8 rate = requested_rate;
 	if (rate == IB_RATE_PORT_CURRENT) {
 		return 0;
 	} else if (rate < IB_RATE_2_5_GBPS || rate > IB_RATE_300_GBPS) {
+		pr_err("Invalid rate %d\n", rate);
 		return -EINVAL;
 	} else {
-		while (rate != IB_RATE_2_5_GBPS &&
-		       !(1 << (rate + MLX5_STAT_RATE_OFFSET) &
-			 MLX5_CAP_GEN(dev->mdev, stat_rate_support)))
+		while (!(1 << (rate + MLX5_STAT_RATE_OFFSET) &
+			 MLX5_CAP_GEN(dev->mdev, stat_rate_support))) {
+			if (rate == IB_RATE_2_5_GBPS) {
+				pr_err("There is no supported rate <= %d\n",
+				       requested_rate);
+				return -EINVAL;
+			}
+
 			--rate;
+		}
 	}
 
 	return rate + MLX5_STAT_RATE_OFFSET;
