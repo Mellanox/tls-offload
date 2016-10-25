@@ -111,6 +111,10 @@ struct sec_path *secpath_dup(struct sec_path *src)
 		return NULL;
 
 	sp->len = 0;
+	sp->olen = 0;
+
+	memset(sp->ovec, 0, sizeof(sp->ovec[XFRM_MAX_OFFLOAD_DEPTH]));
+
 	if (src) {
 		int i;
 
@@ -192,6 +196,8 @@ int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 	unsigned int family;
 	int decaps = 0;
 	int async = 0;
+	bool crypto_done = false;
+	struct xfrm_offload *xo = xfrm_offload(skb);
 
 	if (encap_type < 0) {
 		/* An encap_type of -1 indicates async resumption. */
@@ -204,6 +210,37 @@ int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 		}
 		/* encap_type < -1 indicates a GRO call. */
 		encap_type = 0;
+	}
+
+	if (xo && (xo->flags & CRYPTO_DONE)) {
+		crypto_done = true;
+		x = xfrm_input_state(skb);
+		family = XFRM_SPI_SKB_CB(skb)->family;
+
+		if (!(xo->status & CRYPTO_SUCCESS)) {
+			if (xo->status &
+			    (CRYPTO_TRANSPORT_AH_AUTH_FAILED |
+			     CRYPTO_TRANSPORT_ESP_AUTH_FAILED |
+			     CRYPTO_TUNNEL_AH_AUTH_FAILED |
+			     CRYPTO_TUNNEL_ESP_AUTH_FAILED)) {
+
+				xfrm_audit_state_icvfail(x, skb,
+							 x->type->proto);
+				x->stats.integrity_failed++;
+				XFRM_INC_STATS(net, LINUX_MIB_XFRMINSTATEPROTOERROR);
+				goto drop;
+			}
+
+			XFRM_INC_STATS(net, LINUX_MIB_XFRMINBUFFERERROR);
+			goto drop;
+		}
+
+		if ((err = xfrm_parse_spi(skb, nexthdr, &spi, &seq)) != 0) {
+			XFRM_INC_STATS(net, LINUX_MIB_XFRMINHDRERROR);
+			goto drop;
+		}
+
+		goto lock;
 	}
 
 	daddr = (xfrm_address_t *)(skb_network_header(skb) +
@@ -257,6 +294,7 @@ int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 
 		skb->sp->xvec[skb->sp->len++] = x;
 
+lock:
 		spin_lock(&x->lock);
 
 		if (unlikely(x->km.state != XFRM_STATE_VALID)) {
@@ -298,7 +336,10 @@ int xfrm_input(struct sk_buff *skb, int nexthdr, __be32 spi, int encap_type)
 		skb_dst_force(skb);
 		dev_hold(skb->dev);
 
-		nexthdr = x->type->input(x, skb);
+		if (crypto_done)
+			nexthdr = x->type_offload->input_tail(x, skb);
+		else
+			nexthdr = x->type->input(x, skb);
 
 		if (nexthdr == -EINPROGRESS)
 			return 0;
