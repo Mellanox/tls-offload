@@ -89,11 +89,11 @@ void mlx_accel_xfer_comp_trans(const struct mlx_accel_transaction *complete,
 	} else {
 		xfer_state->done_count++;
 	}
+	ret = mlx_accel_xfer_exec_more(xfer_state);
+
 	xfer_state->inflight_count--;
 	if (!xfer_state->inflight_count)
 		done = true;
-
-	ret = mlx_accel_xfer_exec_more(xfer_state);
 
 	spin_unlock_irqrestore(&xfer_state->lock, flags);
 
