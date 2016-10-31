@@ -36,33 +36,16 @@
 #include <crypto/internal/geniv.h>
 #include <crypto/aead.h>
 
-static enum auth_identifier
-mlx_ipsec_get_auth_identifier(struct xfrm_state *x)
+static enum sadb_encryption_mode
+mlx_ipsec_get_encryption_mode(struct xfrm_state *x)
 {
 	unsigned int key_len = (x->aead->alg_key_len + 7) / 8 - 4;
 
 	switch (key_len) {
 	case 16:
-		return IPSEC_OFFLOAD_AUTH_AES_GCM_128;
+		return SADB_MODE_AES_GCM_128_AUTH_128;
 	case 32:
-		return IPSEC_OFFLOAD_AUTH_AES_GCM_256;
-	default:
-		pr_warn("Bad key len: %d for alg %s\n", key_len,
-			x->aead->alg_name);
-		return -1;
-	}
-}
-
-static enum crypto_identifier
-mlx_ipsec_get_crypto_identifier(struct xfrm_state *x)
-{
-	unsigned int key_len = (x->aead->alg_key_len + 7) / 8 - 4;
-
-	switch (key_len) {
-	case 16:
-		return IPSEC_OFFLOAD_CRYPTO_AES_GCM_128;
-	case 32:
-		return IPSEC_OFFLOAD_CRYPTO_AES_GCM_256;
+		return SADB_MODE_AES_GCM_256_AUTH_128;
 	default:
 		pr_warn("Bad key len: %d for alg %s\n", key_len,
 			x->aead->alg_name);
@@ -91,35 +74,36 @@ static void mlx_ipsec_build_hw_entry(struct mlx_ipsec_sa_entry *sa,
 		geniv_ctx = crypto_aead_ctx(aead);
 		ivsize = crypto_aead_ivsize(aead);
 
-		memcpy(&hw_entry->key, sa->x->aead->alg_key, key_len);
+		memcpy(&hw_entry->key_enc, sa->x->aead->alg_key, key_len);
 		/* Duplicate 128 bit key twice according to HW layout */
 		if (key_len == 16)
-			memcpy(&hw_entry->key[16], sa->x->aead->alg_key,
+			memcpy(&hw_entry->key_enc[16], sa->x->aead->alg_key,
 			       key_len);
-		memcpy(&hw_entry->salt_iv, geniv_ctx->salt, ivsize);
-		hw_entry->salt = *((__be32 *)(sa->x->aead->alg_key + key_len));
+		memcpy(&hw_entry->gcm.salt_iv, geniv_ctx->salt, ivsize);
+		hw_entry->gcm.salt = *((__be32 *)(sa->x->aead->alg_key +
+						  key_len));
 	}
 
-	hw_entry->enable |= SADB_SA_VALID | SADB_SPI_EN;
-	hw_entry->sip = sa->x->props.saddr.a4;
-	hw_entry->sip_mask = inet_make_mask(sa->x->sel.prefixlen_s);
-	hw_entry->dip = sa->x->id.daddr.a4;
-	hw_entry->dip_mask = inet_make_mask(sa->x->sel.prefixlen_d);
+	hw_entry->flags |= SADB_SA_VALID | SADB_SPI_EN;
+	hw_entry->sip[3] = sa->x->props.saddr.a4;
+	hw_entry->sip_masklen = sa->x->sel.prefixlen_s;
+	hw_entry->dip[3] = sa->x->id.daddr.a4;
+	hw_entry->dip_masklen = sa->x->sel.prefixlen_d;
 	hw_entry->spi = sa->x->id.spi;
 	hw_entry->sw_sa_handle = htonl(sa->sw_sa_id);
-	hw_entry->sport = htons(sa->x->sel.sport);
-	hw_entry->enable |= sa->x->sel.sport_mask ? SADB_SPORT_EN : 0;
-	hw_entry->dport = htons(sa->x->sel.dport);
-	hw_entry->enable |= sa->x->sel.dport_mask ? SADB_DPORT_EN : 0;
-	hw_entry->ip_proto = sa->x->id.proto;
-	if (hw_entry->ip_proto)
-		hw_entry->enable |= SADB_IP_PROTO_EN;
-	hw_entry->enc_auth_mode = mlx_ipsec_get_auth_identifier(sa->x) << 4;
-	hw_entry->enc_auth_mode |= mlx_ipsec_get_crypto_identifier(sa->x);
+	switch (sa->x->id.proto) {
+	case IPPROTO_ESP:
+		hw_entry->flags |= SADB_IP_ESP;
+		break;
+	case IPPROTO_AH:
+		hw_entry->flags |= SADB_IP_AH;
+		break;
+	default:
+		break;
+	}
+	hw_entry->enc_mode = mlx_ipsec_get_encryption_mode(sa->x);
 	if (!(sa->x->xso.flags & XFRM_OFFLOAD_INBOUND))
-		hw_entry->enable |= SADB_DIR_SX;
-	if (sa->x->props.mode)
-		hw_entry->enable |= SADB_TUNNEL | SADB_TUNNEL_EN;
+		hw_entry->flags |= SADB_DIR_SX;
 }
 
 #ifndef MLX_IPSEC_SADB_RDMA

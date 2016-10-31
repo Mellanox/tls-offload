@@ -73,54 +73,46 @@ struct pet {
 	__be16 ethertype;
 } __packed;
 
-enum direction {
-	RX_DIRECTION = 0,
-	TX_DIRECTION = 1
+enum sadb_encryption_mode {
+	SADB_MODE_NONE			= 0,
+	SADB_MODE_AES_GCM_128_AUTH_128	= 1,
+	SADB_MODE_AES_GCM_256_AUTH_128	= 3,
 };
 
-enum crypto_identifier {
-	IPSEC_OFFLOAD_CRYPTO_NONE			= 0,
-	IPSEC_OFFLOAD_CRYPTO_AES_GCM_128	= 1,
-	IPSEC_OFFLOAD_CRYPTO_AES_GCM_256	= 2,
-};
-
-enum auth_identifier {
-	IPSEC_OFFLOAD_AUTH_NONE			= 0,
-	IPSEC_OFFLOAD_AUTH_AES_GCM_128	= 1,
-	IPSEC_OFFLOAD_AUTH_AES_GCM_256	= 2,
-};
+#define SADB_IP_AH       BIT(7)
+#define SADB_IP_ESP      BIT(6)
+#define SADB_SA_VALID    BIT(5)
+#define SADB_SPI_EN      BIT(4)
+#define SADB_DIR_SX      BIT(3)
+#define SADB_IPV6        BIT(2)
 
 #define IPSEC_BYPASS_ADDR	0x0
 #define IPSEC_BYPASS_BIT	0x400000
 
 struct __attribute__((__packed__)) sadb_entry {
-	u8 key[32];
-	__be32 sip;
-	__be32 sip_mask;
-	__be32 dip;
-	__be32 dip_mask;
+	u8 key_enc[32];
+	u8 key_auth[32];
+	__be32 sip[4];
+	__be32 dip[4];
+	union {
+		struct {
+			__be32 reserved;
+			u8 salt_iv[8];
+			__be32 salt;
+		} gcm;
+		struct {
+			u8 salt[16];
+		} cbc;
+	};
 	__be32 spi;
-	__be32 salt;
-	u8 salt_iv[8];
 	__be32 sw_sa_handle;
-	__be16 sport;
-	__be16 dport;
-	u8 ip_proto;
-	u8 enc_auth_mode;
-	u8 enable;
-	u8 pad;
 	__be16 tfclen;
-	__be16 pad2;
+	u8 enc_mode;
+	u8 sip_masklen;
+	u8 dip_masklen;
+	u8 flags;
+	u8 reserved[2];
 };
-
-#define SADB_DIR_SX      BIT(7)
-#define SADB_SA_VALID    BIT(6)
-#define SADB_SPI_EN      BIT(5)
-#define SADB_IP_PROTO_EN BIT(4)
-#define SADB_SPORT_EN    BIT(3)
-#define SADB_DPORT_EN    BIT(2)
-#define SADB_TUNNEL      BIT(1)
-#define SADB_TUNNEL_EN   BIT(0)
 
 enum ipsec_response_syndrome {
 	IPSEC_RESPONSE_SUCCESS = 0,
