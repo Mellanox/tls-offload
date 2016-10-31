@@ -73,14 +73,6 @@ struct pet {
 	__be16 ethertype;
 } __packed;
 
-#define IPPROTO_DUMMY_DWORD 0xff
-
-struct dummy_dword {
-	unsigned char next_proto;
-	unsigned char len;
-	__be16 reserved;
-} __packed;
-
 enum direction {
 	RX_DIRECTION = 0,
 	TX_DIRECTION = 1

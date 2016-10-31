@@ -311,37 +311,6 @@ static void remove_pet(struct sk_buff *skb, struct pet *pet)
 	/* Ethertype is already in its new place */
 }
 
-static void remove_dummy_dword(struct sk_buff *skb)
-{
-	struct iphdr *iphdr = (struct iphdr *)skb->data;
-	unsigned char *old;
-	unsigned char *new;
-	unsigned int iphdr_len = iphdr->ihl * 4;
-
-	/* We expect IP header right after the PET
-	 * with no IP options, all other are not offloaded for now
-	 */
-	if (be16_to_cpu(skb->protocol) != ETH_P_IP)
-		pr_warn("expected ETH_P_IP but received %04x\n",
-			be16_to_cpu(skb->protocol));
-	if (iphdr_len > sizeof(struct iphdr))
-		pr_warn("expected ETH_P_IP without IP options\n");
-
-	if (iphdr->protocol != IPPROTO_DUMMY_DWORD)
-		return;
-
-	old = skb->data - sizeof(struct ethhdr);
-	new = skb_pull_inline(skb, sizeof(struct dummy_dword)) -
-			      sizeof(struct ethhdr);
-	iphdr->protocol = IPPROTO_ESP; /* TODO */
-	iphdr->tot_len = htons(ntohs(iphdr->tot_len) - 4);
-	iphdr->check = htons(~(~ntohs(iphdr->check) - 0xd1));
-
-	memmove(new, old, ETH_HLEN + iphdr_len);
-
-	skb->mac_header += sizeof(struct dummy_dword);
-}
-
 static struct pet *insert_pet(struct sk_buff *skb)
 {
 	struct ethhdr *eth;
@@ -370,7 +339,7 @@ static bool mlx_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x)
 
 static u16 mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw)
 {
-	u16 mtu_diff = sizeof(struct pet) + sizeof(struct dummy_dword);
+	u16 mtu_diff = sizeof(struct pet);
 
 	if (is_sw2hw)
 		return mtu + mtu_diff;
@@ -557,8 +526,6 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 		be32_to_cpu(pet.content.rcv.sa_id));
 
 	skb->protocol = pet.ethertype;
-
-	remove_dummy_dword(skb);
 
 	WARN_ON(skb->sp != NULL);
 	skb->sp = secpath_dup(skb->sp);
