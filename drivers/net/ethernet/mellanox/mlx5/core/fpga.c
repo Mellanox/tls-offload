@@ -91,7 +91,7 @@ EXPORT_SYMBOL_GPL(mlx5_fpga_load);
 
 int mlx5_fpga_ctrl_op(struct mlx5_core_dev *dev, u8 op)
 {
-	if (op > MLX5_FPGA_CTRL_OP_IMAGE_SEL) {
+	if (op > MLX5_FPGA_CTRL_OP_SB_BYPASS_OFF) {
 		pr_warn("Skipping undelivered FPGA_CTRL op %u\n", op);
 		return 0;
 	}
