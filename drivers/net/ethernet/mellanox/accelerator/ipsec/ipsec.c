@@ -304,7 +304,7 @@ static void remove_pet(struct sk_buff *skb, struct pet *pet)
 
 	memcpy(pet, skb->data, sizeof(*pet));
 	old_eth = (struct ethhdr *)(skb->data - sizeof(struct ethhdr));
-	new_eth = (struct ethhdr *)(skb_pull_inline(skb, sizeof(struct pet)) -
+	new_eth = (struct ethhdr *)(pskb_pull(skb, sizeof(struct pet)) -
 		sizeof(struct ethhdr));
 	skb->mac_header += sizeof(struct pet);
 
