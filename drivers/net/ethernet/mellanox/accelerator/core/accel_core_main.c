@@ -363,15 +363,6 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 	int err = 0;
 	struct mlx_accel_client_data *client_context;
 
-	list_for_each_entry(client_context,
-			    &accel_device->client_data_list, list) {
-		if (!client_context->added)
-			continue;
-		client_context->client->remove(accel_device);
-		client_context->added = false;
-	}
-	WARN_ON(!list_empty(&accel_device->client_connections));
-
 	if (accel_device->state == MLX_ACCEL_FPGA_STATUS_SUCCESS) {
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
@@ -380,6 +371,15 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 				"Failed to re-set SBU bypass on: %d\n", err);
 		}
 	}
+
+	list_for_each_entry(client_context,
+			    &accel_device->client_data_list, list) {
+		if (!client_context->added)
+			continue;
+		client_context->client->remove(accel_device);
+		client_context->added = false;
+	}
+	WARN_ON(!list_empty(&accel_device->client_connections));
 
 	if (accel_device->core_conn) {
 		mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
