@@ -100,29 +100,6 @@ struct mlx_ipsec_dev *mlx_ipsec_find_dev_by_netdev(struct net_device *netdev)
 	return dev;
 }
 
-static void mlx_ipsec_set_clear_bypass(struct mlx_ipsec_dev *dev, bool set)
-{
-	int res;
-	u32 dw;
-
-	res = mlx_accel_core_mem_read(dev->accel_device, 4,
-				      IPSEC_BYPASS_ADDR, &dw,
-				      MLX_ACCEL_ACCESS_TYPE_DONTCARE);
-	if (res != 4) {
-		pr_warn("IPSec bypass clear failed on read\n");
-		return;
-	}
-
-	dw = set ? dw | IPSEC_BYPASS_BIT : dw & ~IPSEC_BYPASS_BIT;
-	res = mlx_accel_core_mem_write(dev->accel_device, 4,
-				       IPSEC_BYPASS_ADDR, &dw,
-				       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
-	if (res != 4) {
-		pr_warn("IPSec bypass clear failed on write\n");
-		return;
-	}
-}
-
 /*
  * returns 0 on success, negative error if failed to send message to FPGA
  * positive error if FPGA returned a bad response
@@ -732,7 +709,6 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	netdev_change_features(dev->netdev);
 	rtnl_unlock();
 
-	mlx_ipsec_set_clear_bypass(dev, false);
 	dev_info(&dev->netdev->dev, "mlx_ipsec added on device %s\n",
 		 accel_device->name);
 	goto out;
@@ -781,7 +757,6 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 #ifdef MLX_IPSEC_SADB_RDMA
 	mlx_accel_core_conn_destroy(dev->conn);
 #endif
-	mlx_ipsec_set_clear_bypass(dev, true);
 	mlx_accel_core_client_ops_unregister(netdev);
 
 	rtnl_lock();

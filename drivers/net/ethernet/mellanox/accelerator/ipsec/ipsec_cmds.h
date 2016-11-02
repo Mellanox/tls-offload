@@ -86,9 +86,6 @@ enum sadb_encryption_mode {
 #define SADB_DIR_SX      BIT(3)
 #define SADB_IPV6        BIT(2)
 
-#define IPSEC_BYPASS_ADDR	0x0
-#define IPSEC_BYPASS_BIT	0x400000
-
 struct __attribute__((__packed__)) sadb_entry {
 	u8 key_enc[32];
 	u8 key_auth[32];
