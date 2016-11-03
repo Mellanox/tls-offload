@@ -865,7 +865,8 @@ static inline void mlx5e_mpwqe_fill_rx_skb(struct mlx5e_rq *rq,
 	u32 head_offset    = wqe_offset & (PAGE_SIZE - 1);
 	u32 page_idx       = wqe_offset >> PAGE_SHIFT;
 	u32 head_page_idx  = page_idx;
-	u16 headlen = min_t(u16, MLX5_MPWRQ_SMALL_PACKET_THRESHOLD, cqe_bcnt);
+	u16 headlen = min_t(u16, ETH_HLEN + 8 /* PET */ + sizeof(struct iphdr) +
+			    sizeof(struct ip_esp_hdr) + 8 /* IV */, cqe_bcnt);
 	u32 frag_offset    = head_offset + headlen;
 	u16 byte_cnt       = cqe_bcnt - headlen;
 
