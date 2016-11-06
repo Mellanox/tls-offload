@@ -865,10 +865,17 @@ static inline void mlx5e_mpwqe_fill_rx_skb(struct mlx5e_rq *rq,
 	u32 head_offset    = wqe_offset & (PAGE_SIZE - 1);
 	u32 page_idx       = wqe_offset >> PAGE_SHIFT;
 	u32 head_page_idx  = page_idx;
-	u16 headlen = min_t(u16, ETH_HLEN + 8 /* PET */ + sizeof(struct iphdr) +
-			    sizeof(struct ip_esp_hdr) + 8 /* IV */, cqe_bcnt);
-	u32 frag_offset    = head_offset + headlen;
-	u16 byte_cnt       = cqe_bcnt - headlen;
+	u16 headlen = min_t(u16, MLX5_MPWRQ_SMALL_PACKET_THRESHOLD, cqe_bcnt);
+	u32 frag_offset;
+	u16 byte_cnt = min_t(u32, PAGE_SIZE - head_offset, cqe_bcnt);
+	void *va;
+
+	if (byte_cnt > MLX5_MPWRQ_SMALL_PACKET_THRESHOLD) {
+		va = page_address(&wi->dma_info.page[page_idx]) + head_offset;
+		headlen = eth_get_headlen(va, byte_cnt) + 8 /* PET */;
+	}
+	frag_offset    = head_offset + headlen;
+	byte_cnt       = cqe_bcnt - headlen;
 
 	if (unlikely(frag_offset >= PAGE_SIZE)) {
 		page_idx++;
