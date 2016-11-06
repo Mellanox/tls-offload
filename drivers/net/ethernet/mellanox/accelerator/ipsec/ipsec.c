@@ -695,8 +695,6 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, esp)) {
 		dev->netdev->wanted_features |= NETIF_F_HW_ESP |
 						NETIF_F_HW_ESP_TX_CSUM;
-		dev->netdev->hw_features |= NETIF_F_HW_ESP |
-					    NETIF_F_HW_ESP_TX_CSUM;
 		if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, lso)) {
 			dev_dbg(&dev->netdev->dev, "ESP GSO capability turned on\n");
 			dev->netdev->wanted_features |= NETIF_F_GSO_ESP;
