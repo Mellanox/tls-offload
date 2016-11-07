@@ -127,7 +127,7 @@ static int mlx_accel_xfer_exec_more(struct xfer_state *xfer_state)
 		if (!left)
 			break;
 
-		xfer_trans = kzalloc(sizeof(*xfer_trans), GFP_KERNEL);
+		xfer_trans = kzalloc(sizeof(*xfer_trans), GFP_ATOMIC);
 		if (!xfer_trans) {
 			ret = -ENOMEM;
 			break;
