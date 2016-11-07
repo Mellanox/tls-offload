@@ -65,6 +65,8 @@ struct mlx_accel_core_device {
 	struct list_head client_connections;
 	struct list_head client_data_list;
 	struct mlx_accel_core_conn *core_conn;
+	struct kobject *class_kobj;
+	struct kobject core_kobj;
 
 	/* Transactions state */
 	struct mlx_accel_trans_device_state *trans;

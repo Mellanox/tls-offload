@@ -451,6 +451,8 @@ static void mlx_accel_device_start(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_core_client *client;
 
+	mlx_accel_device_register_sysfs(accel_device);
+
 	list_for_each_entry(client, &mlx_accel_core_clients, list)
 		mlx_accel_client_context_create(accel_device, client);
 
@@ -471,6 +473,8 @@ static void mlx_accel_device_stop(struct mlx_accel_core_device *accel_device)
 	list_for_each_entry_safe(context, tmp, &accel_device->client_data_list,
 				 list)
 		mlx_accel_client_context_destroy(accel_device, context);
+
+	mlx_accel_device_unregister_sysfs(accel_device);
 }
 
 static void mlx_accel_ib_dev_add_one(struct ib_device *ibdev)

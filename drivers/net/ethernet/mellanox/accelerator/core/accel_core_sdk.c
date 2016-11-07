@@ -347,8 +347,7 @@ EXPORT_SYMBOL(mlx_accel_core_client_data_get);
 
 struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *device)
 {
-	/* TODO: return port 0 as parent sysfs node, instead of "ports" node? */
-	return device->ib_dev->ports_parent;
+	return device->class_kobj;
 }
 EXPORT_SYMBOL(mlx_accel_core_kobj);
 

@@ -75,6 +75,9 @@ int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
 int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 			size_t size, u64 addr, u8 *buf);
 
+int mlx_accel_device_register_sysfs(struct mlx_accel_core_device *device);
+void mlx_accel_device_unregister_sysfs(struct mlx_accel_core_device *device);
+
 /* fpga QP */
 #define mlx_accel_fpga_qp_device_init(accel_device) 0
 #define mlx_accel_fpga_qp_device_deinit(accel_device)
