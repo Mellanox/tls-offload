@@ -70,7 +70,153 @@ static const struct sysfs_ops accel_sysfs_ops = {
 	.show = accel_attr_show
 };
 
+static ssize_t fpga_caps_show(struct mlx_accel_core_device *device, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE,
+			 "FPGA ID: 0x%02x\n"
+			 "FPGA Device: 0x%06x\n"
+			 "Register File Version: 0x%08x\n"
+			 "FPGA Ctrl Modify: %u\n"
+			 "Access Reg Query: %u\n"
+			 "Access Reg Modify: %u\n"
+			 "Image Version: 0x%08x\n"
+			 "Image Date: 0x%08x\n"
+			 "Image Time: 0x%08x\n"
+			 "Shell Version: 0x%08x\n"
+			 "IEEE Vendor ID: 0x%06x\n"
+			 "SBU Product Version: 0x%04x\n"
+			 "SBU Product ID: 0x%04x\n"
+			 "SBU Basic Caps: 0x%08x\n"
+			 "SBU Extended Caps Len: 0x%04x\n"
+			 "SBU Extended Caps Address: 0x%llx\n"
+			 "FPGA DDR Start Address: 0x%llx\n"
+			 "FPGA CrSpace Start Address: 0x%llx\n"
+			 "FPGA DDR Size: 0x%llx\n"
+			 "FPGA CrSpace Size: 0x%llx\n",
+			 MLX5_CAP_FPGA(device, fpga_id),
+			 MLX5_CAP_FPGA(device, fpga_device),
+			 MLX5_CAP_FPGA(device, register_file_ver),
+			 MLX5_CAP_FPGA(device, fpga_ctrl_modify),
+			 MLX5_CAP_FPGA(device, access_reg_query_mode),
+			 MLX5_CAP_FPGA(device, access_reg_modify_mode),
+			 MLX5_CAP_FPGA(device, image_version),
+			 MLX5_CAP_FPGA(device, image_date),
+			 MLX5_CAP_FPGA(device, image_time),
+			 MLX5_CAP_FPGA(device, shell_version),
+			 MLX5_CAP_FPGA(device, ieee_vendor_id),
+			 MLX5_CAP_FPGA(device, sandbox_product_version),
+			 MLX5_CAP_FPGA(device, sandbox_product_id),
+			 MLX5_CAP_FPGA(device, sandbox_basic_caps),
+			 MLX5_CAP_FPGA(device, sandbox_extended_caps_len),
+			 MLX5_CAP64_FPGA(device, sandbox_extended_caps_addr),
+			 MLX5_CAP64_FPGA(device, fpga_ddr_start_addr),
+			 MLX5_CAP64_FPGA(device, fpga_cr_space_start_addr),
+			 1024ULL * MLX5_CAP_FPGA(device, fpga_ddr_size),
+			 1024ULL * MLX5_CAP_FPGA(device, fpga_cr_space_size));
+}
+
+static ssize_t shell_caps_show(struct mlx_accel_core_device *device, char *buf)
+{
+	return scnprintf(buf, PAGE_SIZE,
+			 "Maximum Number of QPs: %u\n"
+			 "Total Receive Credits: %u\n"
+			 "QP Type: %u\n"
+			 "RAE: %u\n"
+			 "RWE: %u\n"
+			 "RRE: %u\n"
+			 "DC: %u\n"
+			 "UD: %u\n"
+			 "UC: %u\n"
+			 "RC: %u\n"
+			 "DDR Size: %u GB\n"
+			 "QP Message Size: 0x%08x\n",
+			 MLX5_CAP_FPGA(device, shell_caps.max_num_qps),
+			 MLX5_CAP_FPGA(device, shell_caps.total_rcv_credits),
+			 MLX5_CAP_FPGA(device, shell_caps.qp_type),
+			 MLX5_CAP_FPGA(device, shell_caps.rae),
+			 MLX5_CAP_FPGA(device, shell_caps.rwe),
+			 MLX5_CAP_FPGA(device, shell_caps.rre),
+			 MLX5_CAP_FPGA(device, shell_caps.dc),
+			 MLX5_CAP_FPGA(device, shell_caps.ud),
+			 MLX5_CAP_FPGA(device, shell_caps.uc),
+			 MLX5_CAP_FPGA(device, shell_caps.rc),
+			 1 << MLX5_CAP_FPGA(device, shell_caps.log_ddr_size),
+			 MLX5_CAP_FPGA(device,
+				       shell_caps.max_fpga_qp_msg_size));
+}
+
+static ssize_t shell_counters_show(struct mlx_accel_core_device *device,
+				   char *buf)
+{
+	struct mlx5_fpga_shell_counters data;
+	int ret = mlx5_fpga_shell_counters(device->hw_dev, false, &data);
+
+	if (ret)
+		return -EIO;
+	return scnprintf(buf, PAGE_SIZE,
+			 "DDR Read Requests: %llu\n"
+			 "DDR Write Requests: %llu\n"
+			 "DDR Read Bytes: %llu\n"
+			 "DDR Write Bytes: %llu\n",
+			 data.ddr_read_requests,
+			 data.ddr_write_requests,
+			 data.ddr_read_bytes,
+			 data.ddr_write_bytes);
+}
+
+static ssize_t shell_counters_store(struct mlx_accel_core_device *device,
+				    const char *buf, size_t size)
+{
+	int ret = mlx5_fpga_shell_counters(device->hw_dev, true, NULL);
+
+	if (ret)
+		return -EIO;
+	return size;
+}
+
+static ssize_t qp_counters_show(struct mlx_accel_core_device *device,
+				char *buf)
+{
+	struct mlx5_fpga_qp_counters data;
+	int ret = mlx5_fpga_query_qp_counters(device->hw_dev,
+					      device->core_conn->fpga_qpn,
+					      false, &data);
+	if (ret)
+		return -EIO;
+	return scnprintf(buf, PAGE_SIZE,
+			 "RX Ack Packets: %llu\n"
+			 "RX Send Packets: %llu\n"
+			 "TX Ack Packets: %llu\n"
+			 "TX Send Packets: %llu\n"
+			 "RX Total Drop: %llu\n",
+			 data.rx_ack_packets,
+			 data.rx_send_packets,
+			 data.tx_ack_packets,
+			 data.tx_send_packets,
+			 data.rx_total_drop);
+}
+
+static ssize_t qp_counters_store(struct mlx_accel_core_device *device,
+				 const char *buf, size_t size)
+{
+	int ret = mlx5_fpga_query_qp_counters(device->hw_dev,
+					      device->core_conn->fpga_qpn,
+					      true, NULL);
+	if (ret)
+		return -EIO;
+	return size;
+}
+
+static ACCEL_ATTR_RO(fpga_caps);
+static ACCEL_ATTR_RO(shell_caps);
+static ACCEL_ATTR_RW(shell_counters);
+static ACCEL_ATTR_RW(qp_counters);
+
 static struct attribute *accel_default_attrs[] = {
+	&accel_attr_fpga_caps.attr,
+	&accel_attr_shell_caps.attr,
+	&accel_attr_shell_counters.attr,
+	&accel_attr_qp_counters.attr,
 	NULL
 };
 
