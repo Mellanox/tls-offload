@@ -110,6 +110,7 @@ enum {
 	MLX5_REG_FPGA_CAP	 = 0x4022,
 	MLX5_REG_FPGA_CTRL	 = 0x4023,
 	MLX5_REG_FPGA_ACCESS_REG = 0x4024,
+	MLX5_REG_FPGA_SHELL_CNTR = 0x4025,
 	MLX5_REG_PCAP		 = 0x5001,
 	MLX5_REG_PMTU		 = 0x5003,
 	MLX5_REG_PTYS		 = 0x5004,
@@ -801,6 +802,13 @@ struct mlx5_fpga_qp_counters {
 	u64 rx_total_drop;
 };
 
+struct mlx5_fpga_shell_counters {
+	u64 ddr_read_requests;
+	u64 ddr_write_requests;
+	u64 ddr_read_bytes;
+	u64 ddr_write_bytes;
+};
+
 static inline void *mlx5_buf_offset(struct mlx5_buf *buf, int offset)
 {
 		return buf->direct.buf + offset;
@@ -990,6 +998,8 @@ bool mlx5_rl_is_in_range(struct mlx5_core_dev *dev, u32 rate);
 int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps);
 int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 			 u8 *buf, bool write);
+int mlx5_fpga_shell_counters(struct mlx5_core_dev *dev, bool clear,
+			     struct mlx5_fpga_shell_counters *data);
 int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image);
 int mlx5_fpga_ctrl_op(struct mlx5_core_dev *dev, u8 op);
 int mlx5_fpga_image_select(struct mlx5_core_dev *dev,

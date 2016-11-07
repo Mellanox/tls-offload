@@ -301,6 +301,35 @@ out:
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_query_qp_counters);
 
+int mlx5_fpga_shell_counters(struct mlx5_core_dev *dev, bool clear,
+			     struct mlx5_fpga_shell_counters *data)
+{
+	u32 in[MLX5_ST_SZ_DW(fpga_shell_counters)];
+	u32 out[MLX5_ST_SZ_DW(fpga_shell_counters)];
+	int err;
+
+	memset(in, 0, sizeof(in));
+	MLX5_SET(fpga_shell_counters, in, clear, clear);
+	err = mlx5_core_access_reg(dev, in, sizeof(in), out, sizeof(out),
+				   MLX5_REG_FPGA_SHELL_CNTR, 0, false);
+	if (err)
+		goto out;
+	if (data) {
+		data->ddr_read_requests = MLX5_GET64(fpga_shell_counters, out,
+						     ddr_read_requests);
+		data->ddr_write_requests = MLX5_GET64(fpga_shell_counters, out,
+						      ddr_write_requests);
+		data->ddr_read_bytes = MLX5_GET64(fpga_shell_counters, out,
+						  ddr_read_bytes);
+		data->ddr_write_bytes = MLX5_GET64(fpga_shell_counters, out,
+						   ddr_write_bytes);
+	}
+
+out:
+	return err;
+}
+EXPORT_SYMBOL_GPL(mlx5_fpga_shell_counters);
+
 int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps)
 {
 	int err;
