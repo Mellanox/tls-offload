@@ -46,7 +46,8 @@ static int mlx_xfrm_add_state(struct xfrm_state *x);
 static void mlx_xfrm_del_state(struct xfrm_state *x);
 static void mlx_xfrm_free_state(struct xfrm_state *x);
 static bool mlx_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x);
-static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb);
+static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *pet,
+					    u8 petlen);
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *,
 					    struct mlx5e_swp_info *swp_info);
 static u16             mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw);
@@ -274,21 +275,6 @@ static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
 	return NULL;
 }
 
-static void remove_pet(struct sk_buff *skb, struct pet *pet)
-{
-	struct ethhdr *old_eth;
-	struct ethhdr *new_eth;
-
-	memcpy(pet, skb->data, sizeof(*pet));
-	old_eth = (struct ethhdr *)(skb->data - sizeof(struct ethhdr));
-	new_eth = (struct ethhdr *)(pskb_pull(skb, sizeof(struct pet)) -
-		sizeof(struct ethhdr));
-	skb->mac_header += sizeof(struct pet);
-
-	memmove(new_eth, old_eth, 2 * ETH_ALEN);
-	/* Ethertype is already in its new place */
-}
-
 static struct pet *insert_pet(struct sk_buff *skb)
 {
 	struct ethhdr *eth;
@@ -486,24 +472,22 @@ out:
 	return skb;
 }
 
-static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
+static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *rawpet,
+					    u8 petlen)
 {
-	struct pet pet;
+	struct pet *pet = (struct pet *)rawpet;
 	struct xfrm_offload_state *xos;
 	struct mlx_ipsec_dev *dev;
 	struct net_device *netdev = skb->dev;
 	struct xfrm_state *xs;
 
-	if (skb->protocol != cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE))
+	if (petlen != sizeof(*pet))
 		goto out;
 
 	dev_dbg(&netdev->dev, ">> rx_handler %u bytes\n", skb->len);
-	remove_pet(skb, &pet);
 	dev_dbg(&netdev->dev, "   RX PET: size %lu, etherType %04X, syndrome %02x, sw_sa_id %x\n",
-		sizeof(pet), be16_to_cpu(pet.ethertype), pet.syndrome,
-		be32_to_cpu(pet.content.rcv.sa_id));
-
-	skb->protocol = pet.ethertype;
+		sizeof(*pet), be16_to_cpu(pet->ethertype), pet->syndrome,
+		be32_to_cpu(pet->content.rcv.sa_id));
 
 	WARN_ON(skb->sp != NULL);
 	skb->sp = secpath_dup(skb->sp);
@@ -514,7 +498,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 
 	dev = find_mlx_ipsec_dev_by_netdev(netdev);
 	xs = mlx_sw_sa_id_to_xfrm_state(dev,
-			be32_to_cpu(pet.content.rcv.sa_id));
+			be32_to_cpu(pet->content.rcv.sa_id));
 
 	if (!xs) {
 		pr_warn("No xfrm_state found for processed packet\n");
@@ -527,7 +511,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 
 	xos = xfrm_offload_input(skb);
 	xos->flags = CRYPTO_DONE;
-	switch (pet.syndrome) {
+	switch (pet->syndrome) {
 	case PET_SYNDROME_DECRYPTED:
 		xos->status = CRYPTO_SUCCESS;
 		break;
@@ -535,7 +519,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb)
 		xos->status = CRYPTO_TUNNEL_ESP_AUTH_FAILED;
 		break;
 	default:
-		pr_warn("Unknown metadata syndrom %d\n", pet.syndrome);
+		pr_warn("Unknown metadata syndrom %d\n", pet->syndrome);
 		goto drop;
 	}
 	goto out;
