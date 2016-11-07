@@ -128,7 +128,8 @@ static struct sk_buff *mlx5e_accel_tx_handler(struct sk_buff *skb,
 	return skb;
 }
 
-static struct sk_buff *mlx5e_accel_rx_handler(struct sk_buff *skb)
+static struct sk_buff *mlx5e_accel_rx_handler(struct sk_buff *skb, u8 *pet,
+					      u8 petlen)
 {
 	return skb;
 }

@@ -627,6 +627,7 @@ static inline void mlx5e_build_rx_skb(struct mlx5_cqe64 *cqe,
 
 static inline void mlx5e_complete_rx_cqe(struct mlx5e_rq *rq,
 					 struct mlx5_cqe64 *cqe,
+					 struct mlx5e_mpw_info *wi,
 					 u32 cqe_bcnt,
 					 struct sk_buff *skb)
 {
@@ -638,7 +639,8 @@ static inline void mlx5e_complete_rx_cqe(struct mlx5e_rq *rq,
 
 	rcu_read_lock();
 	accel_client_ops = rcu_dereference(rq->priv->accel_client_ops);
-	skb = accel_client_ops->rx_handler(skb);
+	skb = accel_client_ops->rx_handler(skb, wi ? wi->pet : NULL,
+					   wi ? wi->petlen : 0);
 	if (!skb) {
 		rcu_read_unlock();
 		return;
@@ -842,7 +844,7 @@ void mlx5e_handle_rx_cqe_rep(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	if (!skb)
 		goto wq_ll_pop;
 
-	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
+	mlx5e_complete_rx_cqe(rq, cqe, NULL, cqe_bcnt, skb);
 
 	if (rep->vlan && skb_vlan_tag_present(skb))
 		skb_vlan_pop(skb);
@@ -868,12 +870,34 @@ static inline void mlx5e_mpwqe_fill_rx_skb(struct mlx5e_rq *rq,
 	u16 headlen = min_t(u16, MLX5_MPWRQ_SMALL_PACKET_THRESHOLD, cqe_bcnt);
 	u32 frag_offset;
 	u16 byte_cnt = min_t(u32, PAGE_SIZE - head_offset, cqe_bcnt);
-	void *va;
+	u8 *va;
+	struct ethhdr *old_eth;
+	struct ethhdr *new_eth;
+	__be16 *ethtype;
 
-	if (byte_cnt > MLX5_MPWRQ_SMALL_PACKET_THRESHOLD) {
+	wi->petlen = 0;
+	if (byte_cnt >= ETH_HLEN) {
 		va = page_address(&wi->dma_info.page[page_idx]) + head_offset;
-		headlen = eth_get_headlen(va, byte_cnt) + 8 /* PET */;
+		ethtype = (__be16 *)(va + ETH_ALEN * 2);
+		if (*ethtype == cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE)) {
+			wi->petlen = sizeof(wi->pet);
+			memcpy(&wi->pet, ethtype + 1, sizeof(wi->pet));
+			old_eth = (struct ethhdr *)va;
+			new_eth = (struct ethhdr *)(va + sizeof(wi->pet));
+			memmove(new_eth, old_eth, 2 * ETH_ALEN);
+			/* Ethertype is already in its new place */
+
+			va += sizeof(wi->pet);
+			cqe_bcnt -= sizeof(wi->pet);
+			byte_cnt -= sizeof(wi->pet);
+			head_offset += sizeof(wi->pet);
+			wqe_offset += sizeof(wi->pet);
+			headlen -= sizeof(wi->pet);
+		}
 	}
+
+	if (byte_cnt > MLX5_MPWRQ_SMALL_PACKET_THRESHOLD)
+		headlen = eth_get_headlen(va, byte_cnt);
 	frag_offset    = head_offset + headlen;
 	byte_cnt       = cqe_bcnt - headlen;
 
@@ -933,7 +957,7 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	cqe_bcnt = mpwrq_get_cqe_byte_cnt(cqe);
 
 	mlx5e_mpwqe_fill_rx_skb(rq, cqe, wi, cqe_bcnt, skb);
-	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
+	mlx5e_complete_rx_cqe(rq, cqe, wi, cqe_bcnt, skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 mpwrq_cqe_out:

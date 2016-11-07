@@ -396,6 +396,8 @@ struct mlx5e_mpw_info {
 	struct mlx5e_umr_dma_info umr;
 	u16 consumed_strides;
 	u16 skbs_frags[MLX5_MPWRQ_PAGES_PER_WQE];
+	u8 pet[8];
+	u8 petlen;
 };
 
 struct mlx5e_tx_wqe_info {
