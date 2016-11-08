@@ -41,7 +41,7 @@ int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 {
 	u32 in[MLX5_ST_SZ_DW(fpga_access_reg) + MLX5_FPGA_ACCESS_REG_SIZE_MAX];
 	u32 out[MLX5_ST_SZ_DW(fpga_access_reg) + MLX5_FPGA_ACCESS_REG_SIZE_MAX];
-	int err, i;
+	int err;
 
 	if (size & 3)
 		return -EINVAL;
@@ -54,20 +54,17 @@ int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 	MLX5_SET(fpga_access_reg, in, size, size);
 	MLX5_SET(fpga_access_reg, in, address_h, addr >> 32);
 	MLX5_SET(fpga_access_reg, in, address_l, addr & 0xFFFFFFFF);
-	if (write) {
-		for (i = 0; i < size; ++i)
-			MLX5_SET(fpga_access_reg, in, data[i], buf[i]);
-	}
+	if (write)
+		memcpy(MLX5_ADDR_OF(fpga_access_reg, in, data), buf, size);
 
 	err = mlx5_core_access_reg(dev, in, sizeof(in), out, sizeof(out),
 				   MLX5_REG_FPGA_ACCESS_REG, 0, write);
 	if (err)
 		return err;
 
-	if (!write) {
-		for (i = 0; i < size; i++)
-			buf[i] = MLX5_GET(fpga_access_reg, out, data[i]);
-	}
+	if (!write)
+		memcpy(buf, MLX5_ADDR_OF(fpga_access_reg, out, data), size);
+
 	return 0;
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_access_reg);
