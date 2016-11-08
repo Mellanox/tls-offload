@@ -81,6 +81,55 @@ static ssize_t mlx_ipsec_attr_store(struct kobject *kobj,
 	return ret;
 }
 
+#define MLX5_IPSEC_CAP(caps, cap) MLX5_GET(ipsec_extended_cap, caps, cap)
+
+static ssize_t caps_show(struct mlx_ipsec_dev *dev, char *buf)
+{
+	u32 *caps = dev->ipsec_caps;
+
+	return scnprintf(buf, PAGE_SIZE,
+			"UDP Encapsulations: %08x\n"
+			"IPv4 Fragment: %u\n"
+			"IPv6: %u\n"
+			"Extended Sequence Numbers: %u\n"
+			"Large Segment Offload: %u\n"
+			"Combined Transport+Tunnel Mode: %u\n"
+			"Tunnel Mode: %u\n"
+			"Transport Mode: %u\n"
+			"Combined AH+ESP: %u\n"
+			"ESP: %u\n"
+			"AH: %u\n"
+			"IPv4 Options: %u\n"
+			"Authentication algorithm AES_GCM_128: %u\n"
+			"Authentication algorithm AES_GCM_256: %u\n"
+			"Encryption algorithm AES_GCM_128: %u\n"
+			"Encryption algorithm AES_GCM_256: %u\n"
+			"Maximum SAs: %u\n"
+			"IPSec Counters: %u\n"
+			"IPSec Counters Start Address: 0x%x\n",
+			MLX5_IPSEC_CAP(caps, encapsulation),
+			MLX5_IPSEC_CAP(caps, ipv4_fragment),
+			MLX5_IPSEC_CAP(caps, ipv6),
+			MLX5_IPSEC_CAP(caps, esn),
+			MLX5_IPSEC_CAP(caps, lso),
+			MLX5_IPSEC_CAP(caps, transport_and_tunnel_mode),
+			MLX5_IPSEC_CAP(caps, tunnel_mode),
+			MLX5_IPSEC_CAP(caps, transport_mode),
+			MLX5_IPSEC_CAP(caps, ah_esp),
+			MLX5_IPSEC_CAP(caps, esp),
+			MLX5_IPSEC_CAP(caps, ah),
+			MLX5_IPSEC_CAP(caps, ipv4_options),
+			!!(MLX5_IPSEC_CAP(caps, auth_alg) & BIT(0)),
+			!!(MLX5_IPSEC_CAP(caps, auth_alg) & BIT(1)),
+			!!(MLX5_IPSEC_CAP(caps, enc_alg) & BIT(0)),
+			!!(MLX5_IPSEC_CAP(caps, enc_alg) & BIT(1)),
+			MLX5_IPSEC_CAP(caps, sa_cap),
+			MLX5_IPSEC_CAP(caps, number_of_ipsec_counters),
+			MLX5_IPSEC_CAP(caps, ipsec_counters_start_addr));
+}
+
+static MLX_IPSEC_ATTR_RO(caps);
+
 #ifdef QP_SIMULATOR
 
 static ssize_t sqpn_show(struct mlx_ipsec_dev *dev, char *buf)
@@ -155,6 +204,7 @@ static MLX_IPSEC_ATTR_RW(dgid);
 #endif
 
 static struct attribute *mlx_ipsec_def_attrs[] = {
+	&mlx_ipsec_attr_caps.attr,
 #ifdef QP_SIMULATOR
 	&mlx_ipsec_attr_sqpn.attr,
 	&mlx_ipsec_attr_sgid.attr,
