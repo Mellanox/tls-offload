@@ -51,6 +51,9 @@ struct accel_attribute accel_attr_##_name = __ATTR_RW(_name)
 #define ACCEL_ATTR_RO(_name) \
 struct accel_attribute accel_attr_##_name = __ATTR_RO(_name)
 
+#define ACCEL_ATTR_WO(_name) \
+struct accel_attribute accel_attr_##_name = __ATTR_WO(_name)
+
 static ssize_t accel_attr_show(struct kobject *kobj, struct attribute *attr,
 			       char *buf)
 {
@@ -212,11 +215,87 @@ static ACCEL_ATTR_RO(shell_caps);
 static ACCEL_ATTR_RW(shell_counters);
 static ACCEL_ATTR_RW(qp_counters);
 
+#ifdef QP_SIMULATOR
+
+static ssize_t ip_show(struct mlx_accel_core_device *dev, char *buf)
+{
+	__be16 *sgid = (__be16 *)&dev->core_conn->fpga_qpc.remote_ip;
+
+	return sprintf(buf, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+			be16_to_cpu(sgid[0]),
+			be16_to_cpu(sgid[1]),
+			be16_to_cpu(sgid[2]),
+			be16_to_cpu(sgid[3]),
+			be16_to_cpu(sgid[4]),
+			be16_to_cpu(sgid[5]),
+			be16_to_cpu(sgid[6]),
+			be16_to_cpu(sgid[7]));
+}
+
+static ssize_t qpn_show(struct mlx_accel_core_device *dev, char *buf)
+{
+	if (dev->core_conn && dev->core_conn->qp)
+		return sprintf(buf, "%u\n", dev->core_conn->qp->qp_num);
+	return sprintf(buf, "null\n");
+}
+
+static ssize_t fpga_ip_store(struct mlx_accel_core_device *dev, const char *buf,
+			     size_t count)
+{
+	__be16 *gid = (__be16 *)&dev->core_conn->fpga_qpc.fpga_ip;
+	int i = 0;
+
+	if (sscanf(buf, "%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx\n",
+		   &gid[0], &gid[1], &gid[2], &gid[3],
+		   &gid[4], &gid[5], &gid[6], &gid[7]) != 8)
+		return -EINVAL;
+
+	for (i = 0; i < 8; i++)
+		gid[i] = cpu_to_be16(gid[i]);
+	return count;
+}
+
+static ssize_t fpga_qpn_store(struct mlx_accel_core_device *dev,
+			      const char *buf, size_t count)
+{
+	if (sscanf(buf, "%u\n", &dev->core_conn->fpga_qpn) != 1)
+		return -EINVAL;
+	return count;
+}
+
+static ssize_t fpga_conn_store(struct mlx_accel_core_device *dev,
+			       const char *buf, size_t count)
+{
+	int err;
+
+	err = mlx_accel_core_rdma_connect(dev->core_conn);
+	if (err) {
+		pr_err("Failed to connect core RC QP to FPGA QP: %d\n", err);
+		return -EIO;
+	}
+	return count;
+}
+
+static ACCEL_ATTR_RO(ip);
+static ACCEL_ATTR_RO(qpn);
+static ACCEL_ATTR_WO(fpga_qpn);
+static ACCEL_ATTR_WO(fpga_ip);
+static ACCEL_ATTR_WO(fpga_conn);
+
+#endif
+
 static struct attribute *accel_default_attrs[] = {
 	&accel_attr_fpga_caps.attr,
 	&accel_attr_shell_caps.attr,
 	&accel_attr_shell_counters.attr,
 	&accel_attr_qp_counters.attr,
+#ifdef QP_SIMULATOR
+	&accel_attr_ip.attr,
+	&accel_attr_qpn.attr,
+	&accel_attr_fpga_ip.attr,
+	&accel_attr_fpga_qpn.attr,
+	&accel_attr_fpga_conn.attr,
+#endif
 	NULL
 };
 

@@ -78,15 +78,4 @@ int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 int mlx_accel_device_register_sysfs(struct mlx_accel_core_device *device);
 void mlx_accel_device_unregister_sysfs(struct mlx_accel_core_device *device);
 
-/* fpga QP */
-#define mlx_accel_fpga_qp_device_init(accel_device) 0
-#define mlx_accel_fpga_qp_device_deinit(accel_device)
-
-#if defined(QP_SIMULATOR)
-#undef mlx_accel_fpga_qp_device_init
-#undef mlx_accel_fpga_qp_device_deinit
-int mlx_accel_fpga_qp_device_init(struct mlx_accel_core_device *accel_device);
-int mlx_accel_fpga_qp_device_deinit(struct mlx_accel_core_device *accel_device);
-#endif
-
 #endif /* __MLX_ACCEL_CORE_H__ */

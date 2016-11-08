@@ -228,13 +228,6 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	}
 #endif
 
-	err = mlx_accel_fpga_qp_device_init(accel_device);
-	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to initialize FPGA QP: %d\n", err);
-		goto out;
-	}
-
 #ifdef QP_SIMULATOR
 	accel_device->pkey_index = 0;
 #else
@@ -243,7 +236,7 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	if (err) {
 		dev_err(&accel_device->hw_dev->pdev->dev,
 			"Failed to query pkey: %d\n", err);
-		goto err_fpga_dev;
+		goto out;
 	}
 #endif
 	pr_debug("pkey %x index is %u\n", IB_DEFAULT_PKEY_FULL,
@@ -253,7 +246,7 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	if (err) {
 		dev_err(&accel_device->hw_dev->pdev->dev,
 			"Failed to initialize transaction machine: %d\n", err);
-		goto err_fpga_dev;
+		goto out;
 	}
 
 	accel_device->pd = ib_alloc_pd(accel_device->ib_dev);
@@ -360,8 +353,6 @@ err_pd:
 	accel_device->pd = NULL;
 err_trans:
 	mlx_accel_trans_device_deinit(accel_device);
-err_fpga_dev:
-	mlx_accel_fpga_qp_device_deinit(accel_device);
 out:
 	accel_device->state = err ? MLX_ACCEL_FPGA_STATUS_FAILURE :
 				    MLX_ACCEL_FPGA_STATUS_SUCCESS;
@@ -400,7 +391,6 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 		ib_dealloc_pd(accel_device->pd);
 		accel_device->pd = NULL;
 		mlx_accel_trans_device_deinit(accel_device);
-		mlx_accel_fpga_qp_device_deinit(accel_device);
 	}
 }
 
