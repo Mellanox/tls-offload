@@ -305,8 +305,8 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 #endif
 
 #ifdef QP_SIMULATOR
-	dev_ntc(&accel_device->hw_dev->pdev->dev,
-		"**** QP Simulator mode; Waiting for QP setup ****\n");
+	dev_notice(&accel_device->hw_dev->pdev->dev,
+		   "**** QP Simulator mode; Waiting for QP setup ****\n");
 #else
 	err = mlx_accel_core_rdma_connect(accel_device->core_conn);
 	if (err) {
