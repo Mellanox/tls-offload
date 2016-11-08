@@ -13,6 +13,6 @@ config MLX_ACCEL_CORE
 config MLX_ACCEL_QP_SIMULATOR
 	bool
 	depends on MLX_ACCEL_CORE
-	default y
+	default n
 	---help---
 	  Use QP based simulator instead of the actual FPGA.
