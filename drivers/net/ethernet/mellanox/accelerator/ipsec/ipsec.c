@@ -583,17 +583,10 @@ static void mlx_ipsec_free(struct mlx_ipsec_dev *dev)
 
 void mlx_ipsec_dev_release(struct kobject *kobj)
 {
-	struct mlx_ipsec_dev *ipsec_dev =
-			container_of(kobj, struct mlx_ipsec_dev, kobj);
+	struct mlx_ipsec_dev *ipsec_dev;
 
-	/*
-	 * [BP]: TODO - Test the corner case of removing the last reference
-	 * while receiving packets that should be handled by the rx_handler.
-	 * Do we need some sync here?
-	 */
-
+	ipsec_dev = container_of(kobj, struct mlx_ipsec_dev, kobj);
 	dev_put(ipsec_dev->netdev);
-
 	kfree(ipsec_dev);
 }
 
@@ -710,11 +703,10 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	}
 
 	ret = ipsec_sysfs_init_and_add(&dev->kobj,
-			mlx_accel_core_kobj(dev->accel_device),
-			"%s",
-			"accel_dev");
+				       mlx_accel_core_kobj(dev->accel_device));
 	if (ret) {
-		pr_err("mlx_ipsec_add_one(): Got error from kobject_init_and_add %d\n", ret);
+		pr_err("mlx_ipsec_add_one(): Got error from kobject_init_and_add %d\n",
+		       ret);
 		goto err_ops_register;
 	}
 
@@ -763,38 +755,40 @@ out:
 /* [BP]: TODO - How do we make sure that all packets inflight are dropped? */
 void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 {
-	struct mlx_ipsec_dev *dev;
+	struct mlx_ipsec_dev *dev = NULL;
 	struct net_device *netdev = NULL;
 
 	pr_debug("mlx_ipsec_remove_one called for %s\n", accel_device->name);
 
 	mutex_lock(&mlx_ipsec_mutex);
-
 	list_for_each_entry(dev, &mlx_ipsec_devs, accel_dev_list) {
 		if (dev->accel_device == accel_device) {
-			dev->netdev->wanted_features &= ~(NETIF_F_HW_ESP |
-				NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
-			dev->netdev->hw_enc_features &= ~NETIF_F_GSO_ESP;
 			netdev = dev->netdev;
-#ifdef MLX_IPSEC_SADB_RDMA
-			mlx_accel_core_conn_destroy(dev->conn);
-#endif
-			mlx_ipsec_set_clear_bypass(dev, true);
-			mlx_accel_core_client_ops_unregister(netdev);
-			mlx_ipsec_free(dev);
 			break;
 		}
 	}
 	mutex_unlock(&mlx_ipsec_mutex);
 
+	if (!netdev)
+		return;
+
 	/* Remove NETIF_F_HW_ESP feature.
 	 * We assume that xfrm ops are assigned by xfrm_dev notifier callback
 	 */
-	if (netdev) {
-		rtnl_lock();
-		netdev_change_features(netdev);
-		rtnl_unlock();
-	}
+	dev->netdev->wanted_features &= ~(NETIF_F_HW_ESP |
+		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
+	dev->netdev->hw_enc_features &= ~NETIF_F_GSO_ESP;
+#ifdef MLX_IPSEC_SADB_RDMA
+	mlx_accel_core_conn_destroy(dev->conn);
+#endif
+	mlx_ipsec_set_clear_bypass(dev, true);
+	mlx_accel_core_client_ops_unregister(netdev);
+
+	rtnl_lock();
+	netdev_change_features(netdev);
+	rtnl_unlock();
+
+	mlx_ipsec_free(dev);
 }
 
 void mlx_ipsec_init_inverse_table(void)

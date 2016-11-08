@@ -38,7 +38,6 @@
 
 #include "ipsec.h"
 
-int ipsec_sysfs_init_and_add(struct kobject *kobj,
-			 struct kobject *parent, const char *fmt, char *arg);
+int ipsec_sysfs_init_and_add(struct kobject *kobj, struct kobject *parent);
 
 #endif	/* __IPSEC_SYSFS_H__ */

@@ -42,24 +42,24 @@ struct mlx_ipsec_attribute {
 			size_t count);
 };
 
-#define MLX_IPSEC_ATTR(_name, _mode, _show, _store) \
-	struct mlx_ipsec_attribute mlx_ipsec_attr_##_name = { \
-			.attr = {.name = __stringify(_name), .mode = _mode}, \
-			.show = _show, \
-			.store = _store, \
-	}
-#define to_mlx_ipsec_dev(obj)	\
-		container_of(obj, struct mlx_ipsec_dev, kobj)
-#define to_mlx_ipsec_attr(_attr)	\
-		container_of(_attr, struct mlx_ipsec_attribute, attr)
+#define MLX_IPSEC_ATTR_RW(_name) \
+struct mlx_ipsec_attribute mlx_ipsec_attr_##_name = __ATTR_RW(_name)
+
+#define MLX_IPSEC_ATTR_RO(_name) \
+struct mlx_ipsec_attribute mlx_ipsec_attr_##_name = __ATTR_RO(_name)
+
+#define MLX_IPSEC_ATTR_WO(_name) \
+struct mlx_ipsec_attribute mlx_ipsec_attr_##_name = __ATTR_WO(_name)
 
 static ssize_t mlx_ipsec_attr_show(struct kobject *kobj, struct attribute *attr,
 		char *buf)
 {
-	struct mlx_ipsec_dev *dev = to_mlx_ipsec_dev(kobj);
-	struct mlx_ipsec_attribute *mlx_ipsec_attr = to_mlx_ipsec_attr(attr);
+	struct mlx_ipsec_dev *dev;
+	struct mlx_ipsec_attribute *mlx_ipsec_attr;
 	ssize_t ret = -EIO;
 
+	dev = container_of(kobj, struct mlx_ipsec_dev, kobj);
+	mlx_ipsec_attr = container_of(attr, struct mlx_ipsec_attribute, attr);
 	if (mlx_ipsec_attr->show)
 		ret = mlx_ipsec_attr->show(dev, buf);
 
@@ -69,22 +69,26 @@ static ssize_t mlx_ipsec_attr_show(struct kobject *kobj, struct attribute *attr,
 static ssize_t mlx_ipsec_attr_store(struct kobject *kobj,
 		struct attribute *attr, const char *buf, size_t count)
 {
-	struct mlx_ipsec_dev *dev = to_mlx_ipsec_dev(kobj);
-	struct mlx_ipsec_attribute *mlx_ipsec_attr = to_mlx_ipsec_attr(attr);
+	struct mlx_ipsec_dev *dev;
+	struct mlx_ipsec_attribute *mlx_ipsec_attr;
 	ssize_t ret = -EIO;
 
+	dev = container_of(kobj, struct mlx_ipsec_dev, kobj);
+	mlx_ipsec_attr = container_of(attr, struct mlx_ipsec_attribute, attr);
 	if (mlx_ipsec_attr->store)
 		ret = mlx_ipsec_attr->store(dev, buf, count);
 
 	return ret;
 }
 
-static ssize_t mlx_ipsec_sqpn_read(struct mlx_ipsec_dev *dev, char *buf)
+#ifdef QP_SIMULATOR
+
+static ssize_t sqpn_show(struct mlx_ipsec_dev *dev, char *buf)
 {
 	return sprintf(buf, "%d\n", dev->conn->qp->qp_num);
 }
 
-static ssize_t mlx_ipsec_sgid_read(struct mlx_ipsec_dev *dev, char *buf)
+static ssize_t sgid_show(struct mlx_ipsec_dev *dev, char *buf)
 {
 	__be16 *sgid = (__be16 *)&dev->conn->fpga_qpc.remote_ip;
 
@@ -99,26 +103,21 @@ static ssize_t mlx_ipsec_sgid_read(struct mlx_ipsec_dev *dev, char *buf)
 			be16_to_cpu(sgid[7]));
 }
 
-static ssize_t mlx_ipsec_dqpn_read(struct mlx_ipsec_dev *dev, char *buf)
+static ssize_t dqpn_show(struct mlx_ipsec_dev *dev, char *buf)
 {
 	return sprintf(buf, "%d\n", dev->conn->fpga_qpn);
 }
 
-static ssize_t mlx_ipsec_dqpn_write(struct mlx_ipsec_dev *dev, const char *buf,
-		size_t count)
+static ssize_t dqpn_store(struct mlx_ipsec_dev *dev, const char *buf,
+			  size_t count)
 {
 	if (sscanf(buf, "%u\n", &dev->conn->fpga_qpn) != 1)
 		return -EINVAL;
-	/* [SR] TODO: We are planning on keeping this interface in
-	 * final version as well? If so, how will we know what DQPN to
-	 * use? I guess we should have "allocate-user-QP-slot" API in
-	 * the core.
-	 */
 	mlx_accel_core_connect(dev->conn);
 	return count;
 }
 
-static ssize_t mlx_ipsec_dgid_read(struct mlx_ipsec_dev *dev, char *buf)
+static ssize_t dgid_show(struct mlx_ipsec_dev *dev, char *buf)
 {
 	__be16 *dgid = (__be16 *)&dev->conn->fpga_qpc.fpga_ip;
 
@@ -133,8 +132,8 @@ static ssize_t mlx_ipsec_dgid_read(struct mlx_ipsec_dev *dev, char *buf)
 			be16_to_cpu(dgid[7]));
 }
 
-static ssize_t mlx_ipsec_dgid_write(struct mlx_ipsec_dev *dev, const char *buf,
-		size_t count)
+static ssize_t dgid_store(struct mlx_ipsec_dev *dev, const char *buf,
+			  size_t count)
 {
 	__be16 *dgid = (__be16 *)&dev->conn->fpga_qpc.fpga_ip;
 	int i = 0;
@@ -148,20 +147,24 @@ static ssize_t mlx_ipsec_dgid_write(struct mlx_ipsec_dev *dev, const char *buf,
 	return count;
 }
 
-static MLX_IPSEC_ATTR(sqpn, 0444, mlx_ipsec_sqpn_read, NULL);
-static MLX_IPSEC_ATTR(sgid, 0444, mlx_ipsec_sgid_read, NULL);
-static MLX_IPSEC_ATTR(dqpn, 0666, mlx_ipsec_dqpn_read, mlx_ipsec_dqpn_write);
-static MLX_IPSEC_ATTR(dgid, 0666, mlx_ipsec_dgid_read, mlx_ipsec_dgid_write);
+static MLX_IPSEC_ATTR_RO(sqpn);
+static MLX_IPSEC_ATTR_RO(sgid);
+static MLX_IPSEC_ATTR_RW(dqpn);
+static MLX_IPSEC_ATTR_RW(dgid);
 
-struct attribute *mlx_ipsec_def_attrs[] = {
-		&mlx_ipsec_attr_sqpn.attr,
-		&mlx_ipsec_attr_sgid.attr,
-		&mlx_ipsec_attr_dqpn.attr,
-		&mlx_ipsec_attr_dgid.attr,
-		NULL,
+#endif
+
+static struct attribute *mlx_ipsec_def_attrs[] = {
+#ifdef QP_SIMULATOR
+	&mlx_ipsec_attr_sqpn.attr,
+	&mlx_ipsec_attr_sgid.attr,
+	&mlx_ipsec_attr_dqpn.attr,
+	&mlx_ipsec_attr_dgid.attr,
+#endif
+	NULL,
 };
 
-const struct sysfs_ops mlx_ipsec_dev_sysfs_ops = {
+static const struct sysfs_ops mlx_ipsec_dev_sysfs_ops = {
 	.show  = mlx_ipsec_attr_show,
 	.store = mlx_ipsec_attr_store,
 };
@@ -172,11 +175,8 @@ static struct kobj_type mlx_ipsec_dev_type = {
 	.default_attrs  = mlx_ipsec_def_attrs,
 };
 
-int ipsec_sysfs_init_and_add(struct kobject *kobj,
-			 struct kobject *parent, const char *fmt, char *arg)
+int ipsec_sysfs_init_and_add(struct kobject *kobj, struct kobject *parent)
 {
-	return kobject_init_and_add(kobj, &mlx_ipsec_dev_type,
-			parent,
-			fmt, arg);
+	return kobject_init_and_add(kobj, &mlx_ipsec_dev_type, parent, "ipsec");
 }
 
