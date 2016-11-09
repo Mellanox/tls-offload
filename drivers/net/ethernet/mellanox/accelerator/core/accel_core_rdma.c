@@ -41,6 +41,14 @@
 static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn);
 static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn);
 
+static void mlx_accel_core_recv_complete(struct mlx_accel_core_conn *conn,
+					 struct mlx_accel_core_dma_buf *buf,
+					 struct ib_wc *wc)
+{
+	dev_dbg(&conn->accel_device->hw_dev->pdev->dev, "Free buf %p\n", buf);
+	kfree(buf);
+}
+
 static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 {
 	struct ib_sge sge;
@@ -68,6 +76,7 @@ static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 	}
 
 	buf->dma_dir = DMA_FROM_DEVICE;
+	buf->complete = mlx_accel_core_recv_complete;
 
 	memset(&sge, 0, sizeof(sge));
 	sge.addr = buf->data_dma_addr;
@@ -263,8 +272,6 @@ static void mlx_accel_complete(struct mlx_accel_core_conn *conn,
 
 	if (buf->complete)
 		buf->complete(conn, buf, wc);
-	if (wc->opcode == IB_WC_RECV)
-		kfree(buf);
 }
 
 static void mlx_accel_core_rdma_comp_handler(struct ib_cq *cq, void *arg)
