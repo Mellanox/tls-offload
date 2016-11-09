@@ -130,6 +130,19 @@ static ssize_t caps_show(struct mlx_ipsec_dev *dev, char *buf)
 
 static MLX_IPSEC_ATTR_RO(caps);
 
+static ssize_t qp_counters_show(struct mlx_ipsec_dev *dev, char *buf)
+{
+	return mlx_accel_counters_sysfs_show(dev->conn, buf);
+}
+
+static ssize_t qp_counters_store(struct mlx_ipsec_dev *dev, const char *buf,
+				 size_t count)
+{
+	return mlx_accel_counters_sysfs_store(dev->conn, buf, count);
+}
+
+static MLX_IPSEC_ATTR_RW(qp_counters);
+
 #ifdef QP_SIMULATOR
 
 static ssize_t sqpn_show(struct mlx_ipsec_dev *dev, char *buf)
@@ -205,6 +218,7 @@ static MLX_IPSEC_ATTR_RW(dgid);
 
 static struct attribute *mlx_ipsec_def_attrs[] = {
 	&mlx_ipsec_attr_caps.attr,
+	&mlx_ipsec_attr_qp_counters.attr,
 #ifdef QP_SIMULATOR
 	&mlx_ipsec_attr_sqpn.attr,
 	&mlx_ipsec_attr_sgid.attr,
