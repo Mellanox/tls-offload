@@ -195,6 +195,13 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 
 #else /* MLX_IPSEC_SADB_RDMA */
 
+void mlx_ipsec_hw_send_complete(struct mlx_accel_core_conn *conn,
+				struct mlx_accel_core_dma_buf *buf,
+				struct ib_wc *wc)
+{
+	kfree(buf);
+}
+
 static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 {
 	struct mlx_accel_core_dma_buf *buf = NULL;
@@ -208,6 +215,7 @@ static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 		goto out;
 	}
 
+	buf->complete = mlx_ipsec_hw_send_complete;
 	buf->data_size = sizeof(*cmd);
 	buf->data = buf + 1;
 	cmd = buf->data;
@@ -227,8 +235,12 @@ static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 	}
 
 	sa->status = IPSEC_SA_PENDING;
-	mlx_accel_core_sendmsg(sa->dev->conn, buf);
-	/* After this point buf will be freed in mlx_accel_core */
+	res = mlx_accel_core_sendmsg(sa->dev->conn, buf);
+	if (res) {
+		pr_warn("Failure sending IPSec command: %d\n", res);
+		goto err_buf;
+	}
+	/* After this point buf will be freed by completion */
 
 	res = wait_event_killable(sa->dev->wq, sa->status != IPSEC_SA_PENDING);
 	if (res != 0) {
