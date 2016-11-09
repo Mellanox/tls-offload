@@ -177,13 +177,25 @@ static ssize_t shell_counters_store(struct mlx_accel_core_device *device,
 	return size;
 }
 
-static ssize_t qp_counters_show(struct mlx_accel_core_device *device,
-				char *buf)
+ssize_t mlx_accel_counters_sysfs_store(struct mlx_accel_core_conn *conn,
+				       const char *buf, size_t size)
+{
+	int ret = mlx5_fpga_query_qp_counters(conn->accel_device->hw_dev,
+					      conn->fpga_qpn, true, NULL);
+
+	if (ret)
+		return -EIO;
+	return size;
+}
+EXPORT_SYMBOL(mlx_accel_counters_sysfs_store);
+
+ssize_t mlx_accel_counters_sysfs_show(struct mlx_accel_core_conn *conn,
+				      char *buf)
 {
 	struct mlx5_fpga_qp_counters data;
-	int ret = mlx5_fpga_query_qp_counters(device->hw_dev,
-					      device->core_conn->fpga_qpn,
-					      false, &data);
+	int ret = mlx5_fpga_query_qp_counters(conn->accel_device->hw_dev,
+					      conn->fpga_qpn, false, &data);
+
 	if (ret)
 		return -EIO;
 	return scnprintf(buf, PAGE_SIZE,
@@ -198,16 +210,18 @@ static ssize_t qp_counters_show(struct mlx_accel_core_device *device,
 			 data.tx_send_packets,
 			 data.rx_total_drop);
 }
+EXPORT_SYMBOL(mlx_accel_counters_sysfs_show);
+
+static ssize_t qp_counters_show(struct mlx_accel_core_device *device,
+				char *buf)
+{
+	return mlx_accel_counters_sysfs_show(device->core_conn, buf);
+}
 
 static ssize_t qp_counters_store(struct mlx_accel_core_device *device,
 				 const char *buf, size_t size)
 {
-	int ret = mlx5_fpga_query_qp_counters(device->hw_dev,
-					      device->core_conn->fpga_qpn,
-					      true, NULL);
-	if (ret)
-		return -EIO;
-	return size;
+	return mlx_accel_counters_sysfs_store(device->core_conn, buf, size);
 }
 
 static ACCEL_ATTR_RO(fpga_caps);

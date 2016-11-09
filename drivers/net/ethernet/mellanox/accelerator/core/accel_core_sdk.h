@@ -178,6 +178,10 @@ int mlx_accel_core_connect(struct mlx_accel_core_conn *conn);
 
 int mlx_accel_core_sendmsg(struct mlx_accel_core_conn *conn,
 			   struct mlx_accel_core_dma_buf *buf);
+ssize_t mlx_accel_counters_sysfs_store(struct mlx_accel_core_conn *conn,
+				       const char *buf, size_t size);
+ssize_t mlx_accel_counters_sysfs_show(struct mlx_accel_core_conn *conn,
+				      char *buf);
 
 u64 mlx_accel_core_ddr_size_get(struct mlx_accel_core_device *dev);
 u64 mlx_accel_core_ddr_base_get(struct mlx_accel_core_device *dev);
