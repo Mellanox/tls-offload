@@ -213,10 +213,6 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 #endif
 	int err = 0;
 
-	snprintf(accel_device->name, sizeof(accel_device->name), "%s-%s",
-		 accel_device->ib_dev->name,
-		 accel_device->hw_dev->priv.name);
-
 #ifdef QP_SIMULATOR
 	memset(accel_device->fpga_caps, 0, sizeof(*accel_device->fpga_caps));
 #else
@@ -440,6 +436,10 @@ static void mlx_accel_device_check(struct mlx_accel_core_device *accel_device)
 static void mlx_accel_device_start(struct mlx_accel_core_device *accel_device)
 {
 	struct mlx_accel_core_client *client;
+
+	snprintf(accel_device->name, sizeof(accel_device->name), "%s-%s",
+		 accel_device->ib_dev->name,
+		 accel_device->hw_dev->priv.name);
 
 	mlx_accel_device_register_sysfs(accel_device);
 
