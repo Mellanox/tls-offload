@@ -477,7 +477,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *rawpet,
 					    u8 petlen)
 {
 	struct pet *pet = (struct pet *)rawpet;
-	struct xfrm_offload_state *xos;
+	struct xfrm_offload *xo;
 	struct mlx_ipsec_dev *dev;
 	struct net_device *netdev = skb->dev;
 	struct xfrm_state *xs;
@@ -510,14 +510,14 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *rawpet,
 	xfrm_state_hold(xs);
 	skb->sp->xvec[skb->sp->len++] = xs;
 
-	xos = xfrm_offload_input(skb);
-	xos->flags = CRYPTO_DONE;
+	xo = xfrm_offload(skb);
+	xo->flags = CRYPTO_DONE;
 	switch (pet->syndrome) {
 	case PET_SYNDROME_DECRYPTED:
-		xos->status = CRYPTO_SUCCESS;
+		xo->status = CRYPTO_SUCCESS;
 		break;
 	case PET_SYNDROME_AUTH_FAILED:
-		xos->status = CRYPTO_TUNNEL_ESP_AUTH_FAILED;
+		xo->status = CRYPTO_TUNNEL_ESP_AUTH_FAILED;
 		break;
 	default:
 		pr_warn("Unknown metadata syndrom %d\n", pet->syndrome);
