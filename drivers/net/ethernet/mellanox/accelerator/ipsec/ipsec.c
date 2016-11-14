@@ -382,6 +382,7 @@ static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x,
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 					    struct mlx5e_swp_info *swp_info)
 {
+	struct xfrm_offload *xo = xfrm_offload(skb);
 	struct tcphdr *tcph;
 	struct ip_esp_hdr *esph;
 	struct iphdr *iiph;
@@ -392,8 +393,8 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 
 	dev_dbg(&skb->dev->dev, ">> tx_handler %u bytes\n", skb->len);
 
-	if (!skb->sp) {
-		dev_dbg(&skb->dev->dev, "   no sp\n");
+	if (!xo) {
+		dev_dbg(&skb->dev->dev, "   no xo\n");
 		goto out;
 	}
 
@@ -403,7 +404,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 		goto out;
 	}
 
-	x = skb->sp->xvec[0];
+	x = xfrm_input_state(skb);
 	if (!x) {
 		pr_warn_ratelimited("Crypto-offload packet has no xfrm_state\n");
 		goto out;
@@ -452,7 +453,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 			pet->content.send.mss_inv = mlx_ipsec_mss_inv(skb);
 			pet->content.send.seq = htons(ntohl(tcph->seq) &
 						0xFFFF);
-			pet->content.send.esp_next_proto = skb->sp->proto;
+			pet->content.send.esp_next_proto = xo->proto;
 		} else {
 			pet->syndrome = PET_SYNDROME_OFFLOAD;
 			remove_trailer(skb, x,
