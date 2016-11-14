@@ -816,7 +816,7 @@ void mlx5e_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	if (!skb)
 		goto wq_ll_pop;
 
-	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
+	mlx5e_complete_rx_cqe(rq, cqe, NULL, cqe_bcnt, skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 wq_ll_pop:
@@ -877,7 +877,7 @@ static inline void mlx5e_mpwqe_fill_rx_skb(struct mlx5e_rq *rq,
 
 	wi->petlen = 0;
 	if (byte_cnt >= ETH_HLEN) {
-		va = page_address(&wi->dma_info.page[page_idx]) + head_offset;
+		va = page_address(wi->umr.dma_info[page_idx].page) + head_offset;
 		ethtype = (__be16 *)(va + ETH_ALEN * 2);
 		if (*ethtype == cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE)) {
 			wi->petlen = sizeof(wi->pet);
