@@ -245,22 +245,12 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		goto out;
 	}
 
-	accel_device->pd = ib_alloc_pd(accel_device->ib_dev);
+	accel_device->pd = ib_alloc_pd(accel_device->ib_dev, 0);
 	if (IS_ERR(accel_device->pd)) {
 		err = PTR_ERR(accel_device->pd);
 		dev_err(&accel_device->hw_dev->pdev->dev,
 			"Failed to create PD: %d\n", err);
 		goto err_trans;
-	}
-
-	accel_device->mr = ib_get_dma_mr(accel_device->pd,
-					 IB_ACCESS_LOCAL_WRITE |
-					 IB_ACCESS_REMOTE_WRITE);
-	if (IS_ERR(accel_device->mr)) {
-		err = PTR_ERR(accel_device->mr);
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to create MR: %d\n", err);
-		goto err_pd;
 	}
 
 	memset(&core_conn_attr, 0, sizeof(core_conn_attr));
@@ -276,7 +266,7 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		dev_err(&accel_device->hw_dev->pdev->dev,
 			"Failed to create core RC QP: %d\n", err);
 		accel_device->core_conn = NULL;
-		goto err_mr;
+		goto err_pd;
 	}
 
 #ifdef DEBUG
@@ -341,9 +331,6 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 err_core_conn:
 	mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
 	accel_device->core_conn = NULL;
-err_mr:
-	ib_dereg_mr(accel_device->mr);
-	accel_device->mr = NULL;
 err_pd:
 	ib_dealloc_pd(accel_device->pd);
 	accel_device->pd = NULL;
@@ -380,10 +367,6 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 	if (accel_device->core_conn) {
 		mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
 		accel_device->core_conn = NULL;
-		err = ib_dereg_mr(accel_device->mr);
-		if (err)
-			pr_err("Unexpected error deregistering MR: %d\n", err);
-		accel_device->mr = NULL;
 		ib_dealloc_pd(accel_device->pd);
 		accel_device->pd = NULL;
 		mlx_accel_trans_device_deinit(accel_device);

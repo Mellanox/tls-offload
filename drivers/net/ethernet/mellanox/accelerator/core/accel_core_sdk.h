@@ -73,7 +73,6 @@ struct mlx_accel_core_device {
 
 	/* Parameters for QPs */
 	struct ib_pd *pd;
-	struct ib_mr *mr;
 	union ib_gid gid;
 	u16 pkey_index;
 	u8 sl;
