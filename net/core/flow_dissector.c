@@ -862,6 +862,15 @@ u32 __skb_get_poff(const struct sk_buff *skb, void *data,
 	case IPPROTO_SCTP:
 		poff += sizeof(struct sctphdr);
 		break;
+	case IPPROTO_ESP:
+		poff += sizeof(struct ip_esp_hdr);
+		break;
+	case IPPROTO_AH:
+		poff += sizeof(struct ip_auth_hdr);
+		break;
+	case IPPROTO_COMP:
+		poff += sizeof(struct ip_comp_hdr);
+		break;
 	}
 
 	return poff;
