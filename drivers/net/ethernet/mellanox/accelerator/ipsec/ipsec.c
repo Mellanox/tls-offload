@@ -509,6 +509,7 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *rawpet,
 	/* xfrm_input expects us to hold the xfrm_state */
 	xfrm_state_hold(xs);
 	skb->sp->xvec[skb->sp->len++] = xs;
+	skb->sp->olen++;
 
 	xo = xfrm_offload(skb);
 	xo->flags = CRYPTO_DONE;
