@@ -844,6 +844,20 @@ struct xfrmdev_ops {
 };
 #endif
 
+#if IS_ENABLED(CONFIG_TLS)
+struct tls_crypto_info;
+struct tls_offload_context;
+
+struct tlsdev_ops {
+	int (*tls_dev_add)(struct net_device *netdev, struct sock *sk,
+			bool is_send,
+			struct tls_crypto_info *crypto_info,
+			struct tls_offload_context **ctx);
+	void (*tls_dev_del)(struct net_device *netdev, struct sock *sk,
+			bool is_send);
+};
+#endif
+
 /*
  * This structure defines the management hooks for network devices.
  * The following hooks can be defined; unless noted otherwise, they are
@@ -1720,6 +1734,10 @@ struct net_device {
 
 #ifdef CONFIG_XFRM
 	const struct xfrmdev_ops *xfrmdev_ops;
+#endif
+
+#if IS_ENABLED(CONFIG_TLS)
+	const struct tlsdev_ops *tlsdev_ops;
 #endif
 
 	const struct header_ops *header_ops;
