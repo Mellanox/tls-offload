@@ -77,6 +77,7 @@ struct inet_connection_sock_af_ops {
  * @icsk_pmtu_cookie	   Last pmtu seen by socket
  * @icsk_ca_ops		   Pluggable congestion control hook
  * @icsk_af_ops		   Operations which are AF_INET{4,6} specific
+ * @icsk_clean_acked	   Clean acked data hook
  * @icsk_ca_state:	   Congestion control state
  * @icsk_retransmits:	   Number of unrecovered [RTO] timeouts
  * @icsk_pending:	   Scheduled timer event
@@ -99,6 +100,7 @@ struct inet_connection_sock {
 	__u32			  icsk_pmtu_cookie;
 	const struct tcp_congestion_ops *icsk_ca_ops;
 	const struct inet_connection_sock_af_ops *icsk_af_ops;
+	void			  (*icsk_clean_acked)(struct sock *sk);
 	unsigned int		  (*icsk_sync_mss)(struct sock *sk, u32 pmtu);
 	__u8			  icsk_ca_state:6,
 				  icsk_ca_setsockopt:1,
