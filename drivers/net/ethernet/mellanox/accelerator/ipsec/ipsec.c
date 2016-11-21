@@ -159,7 +159,7 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 		return -EINVAL;
 	}
 	if (x->tfcpad) {
-		dev_info(&netdev->dev, "Cannot offload xfrm states without tfc padding\n");
+		dev_info(&netdev->dev, "Cannot offload xfrm states with tfc padding\n");
 		return -EINVAL;
 	}
 	if (!x->geniv) {
