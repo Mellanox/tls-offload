@@ -736,19 +736,25 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 		return;
 	}
 
-	/* Remove NETIF_F_HW_ESP feature.
-	 * We assume that xfrm ops are assigned by xfrm_dev notifier callback
-	 */
-	dev->netdev->wanted_features &= ~(NETIF_F_HW_ESP |
-		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
-	dev->netdev->hw_enc_features &= ~NETIF_F_GSO_ESP;
 #ifdef MLX_IPSEC_SADB_RDMA
 	mlx_accel_core_conn_destroy(dev->conn);
 #endif
 	mlx_accel_core_client_ops_unregister(netdev);
 
 	rtnl_lock();
+	/* Allow turning off the features */
+	netdev->hw_features |= (NETIF_F_HW_ESP |
+		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
+	/* Turn them off */
+	netdev->wanted_features &= ~(NETIF_F_HW_ESP |
+		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
+	netdev->hw_enc_features &= ~NETIF_F_GSO_ESP;
+	netdev->vlan_features &= ~(NETIF_F_HW_ESP |
+			NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
 	netdev_change_features(netdev);
+	/* And disallow touching them again */
+	netdev->hw_features &= ~(NETIF_F_HW_ESP |
+		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
 	rtnl_unlock();
 
 	mlx_ipsec_free(dev);
