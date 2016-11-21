@@ -731,8 +731,10 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 	}
 	mutex_unlock(&mlx_ipsec_mutex);
 
-	if (!netdev)
+	if (!netdev) {
+		dev_warn(&accel_device->hw_dev->pdev->dev, "Could not unregister netdev callbacks\n");
 		return;
+	}
 
 	/* Remove NETIF_F_HW_ESP feature.
 	 * We assume that xfrm ops are assigned by xfrm_dev notifier callback
