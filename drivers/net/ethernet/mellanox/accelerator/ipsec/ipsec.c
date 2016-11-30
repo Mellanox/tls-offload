@@ -39,6 +39,7 @@
 #include <linux/mlx5/qp.h>
 #include <crypto/aead.h>
 #include <linux/highmem.h>
+#include <net/esp.h>
 
 static LIST_HEAD(mlx_ipsec_devs);
 static DEFINE_MUTEX(mlx_ipsec_mutex);
@@ -443,8 +444,13 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 
 		if (skb_is_gso(skb)) {
 			/* Add LSO PET indication */
-			esph = (struct ip_esp_hdr *)skb_transport_header(skb);
+			esph = ip_esp_hdr(skb);
 			tcph = inner_tcp_hdr(skb);
+			dev_dbg(&skb->dev->dev, "   Offloading GSO packet outer L3 %u; L4 %u; Inner L3 %u; L4 %u\n",
+				skb->network_header,
+				skb->transport_header,
+				skb->inner_network_header,
+				skb->inner_transport_header);
 			dev_dbg(&skb->dev->dev, "   Offloading GSO packet of len %u; mss %u; TCP sp %u dp %u seq 0x%x ESP seq 0x%x\n",
 				skb->len, skb_shinfo(skb)->gso_size,
 				ntohs(tcph->source), ntohs(tcph->dest),
