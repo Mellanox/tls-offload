@@ -114,10 +114,6 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 	unsigned long flags;
 	int res;
 
-	if (x->props.mode != XFRM_MODE_TUNNEL) {
-		dev_info(&netdev->dev, "Only tunnel xfrm state may be offloaded\n");
-		return -EINVAL;
-	}
 	if (x->props.aalgo != SADB_AALG_NONE) {
 		dev_info(&netdev->dev, "Cannot offload authenticated xfrm states\n");
 		return -EINVAL;
@@ -423,16 +419,52 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 
 		/* Offsets are in 2-byte words, counting from start of frame */
 		swp_info->outer_l3_ofs = skb_network_offset(skb) / 2;
-		swp_info->inner_l3_ofs = skb_inner_network_offset(skb) / 2;
-		iiph = (struct iphdr *)skb_inner_network_header(skb);
-		switch (iiph->protocol) {
-		case IPPROTO_UDP:
-			swp_info->swp_flags |= MLX5_ETH_WQE_SWP_INNER_L4_UDP;
-			/* Fall through */
-		case IPPROTO_TCP:
-			swp_info->inner_l4_ofs =
-				skb_inner_transport_offset(skb) / 2;
-			break;
+
+		if (x->props.mode == XFRM_MODE_TUNNEL) {
+			/* Tunnel Mode:
+			 *  - Outer L3 offset and type - as usual
+			 *  - No outer L4 header
+			 *    ESP packet that is marked for offload is
+			 *    'encapsulated' for transport mode as well - its
+			 *    inner transport header in SKB is set.
+			 *  - Inner L3/4 fields are obtained from the
+			 *    encapsulated packet
+			 */
+
+			swp_info->inner_l3_ofs =
+				skb_inner_network_offset(skb) / 2;
+			iiph = (struct iphdr *)skb_inner_network_header(skb);
+
+			switch (iiph->protocol) {
+			case IPPROTO_UDP:
+				swp_info->swp_flags |=
+					MLX5_ETH_WQE_SWP_INNER_L4_UDP;
+				/* Fall through */
+			case IPPROTO_TCP:
+				swp_info->inner_l4_ofs =
+					skb_inner_transport_offset(skb) / 2;
+				break;
+			}
+		} else {
+			/* Transport Mode:
+			 *  - Outer L3 offset and type - as usual
+			 *  - Outer L4 offset: ESP packet that is marked for
+			 *    offload is 'encapsulated' for transport mode as
+			 *    well - its inner transport header in SKB is set
+			 *  - Outer L4 type is whatever the ESP replaced.
+			 *  - Inner L3/4 fields are not set
+			 */
+
+			switch (xo->proto) {
+			case IPPROTO_UDP:
+				swp_info->swp_flags |=
+					MLX5_ETH_WQE_SWP_OUTER_L4_UDP;
+				/* Fall through */
+			case IPPROTO_TCP:
+				swp_info->outer_l4_ofs =
+					skb_inner_transport_offset(skb) / 2;
+				break;
+			}
 		}
 
 		/* Place the SN in the IV field */
