@@ -73,9 +73,7 @@ struct mlx_accel_core_device {
 
 	/* Parameters for QPs */
 	struct ib_pd *pd;
-	union ib_gid gid;
 	u16 pkey_index;
-	u8 sl;
 #ifdef QP_SIMULATOR
 	struct kobject sim_kobj;
 #endif

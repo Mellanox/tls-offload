@@ -591,7 +591,7 @@ static inline int mlx_accel_core_rdma_rtr_qp(struct mlx_accel_core_conn *conn)
 	attr.max_dest_rd_atomic = 0;
 	attr.min_rnr_timer = 0x12;
 	attr.ah_attr.port_num = conn->port_num;
-	attr.ah_attr.sl = conn->accel_device->sl;
+	attr.ah_attr.sl = 0;
 	attr.ah_attr.ah_flags = IB_AH_GRH;
 	memcpy(&attr.ah_attr.grh.dgid, &conn->fpga_qpc.fpga_ip,
 	       sizeof(attr.ah_attr.grh.dgid));
