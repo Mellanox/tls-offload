@@ -328,8 +328,7 @@ static netdev_features_t mlx_ipsec_feature_chk(struct sk_buff *skb,
 	return features;
 }
 
-static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x,
-			   u8 *proto)
+static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x)
 {
 	skb_frag_t *frag;
 	u8 *vaddr;
@@ -355,8 +354,6 @@ static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x,
 		print_hex_dump_bytes("Last frag ", DUMP_PREFIX_OFFSET,
 				     trailer, frag->size);
 
-		*proto = trailer[skb_frag_size(frag) - alen - 1];
-
 		kunmap_atomic(vaddr);
 		skb_frag_unref(skb, last_frag);
 
@@ -364,7 +361,6 @@ static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x,
 			plen, alen);
 	} else {
 		plen = *(skb_tail_pointer(skb) - alen - 2);
-		*proto = *(skb_tail_pointer(skb) - alen - 1);
 		dev_dbg(&skb->dev->dev, "   Pad len is %u bytes; alen is %u\n",
 			plen, alen);
 	}
@@ -376,18 +372,99 @@ static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x,
 	iphdr->check = htons(~(~ntohs(iphdr->check) - trailer_len));
 }
 
+static void set_swp(struct sk_buff *skb, struct mlx5e_swp_info *swp_info,
+		    bool tunnel, struct xfrm_offload *xo)
+{
+	struct iphdr *iiph;
+	u8 proto;
+
+	/* Tunnel Mode:
+	 * SWP:      OutL3       InL3  InL4
+	 * Pkt: MAC  IP     ESP  IP    L4
+	 *
+	 * Transport Mode:
+	 * SWP:      OutL3       InL4
+	 *           InL3
+	 * Pkt: MAC  IP     ESP  L4
+	 *
+	 * Offsets are in 2-byte words, counting from start of frame
+	 */
+	swp_info->outer_l3_ofs = skb_network_offset(skb) / 2;
+
+	if (tunnel) {
+		swp_info->inner_l3_ofs = skb_inner_network_offset(skb) / 2;
+		iiph = (struct iphdr *)skb_inner_network_header(skb);
+		proto = iiph->protocol;
+	} else {
+		swp_info->inner_l3_ofs = skb_network_offset(skb) / 2;
+		proto = xo->proto;
+	}
+	switch (tunnel ? iiph->protocol : xo->proto) {
+	case IPPROTO_UDP:
+		swp_info->swp_flags |= MLX5_ETH_WQE_SWP_INNER_L4_UDP;
+		/* Fall through */
+	case IPPROTO_TCP:
+		swp_info->inner_l4_ofs = skb_inner_transport_offset(skb) / 2;
+		break;
+	}
+	dev_dbg(&skb->dev->dev, "   TX SWP Outer L3 %u L4 %u; Inner L3 %u L4 %u; Flags 0x%x\n",
+		swp_info->outer_l3_ofs, swp_info->outer_l4_ofs,
+		swp_info->inner_l3_ofs, swp_info->inner_l4_ofs,
+		swp_info->swp_flags);
+}
+
+static void set_iv(struct sk_buff *skb)
+{
+	int iv_offset;
+	__be64 seqno;
+
+	/* Place the SN in the IV field */
+	seqno = cpu_to_be64(XFRM_SKB_CB(skb)->seq.output.low +
+		    ((u64)XFRM_SKB_CB(skb)->seq.output.hi << 32));
+	iv_offset = skb->transport_header + sizeof(struct ip_esp_hdr)
+				- skb_headroom(skb);
+	skb_store_bits(skb, iv_offset, &seqno, 8);
+}
+
+static void set_pet(struct sk_buff *skb, struct pet *pet,
+		    struct xfrm_offload *xo)
+{
+	struct tcphdr *tcph;
+	struct ip_esp_hdr *esph;
+
+	if (skb_is_gso(skb)) {
+		/* Add LSO PET indication */
+		esph = ip_esp_hdr(skb);
+		tcph = inner_tcp_hdr(skb);
+		dev_dbg(&skb->dev->dev, "   Offloading GSO packet outer L3 %u; L4 %u; Inner L3 %u; L4 %u\n",
+			skb->network_header,
+			skb->transport_header,
+			skb->inner_network_header,
+			skb->inner_transport_header);
+		dev_dbg(&skb->dev->dev, "   Offloading GSO packet of len %u; mss %u; TCP sp %u dp %u seq 0x%x ESP seq 0x%x\n",
+			skb->len, skb_shinfo(skb)->gso_size,
+			ntohs(tcph->source), ntohs(tcph->dest),
+			ntohl(tcph->seq), ntohl(esph->seq_no));
+		pet->syndrome = PET_SYNDROME_OFFLOAD_WITH_LSO_TCP;
+		pet->content.send.mss_inv = mlx_ipsec_mss_inv(skb);
+		pet->content.send.seq = htons(ntohl(tcph->seq) & 0xFFFF);
+	} else {
+		pet->syndrome = PET_SYNDROME_OFFLOAD;
+	}
+	pet->content.send.esp_next_proto = xo->proto;
+
+	dev_dbg(&skb->dev->dev, "   TX PET syndrome %u proto %u mss_inv %04x seq %04x\n",
+		pet->syndrome, pet->content.send.esp_next_proto,
+		ntohs(pet->content.send.mss_inv),
+		ntohs(pet->content.send.seq));
+}
+
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 					    struct mlx5e_swp_info *swp_info)
 {
 	struct xfrm_offload *xo = xfrm_offload(skb);
-	struct tcphdr *tcph;
-	struct ip_esp_hdr *esph;
-	struct iphdr *iiph;
 	struct xfrm_state *x;
 	struct pet *pet;
-	int iv_offset;
-	__be64 seqno;
-	u8 proto;
 
 	dev_dbg(&skb->dev->dev, ">> tx_handler %u bytes\n", skb->len);
 
@@ -417,87 +494,15 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 			skb = NULL;
 			goto out;
 		}
-
-		/* Offsets are in 2-byte words, counting from start of frame */
-		swp_info->outer_l3_ofs = skb_network_offset(skb) / 2;
-
-		if (x->props.mode == XFRM_MODE_TUNNEL) {
-			/* Tunnel Mode:
-			 *  - Outer L3 offset and type - as usual
-			 *  - No outer L4 header
-			 *    ESP packet that is marked for offload is
-			 *    'encapsulated' for transport mode as well - its
-			 *    inner transport header in SKB is set.
-			 *  - Inner L3/4 fields are obtained from the
-			 *    encapsulated packet
-			 */
-
-			swp_info->inner_l3_ofs =
-				skb_inner_network_offset(skb) / 2;
-			iiph = (struct iphdr *)skb_inner_network_header(skb);
-			proto = iiph->protocol;
-		} else {
-			/* Transport Mode:
-			 *  - Outer L3 offset and type - as usual
-			 *  - Outer L4 offset: ESP packet that is marked for
-			 *    offload is 'encapsulated' for transport mode as
-			 *    well - its inner transport header in SKB is set
-			 *  - Outer L4 type is whatever the ESP replaced.
-			 *  - Inner L3/4 fields are not set
-			 */
-
-			swp_info->inner_l3_ofs = skb_network_offset(skb) / 2;
-			proto = xo->proto;
-		}
-		switch (proto) {
-		case IPPROTO_UDP:
-			swp_info->swp_flags |=
-				MLX5_ETH_WQE_SWP_INNER_L4_UDP;
-			/* Fall through */
-		case IPPROTO_TCP:
-			swp_info->inner_l4_ofs =
-				skb_inner_transport_offset(skb) / 2;
-			break;
-		}
-
-		/* Place the SN in the IV field */
-		seqno = cpu_to_be64(XFRM_SKB_CB(skb)->seq.output.low +
-			    ((u64)XFRM_SKB_CB(skb)->seq.output.hi << 32));
-		iv_offset = skb->transport_header + sizeof(struct ip_esp_hdr)
-					- skb_headroom(skb);
-		skb_store_bits(skb, iv_offset, &seqno, 8);
-
-		if (skb_is_gso(skb)) {
-			/* Add LSO PET indication */
-			esph = ip_esp_hdr(skb);
-			tcph = inner_tcp_hdr(skb);
-			dev_dbg(&skb->dev->dev, "   Offloading GSO packet outer L3 %u; L4 %u; Inner L3 %u; L4 %u\n",
-				skb->network_header,
-				skb->transport_header,
-				skb->inner_network_header,
-				skb->inner_transport_header);
-			dev_dbg(&skb->dev->dev, "   Offloading GSO packet of len %u; mss %u; TCP sp %u dp %u seq 0x%x ESP seq 0x%x\n",
-				skb->len, skb_shinfo(skb)->gso_size,
-				ntohs(tcph->source), ntohs(tcph->dest),
-				ntohl(tcph->seq), ntohl(esph->seq_no));
-			pet->syndrome = PET_SYNDROME_OFFLOAD_WITH_LSO_TCP;
-			pet->content.send.mss_inv = mlx_ipsec_mss_inv(skb);
-			pet->content.send.seq = htons(ntohl(tcph->seq) &
-						0xFFFF);
-			pet->content.send.esp_next_proto = xo->proto;
-		} else {
-			pet->syndrome = PET_SYNDROME_OFFLOAD;
-			remove_trailer(skb, x,
-				       &pet->content.send.esp_next_proto);
-		}
+		if (!skb_is_gso(skb))
+			remove_trailer(skb, x);
+		set_swp(skb, swp_info, x->props.mode == XFRM_MODE_TUNNEL, xo);
+		set_iv(skb);
+		set_pet(skb, pet, xo);
 
 		dev_dbg(&skb->dev->dev, "   TX PKT len %u linear %u bytes + %u bytes in %u frags\n",
 			skb->len, skb_headlen(skb), skb->data_len,
 			skb->data_len ? skb_shinfo(skb)->nr_frags : 0);
-		dev_dbg(&skb->dev->dev, "   TX PET syndrome %u proto %u mss_inv %04x seq %04x\n",
-			pet->syndrome, pet->content.send.esp_next_proto,
-			ntohs(pet->content.send.mss_inv),
-			ntohs(pet->content.send.seq));
 	}
 out:
 	dev_dbg(&skb->dev->dev, "<< tx_handler\n");
