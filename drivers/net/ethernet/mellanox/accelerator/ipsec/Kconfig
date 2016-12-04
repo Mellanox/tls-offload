@@ -5,6 +5,7 @@
 config MLX_ACCEL_IPSEC
 	tristate "Mellanox Technologies IPSec accelarator driver"
 	depends on MLX_ACCEL_CORE
+	depends on XFRM_OFFLOAD
 	default n
 	---help---
 	  IPsec accelarator driver by Mellanox Technologies.
