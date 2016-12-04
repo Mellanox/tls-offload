@@ -387,6 +387,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 	struct pet *pet;
 	int iv_offset;
 	__be64 seqno;
+	u8 proto;
 
 	dev_dbg(&skb->dev->dev, ">> tx_handler %u bytes\n", skb->len);
 
@@ -434,17 +435,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 			swp_info->inner_l3_ofs =
 				skb_inner_network_offset(skb) / 2;
 			iiph = (struct iphdr *)skb_inner_network_header(skb);
-
-			switch (iiph->protocol) {
-			case IPPROTO_UDP:
-				swp_info->swp_flags |=
-					MLX5_ETH_WQE_SWP_INNER_L4_UDP;
-				/* Fall through */
-			case IPPROTO_TCP:
-				swp_info->inner_l4_ofs =
-					skb_inner_transport_offset(skb) / 2;
-				break;
-			}
+			proto = iiph->protocol;
 		} else {
 			/* Transport Mode:
 			 *  - Outer L3 offset and type - as usual
@@ -456,16 +447,17 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 			 */
 
 			swp_info->inner_l3_ofs = skb_network_offset(skb) / 2;
-			switch (xo->proto) {
-			case IPPROTO_UDP:
-				swp_info->swp_flags |=
-					MLX5_ETH_WQE_SWP_INNER_L4_UDP;
-				/* Fall through */
-			case IPPROTO_TCP:
-				swp_info->inner_l4_ofs =
-					skb_inner_transport_offset(skb) / 2;
-				break;
-			}
+			proto = xo->proto;
+		}
+		switch (proto) {
+		case IPPROTO_UDP:
+			swp_info->swp_flags |=
+				MLX5_ETH_WQE_SWP_INNER_L4_UDP;
+			/* Fall through */
+		case IPPROTO_TCP:
+			swp_info->inner_l4_ofs =
+				skb_inner_transport_offset(skb) / 2;
+			break;
 		}
 
 		/* Place the SN in the IV field */
