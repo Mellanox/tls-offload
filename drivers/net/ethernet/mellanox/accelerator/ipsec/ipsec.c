@@ -455,13 +455,14 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 			 *  - Inner L3/4 fields are not set
 			 */
 
+			swp_info->inner_l3_ofs = skb_network_offset(skb) / 2;
 			switch (xo->proto) {
 			case IPPROTO_UDP:
 				swp_info->swp_flags |=
-					MLX5_ETH_WQE_SWP_OUTER_L4_UDP;
+					MLX5_ETH_WQE_SWP_INNER_L4_UDP;
 				/* Fall through */
 			case IPPROTO_TCP:
-				swp_info->outer_l4_ofs =
+				swp_info->inner_l4_ofs =
 					skb_inner_transport_offset(skb) / 2;
 				break;
 			}
