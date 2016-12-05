@@ -206,6 +206,7 @@ int xfrm_output(struct sock *sk, struct sk_buff *skb)
 	int err;
 
 	secpath_reset(skb);
+	skb->encapsulation = 0;
 
 	if (xfrm_dev_offload_ok(skb, x)) {
 		struct sec_path *sp;
@@ -219,6 +220,7 @@ int xfrm_output(struct sock *sk, struct sk_buff *skb)
 		if (skb->sp)
 			secpath_put(skb->sp);
 		skb->sp = sp;
+		skb->encapsulation = 1;
 
 		sp->olen++;
 		sp->xvec[skb->sp->len++] = x;
