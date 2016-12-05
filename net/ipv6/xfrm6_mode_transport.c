@@ -28,6 +28,7 @@ static int xfrm6_transport_output(struct xfrm_state *x, struct sk_buff *skb)
 
 	iph = ipv6_hdr(skb);
 	skb_set_inner_transport_header(skb, skb_transport_offset(skb));
+	skb_shinfo(skb)->gso_type &= ~SKB_GSO_DODGY;
 
 	hdr_len = x->type->hdr_offset(x, skb, &prevhdr);
 	skb_set_mac_header(skb, (prevhdr - x->props.header_len) - skb->data);

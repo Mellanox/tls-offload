@@ -38,6 +38,7 @@ static int xfrm6_mode_tunnel_output(struct xfrm_state *x, struct sk_buff *skb)
 
 	skb_set_inner_network_header(skb, skb_network_offset(skb));
 	skb_set_inner_transport_header(skb, skb_transport_offset(skb));
+	skb_shinfo(skb)->gso_type &= ~SKB_GSO_DODGY;
 
 	skb_set_network_header(skb, -x->props.header_len);
 	skb->mac_header = skb->network_header +
