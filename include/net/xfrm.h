@@ -42,6 +42,8 @@
 	MODULE_ALIAS("xfrm-mode-" __stringify(family) "-" __stringify(encap))
 #define MODULE_ALIAS_XFRM_TYPE(family, proto) \
 	MODULE_ALIAS("xfrm-type-" __stringify(family) "-" __stringify(proto))
+#define MODULE_ALIAS_XFRM_OFFLOAD_TYPE(family, proto) \
+	MODULE_ALIAS("xfrm-offload-" __stringify(family) "-" __stringify(proto))
 
 #ifdef CONFIG_XFRM_STATISTICS
 #define XFRM_INC_STATS(net, field)	SNMP_INC_STATS((net)->mib.xfrm_statistics, field)
