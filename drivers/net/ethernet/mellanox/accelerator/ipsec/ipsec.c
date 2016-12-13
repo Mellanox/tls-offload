@@ -257,13 +257,16 @@ static void mlx_xfrm_free_state(struct xfrm_state *x)
 static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
 		unsigned int sw_sa_id) {
 	struct mlx_ipsec_sa_entry *sa_entry;
+	struct xfrm_state *ret;
 
 	rcu_read_lock();
 	hash_for_each_possible_rcu(dev->sw_sa_id2xfrm_state_table, sa_entry,
 				hlist, sw_sa_id) {
 		if (sa_entry->sw_sa_id == sw_sa_id) {
+			ret = sa_entry->x;
+			xfrm_state_hold(ret);
 			rcu_read_unlock();
-			return sa_entry->x;
+			return ret;
 		}
 	}
 	rcu_read_unlock();
@@ -535,15 +538,13 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *rawpet,
 
 	dev = find_mlx_ipsec_dev_by_netdev(netdev);
 	xs = mlx_sw_sa_id_to_xfrm_state(dev,
-			be32_to_cpu(pet->content.rcv.sa_id));
+					be32_to_cpu(pet->content.rcv.sa_id));
 
 	if (!xs) {
 		pr_warn("No xfrm_state found for processed packet\n");
 		goto drop;
 	}
 
-	/* xfrm_input expects us to hold the xfrm_state */
-	xfrm_state_hold(xs);
 	skb->sp->xvec[skb->sp->len++] = xs;
 	skb->sp->olen++;
 
