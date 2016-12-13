@@ -34,8 +34,6 @@
 #ifndef __IPSEC_H__
 #define __IPSEC_H__
 
-#define MLX_IPSEC_SADB_RDMA
-
 #include <linux/types.h>
 #include <linux/kobject.h>
 #include <linux/kfifo.h>

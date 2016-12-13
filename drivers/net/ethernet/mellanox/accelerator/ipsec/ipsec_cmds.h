@@ -119,8 +119,6 @@ enum ipsec_response_syndrome {
 	IPSEC_SA_PENDING = 0xff,
 };
 
-#ifdef MLX_IPSEC_SADB_RDMA
-
 enum ipsec_hw_cmd {
 	IPSEC_CMD_ADD_SA = 0,
 	IPSEC_CMD_DEL_SA = 1,
@@ -136,13 +134,5 @@ struct ipsec_hw_response {
 	__be32 sw_sa_handle;
 	u8 rsvd[24];
 };
-
-#else
-
-#define IPSEC_FLUSH_CACHE_ADDR	0x144
-#define IPSEC_FLUSH_CACHE_BIT	0x100
-#define SADB_SLOT_SIZE		0x80
-
-#endif	/*  MLX_IPSEC_SADB_RDMA */
 
 #endif /* MLX_IPSEC_CMDS_H */

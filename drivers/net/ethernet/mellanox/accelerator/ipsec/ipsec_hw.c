@@ -106,95 +106,6 @@ static void mlx_ipsec_build_hw_entry(struct mlx_ipsec_sa_entry *sa,
 		hw_entry->flags |= SADB_DIR_SX;
 }
 
-#ifndef MLX_IPSEC_SADB_RDMA
-
-static u64 mlx_ipsec_sadb_addr(struct mlx_ipsec_sa_entry *sa)
-{
-	unsigned long sa_index;
-
-	sa_index = (ntohl(sa->x->id.daddr.a4) ^ ntohl(sa->x->id.spi)) & 0xFFFFF;
-	pr_debug("sa DIP %08x SPI %08x -> Index %lu\n",
-		 sa->x->id.daddr.a4, sa->x->id.spi, sa_index);
-	return mlx_accel_core_ddr_base_get(sa->dev->accel_device) +
-	       (sa_index * SADB_SLOT_SIZE);
-}
-
-static void mlx_ipsec_flush_cache(struct mlx_ipsec_dev *dev)
-{
-	int res;
-	u32 dw;
-
-	res = mlx_accel_core_mem_read(dev->accel_device, 4,
-				      IPSEC_FLUSH_CACHE_ADDR, &dw,
-				      MLX_ACCEL_ACCESS_TYPE_DONTCARE);
-	if (res != 4) {
-		pr_warn("IPSec cache flush failed on read\n");
-		return;
-	}
-
-	dw ^= IPSEC_FLUSH_CACHE_BIT;
-	res = mlx_accel_core_mem_write(dev->accel_device, 4,
-				       IPSEC_FLUSH_CACHE_ADDR, &dw,
-				       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
-	if (res != 4) {
-		pr_warn("IPSec cache flush failed on write\n");
-		return;
-	}
-}
-
-int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
-{
-	struct sadb_entry hw_entry;
-	u64 sa_addr = mlx_ipsec_sadb_addr(sa);
-	int res;
-
-	pr_debug("sa Address %llx\n", sa_addr);
-
-	mlx_ipsec_build_hw_entry(sa, &hw_entry, true);
-
-	res = mlx_accel_core_mem_write(sa->dev->accel_device, sizeof(hw_entry),
-				       sa_addr, &hw_entry,
-				       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
-	if (res != sizeof(hw_entry)) {
-		pr_warn("Writing SA to HW memory failed %d\n", res);
-		goto out;
-	}
-	res = 0;
-	mlx_ipsec_flush_cache(sa->dev);
-
-out:
-	return res;
-}
-
-void mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
-{
-	struct sadb_entry hw_entry;
-	u64 sa_addr;
-	int res;
-
-	if (sa->dev) {
-		sa_addr = mlx_ipsec_sadb_addr(sa);
-		pr_debug("del_sa Address %llx\n", sa_addr);
-
-		memset(&hw_entry, 0, sizeof(hw_entry));
-
-		res = mlx_accel_core_mem_write(sa->dev->accel_device,
-					       sizeof(hw_entry), sa_addr,
-					       &hw_entry,
-					       MLX_ACCEL_ACCESS_TYPE_DONTCARE);
-		if (res != sizeof(hw_entry))
-			pr_warn("Deleting SA in HW memory failed %d\n", res);
-		mlx_ipsec_flush_cache(sa->dev);
-	}
-}
-
-void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
-{
-	WARN_ON(buf);
-}
-
-#else /* MLX_IPSEC_SADB_RDMA */
-
 void mlx_ipsec_hw_send_complete(struct mlx_accel_core_conn *conn,
 				struct mlx_accel_core_dma_buf *buf,
 				struct ib_wc *wc)
@@ -305,5 +216,3 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 	sa_entry->status = ntohl(resp->syndrome);
 	wake_up_all(&dev->wq);
 }
-
-#endif /* MLX_IPSEC_SADB_RDMA */
