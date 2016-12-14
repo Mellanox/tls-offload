@@ -1109,6 +1109,7 @@ struct mlx5_swp_info {
 	u8 inner_l4_ofs;
 	u8 inner_l3_ofs;
 	u8 swp_flags;
+	bool use_swp;
 };
 
 struct mlx5_accel_ops {

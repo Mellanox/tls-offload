@@ -282,11 +282,13 @@ static netdev_tx_t mlx5e_sq_xmit(struct mlx5e_sq *sq, struct sk_buff *skb,
 		num_bytes = max_t(unsigned int, skb->len, ETH_ZLEN);
 	}
 
-	eseg->swp_outer_l3_offset = swp_info->outer_l3_ofs;
-	eseg->swp_outer_l4_offset = swp_info->outer_l4_ofs;
-	eseg->swp_inner_l3_offset = swp_info->inner_l3_ofs;
-	eseg->swp_inner_l4_offset = swp_info->inner_l4_ofs;
-	eseg->swp_flags = swp_info->swp_flags;
+	if (swp_info->use_swp) {
+		eseg->swp_outer_l3_offset = swp_info->outer_l3_ofs;
+		eseg->swp_outer_l4_offset = swp_info->outer_l4_ofs;
+		eseg->swp_inner_l3_offset = swp_info->inner_l3_ofs;
+		eseg->swp_inner_l4_offset = swp_info->inner_l4_ofs;
+		eseg->swp_flags = swp_info->swp_flags;
+	}
 
 	wi->num_bytes = num_bytes;
 
