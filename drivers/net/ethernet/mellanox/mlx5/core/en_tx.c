@@ -217,7 +217,7 @@ static inline void mlx5e_insert_vlan(void *start, struct sk_buff *skb, u16 ihs,
 }
 
 static netdev_tx_t mlx5e_sq_xmit(struct mlx5e_sq *sq, struct sk_buff *skb,
-				 struct mlx5e_swp_info *swp_info)
+				 struct mlx5_swp_info *swp_info)
 {
 	struct mlx5_wq_cyc       *wq   = &sq->wq;
 
@@ -401,12 +401,12 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 {
 	struct mlx5e_priv *priv = netdev_priv(dev);
 	struct mlx5e_sq *sq = NULL;
-	struct mlx5e_accel_client_ops *accel_client_ops;
-	struct mlx5e_swp_info swp_info = {0};
+	struct mlx5_accel_ops *accel_ops;
+	struct mlx5_swp_info swp_info = {0};
 
 	rcu_read_lock();
-	accel_client_ops = rcu_dereference(priv->accel_client_ops);
-	skb = accel_client_ops->tx_handler(skb, &swp_info);
+	accel_ops = mlx5_accel_get(priv->mdev);
+	skb = accel_ops->tx_handler(skb, &swp_info);
 	if (!skb) {
 		rcu_read_unlock();
 		dev_kfree_skb_any(skb);
