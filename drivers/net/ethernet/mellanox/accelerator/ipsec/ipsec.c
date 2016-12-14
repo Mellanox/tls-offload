@@ -417,6 +417,7 @@ static void set_swp(struct sk_buff *skb, struct mlx5_swp_info *swp_info,
 	 *
 	 * Offsets are in 2-byte words, counting from start of frame
 	 */
+	swp_info->use_swp = true;
 	swp_info->outer_l3_ofs = skb_network_offset(skb) / 2;
 
 	if (tunnel) {
