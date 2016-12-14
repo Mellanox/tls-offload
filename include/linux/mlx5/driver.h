@@ -998,8 +998,7 @@ bool mlx5_rl_is_in_range(struct mlx5_core_dev *dev, u32 rate);
 int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps);
 int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 			 u8 *buf, bool write);
-int mlx5_fpga_shell_counters(struct mlx5_core_dev *dev, bool clear,
-			     struct mlx5_fpga_shell_counters *data);
+int mlx5_fpga_sbu_caps(struct mlx5_core_dev *dev, void *caps, int size);
 int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image);
 int mlx5_fpga_ctrl_op(struct mlx5_core_dev *dev, u8 op);
 int mlx5_fpga_image_select(struct mlx5_core_dev *dev,
@@ -1008,16 +1007,6 @@ int mlx5_fpga_query(struct mlx5_core_dev *dev,
 		    enum mlx_accel_fpga_status *status,
 		    enum mlx_accel_fpga_image *admin_image,
 		    enum mlx_accel_fpga_image *oper_image);
-int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
-			struct mlx5_fpga_qpc *fpga_qpc, u32 *fpga_qpn);
-int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
-			enum mlx5_fpga_qpc_field_select fields,
-			struct mlx5_fpga_qpc *fpga_qpc);
-int mlx5_fpga_query_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
-		       struct mlx5_fpga_qpc *fpga_qpc);
-int mlx5_fpga_query_qp_counters(struct mlx5_core_dev *dev, u32 fpga_qpn,
-				bool clear, struct mlx5_fpga_qp_counters *data);
-int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn);
 
 static inline int fw_initializing(struct mlx5_core_dev *dev)
 {

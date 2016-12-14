@@ -869,15 +869,6 @@ enum {
 	MLX5_L3_PROT_TYPE_IPV6		= 1,
 };
 
-#define MLX5_CAP_FPGA(adev, cap) \
-	MLX5_GET(fpga_cap, adev->fpga_caps, cap)
-
-#define MLX5_CAP64_FPGA(adev, cap) \
-	MLX5_GET64(fpga_cap, adev->fpga_caps, cap)
-
-#define MLX5_CAP_FPGA_SHELL(adev, cap) \
-	MLX5_GET(fpga_cap, adev->fpga_caps, shell_caps.cap)
-
 enum {
 	MLX5_L4_PROT_TYPE_TCP		= 0,
 	MLX5_L4_PROT_TYPE_UDP		= 1,
@@ -953,6 +944,7 @@ enum mlx5_cap_type {
 	MLX5_CAP_RESERVED,
 	MLX5_CAP_VECTOR_CALC,
 	MLX5_CAP_QOS,
+	MLX5_CAP_FPGA,
 	/* NUM OF CAP Types */
 	MLX5_CAP_NUM
 };
@@ -1051,6 +1043,12 @@ enum mlx5_cap_type {
 
 #define MLX5_CAP_QOS(mdev, cap)\
 	MLX5_GET(qos_cap, mdev->hca_caps_cur[MLX5_CAP_QOS], cap)
+
+#define MLX5_CAP_FPGA(mdev, cap) \
+	MLX5_GET(fpga_cap, mdev->hca_caps_cur[MLX5_CAP_FPGA], cap)
+
+#define MLX5_CAP64_FPGA(mdev, cap) \
+	MLX5_GET64(fpga_cap, mdev->hca_caps_cur[MLX5_CAP_FPGA], cap)
 
 enum {
 	MLX5_CMD_STAT_OK			= 0x0,
