@@ -624,22 +624,12 @@ static inline void mlx5e_build_rx_skb(struct mlx5_cqe64 *cqe,
 
 static inline void mlx5e_complete_rx_cqe(struct mlx5e_rq *rq,
 					 struct mlx5_cqe64 *cqe,
-					 struct mlx5e_mpw_info *wi,
 					 u32 cqe_bcnt,
 					 struct sk_buff *skb)
 {
-	struct mlx5_accel_ops *accel_ops;
-
 	rq->stats.packets++;
 	rq->stats.bytes += cqe_bcnt;
 	mlx5e_build_rx_skb(cqe, cqe_bcnt, rq, skb);
-
-	rcu_read_lock();
-
-	accel_ops = mlx5_accel_get(rq->priv->mdev);
-	skb = accel_ops->rx_handler(skb, wi ? wi->pet : NULL,
-				    wi ? wi->petlen : 0);
-	rcu_read_unlock();
 }
 
 static inline void mlx5e_xmit_xdp_doorbell(struct mlx5e_sq *sq)
@@ -810,7 +800,7 @@ void mlx5e_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	if (!skb)
 		goto wq_ll_pop;
 
-	mlx5e_complete_rx_cqe(rq, cqe, NULL, cqe_bcnt, skb);
+	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	napi_gro_receive(rq->cq.napi, skb);
 
 wq_ll_pop:
@@ -838,7 +828,7 @@ void mlx5e_handle_rx_cqe_rep(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	if (!skb)
 		goto wq_ll_pop;
 
-	mlx5e_complete_rx_cqe(rq, cqe, NULL, cqe_bcnt, skb);
+	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 
 	if (rep->vlan && skb_vlan_tag_present(skb))
 		skb_vlan_pop(skb);
@@ -924,6 +914,7 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	u16 wqe_id         = be16_to_cpu(cqe->wqe_id);
 	struct mlx5e_mpw_info *wi = &rq->mpwqe.info[wqe_id];
 	struct mlx5e_rx_wqe  *wqe = mlx5_wq_ll_get_wqe(&rq->wq, wqe_id);
+	struct mlx5_accel_ops *accel_ops;
 	struct sk_buff *skb;
 	u16 cqe_bcnt;
 
@@ -951,7 +942,13 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	cqe_bcnt = mpwrq_get_cqe_byte_cnt(cqe);
 
 	mlx5e_mpwqe_fill_rx_skb(rq, cqe, wi, cqe_bcnt, skb);
-	mlx5e_complete_rx_cqe(rq, cqe, wi, cqe_bcnt, skb);
+	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
+
+	rcu_read_lock();
+	accel_ops = mlx5_accel_get(rq->priv->mdev);
+	skb = accel_ops->rx_handler(skb, wi->pet, wi->petlen);
+	rcu_read_unlock();
+
 	napi_gro_receive(rq->cq.napi, skb);
 
 mpwrq_cqe_out:
