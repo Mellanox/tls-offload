@@ -90,7 +90,7 @@ static void mlx_ipsec_build_hw_entry(struct mlx_ipsec_sa_entry *sa,
 	hw_entry->dip[3] = sa->x->id.daddr.a4;
 	hw_entry->dip_masklen = sa->x->sel.prefixlen_d;
 	hw_entry->spi = sa->x->id.spi;
-	hw_entry->sw_sa_handle = htonl(sa->sw_sa_id);
+	hw_entry->sw_sa_handle = htonl(sa->handle);
 	switch (sa->x->id.proto) {
 	case IPPROTO_ESP:
 		hw_entry->flags |= SADB_IP_ESP;
@@ -135,7 +135,7 @@ static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 	mlx_ipsec_build_hw_entry(sa, &cmd->entry, cmd_id == IPSEC_CMD_ADD_SA);
 
 	/* Serialize fifo access */
-	pr_debug("adding to fifo: sa %p ID 0x%08x\n", sa, sa->sw_sa_id);
+	pr_debug("adding to fifo: sa %p handle 0x%08x\n", sa, sa->handle);
 	spin_lock_irqsave(&sa->dev->fifo_sa_cmds_lock, flags);
 	res = kfifo_put(&sa->dev->fifo_sa_cmds, sa);
 	spin_unlock_irqrestore(&sa->dev->fifo_sa_cmds_lock, flags);
@@ -201,12 +201,12 @@ void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)
 		pr_warn("sa_hw2sw_id FIFO empty on recv callback\n");
 		return;
 	}
-	pr_debug("Got from FIFO: sa %p ID 0x%08x\n",
-		 sa_entry, sa_entry->sw_sa_id);
+	pr_debug("Got from FIFO: sa %p handle 0x%08x\n",
+		 sa_entry, sa_entry->handle);
 
-	if (sa_entry->sw_sa_id != ntohl(resp->sw_sa_handle)) {
-		pr_warn("mismatch sw_sa_id. FIFO 0x%08x vs resp 0x%08x\n",
-			sa_entry->sw_sa_id, ntohl(resp->sw_sa_handle));
+	if (sa_entry->handle != ntohl(resp->sw_sa_handle)) {
+		pr_warn("mismatch SA handle. FIFO 0x%08x vs resp 0x%08x\n",
+			sa_entry->handle, ntohl(resp->sw_sa_handle));
 	}
 
 	if (ntohl(resp->syndrome) != IPSEC_RESPONSE_SUCCESS) {

@@ -55,13 +55,12 @@
 
 #define MLX_IPSEC_DEVICE_NAME					"mlx_ipsec"
 
-#define MLX_IPSEC_SA_HASH_TABLE_BITS			10
+#define SADB_RX_HASH_TABLE_BITS 10
 #define MLX_SA_HW2SW_FIFO_SIZE				8
 
 struct mlx_ipsec_sa_entry {
-	unsigned int sw_sa_id;
-	unsigned int hw_sa_id;	/* unused */
-	struct hlist_node hlist;
+	struct hlist_node hlist; /* Item in SADB_RX hashtable */
+	unsigned int handle; /* Handle in SADB_RX */
 	struct xfrm_state *x;
 	enum ipsec_response_syndrome status;
 	struct mlx_ipsec_dev *dev;
@@ -76,11 +75,10 @@ struct mlx_ipsec_dev {
 	struct net_device *netdev;
 	DECLARE_KFIFO(fifo_sa_cmds, struct mlx_ipsec_sa_entry *,
 			MLX_SA_HW2SW_FIFO_SIZE);
-	DECLARE_HASHTABLE(sw_sa_id2xfrm_state_table,
-			MLX_IPSEC_SA_HASH_TABLE_BITS);
+	DECLARE_HASHTABLE(sadb_rx, SADB_RX_HASH_TABLE_BITS);
 	spinlock_t fifo_sa_cmds_lock; /* Protects fifo_sa_cmds */
-	spinlock_t sw_sa_id2xfrm_state_lock; /* Protects sw_sa_id2xfrm_state */
-	atomic_t next_sw_sa_id;
+	spinlock_t sadb_rx_lock; /* Protects sadb_rx and halloc */
+	struct ida halloc;
 	wait_queue_head_t wq;
 	u32 ipsec_caps[MLX5_ST_SZ_DW(ipsec_extended_cap)];
 };

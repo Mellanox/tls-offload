@@ -39,6 +39,7 @@
 #include <linux/mlx5/qp.h>
 #include <crypto/aead.h>
 #include <linux/highmem.h>
+#include <linux/idr.h>
 #include <net/esp.h>
 
 static LIST_HEAD(mlx_ipsec_devs);
@@ -102,6 +103,47 @@ struct mlx_ipsec_dev *mlx_ipsec_find_dev_by_netdev(struct net_device *netdev)
 	return dev;
 }
 
+static int sadb_rx_add(struct mlx_ipsec_sa_entry *sa_entry)
+{
+	int ret;
+	struct mlx_ipsec_dev *dev = sa_entry->dev;
+	unsigned long flags;
+
+	spin_lock_irqsave(&dev->sadb_rx_lock, flags);
+	ret = ida_simple_get(&dev->halloc, 1, 0, GFP_KERNEL);
+	if (ret < 0)
+		goto out;
+
+	sa_entry->handle = ret;
+	hash_add_rcu(dev->sadb_rx, &sa_entry->hlist, sa_entry->handle);
+	ret = 0;
+
+out:
+	spin_unlock_irqrestore(&dev->sadb_rx_lock, flags);
+	return ret;
+}
+
+static void sadb_rx_del(struct mlx_ipsec_sa_entry *sa_entry)
+{
+	struct mlx_ipsec_dev *dev = sa_entry->dev;
+	unsigned long flags;
+
+	spin_lock_irqsave(&dev->sadb_rx_lock, flags);
+	hash_del_rcu(&sa_entry->hlist);
+	spin_unlock_irqrestore(&dev->sadb_rx_lock, flags);
+}
+
+static void sadb_rx_free(struct mlx_ipsec_sa_entry *sa_entry)
+{
+	struct mlx_ipsec_dev *dev = sa_entry->dev;
+	unsigned long flags;
+
+	synchronize_rcu();
+	spin_lock_irqsave(&dev->sadb_rx_lock, flags);
+	ida_simple_remove(&dev->halloc, sa_entry->handle);
+	spin_unlock_irqrestore(&dev->sadb_rx_lock, flags);
+}
+
 /*
  * returns 0 on success, negative error if failed to send message to FPGA
  * positive error if FPGA returned a bad response
@@ -111,7 +153,6 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 	struct net_device *netdev = x->xso.dev;
 	struct mlx_ipsec_dev *dev;
 	struct mlx_ipsec_sa_entry *sa_entry = NULL;
-	unsigned long flags;
 	int res;
 
 	if (x->props.aalgo != SADB_AALG_NONE) {
@@ -174,14 +215,12 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 		goto out;
 	}
 
-	sa_entry = kzalloc(sizeof(struct mlx_ipsec_sa_entry), GFP_ATOMIC);
+	sa_entry = kzalloc(sizeof(*sa_entry), GFP_KERNEL);
 	if (!sa_entry) {
 		res = -ENOMEM;
 		goto out;
 	}
 
-	sa_entry->hw_sa_id = UNASSIGNED_SA_ID;
-	sa_entry->sw_sa_id = atomic_inc_return(&dev->next_sw_sa_id);
 	sa_entry->x = x;
 	sa_entry->dev = dev;
 
@@ -189,34 +228,29 @@ static int mlx_xfrm_add_state(struct xfrm_state *x)
 	 * completion was received
 	 */
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
-		spin_lock_irqsave(&dev->sw_sa_id2xfrm_state_lock, flags);
-		hash_add_rcu(dev->sw_sa_id2xfrm_state_table, &sa_entry->hlist,
-				sa_entry->sw_sa_id);
-		spin_unlock_irqrestore(&dev->sw_sa_id2xfrm_state_lock, flags);
+		res = sadb_rx_add(sa_entry);
+		if (res) {
+			dev_warn(&netdev->dev,
+				 "Failed adding to SADB_RX: %d\n", res);
+			goto err_entry;
+		}
 	}
 
 	res = mlx_ipsec_hw_sadb_add(sa_entry);
 	if (res)
-		goto err_hash_rcu;
+		goto err_sadb_rx;
 
 	x->xso.offload_handle = (unsigned long)sa_entry;
 	try_module_get(THIS_MODULE);
 	goto out;
 
-err_hash_rcu:
+err_sadb_rx:
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND) {
-		spin_lock_irqsave(
-				&dev->sw_sa_id2xfrm_state_lock,
-				flags);
-		hash_del_rcu(&sa_entry->hlist);
-		spin_unlock_irqrestore(
-				&dev->sw_sa_id2xfrm_state_lock,
-				flags);
-		synchronize_rcu();
+		sadb_rx_del(sa_entry);
+		sadb_rx_free(sa_entry);
 	}
-
+err_entry:
 	kfree(sa_entry);
-	sa_entry = NULL;
 out:
 	return res;
 }
@@ -232,7 +266,7 @@ static void mlx_xfrm_del_state(struct xfrm_state *x)
 	WARN_ON(sa_entry->x != x);
 
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND)
-		hash_del_rcu(&sa_entry->hlist);
+		sadb_rx_del(sa_entry);
 }
 
 static void mlx_xfrm_free_state(struct xfrm_state *x)
@@ -248,31 +282,30 @@ static void mlx_xfrm_free_state(struct xfrm_state *x)
 	mlx_ipsec_hw_sadb_del(sa_entry);
 
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND)
-		synchronize_rcu();
+		sadb_rx_free(sa_entry);
 
 	kfree(sa_entry);
 	module_put(THIS_MODULE);
 }
 
-static struct xfrm_state *mlx_sw_sa_id_to_xfrm_state(struct mlx_ipsec_dev *dev,
-		unsigned int sw_sa_id) {
+static struct xfrm_state *sadb_rx_lookup(struct mlx_ipsec_dev *dev,
+					 unsigned int handle) {
 	struct mlx_ipsec_sa_entry *sa_entry;
-	struct xfrm_state *ret;
+	struct xfrm_state *ret = NULL;
 
 	rcu_read_lock();
-	hash_for_each_possible_rcu(dev->sw_sa_id2xfrm_state_table, sa_entry,
-				hlist, sw_sa_id) {
-		if (sa_entry->sw_sa_id == sw_sa_id) {
+	hash_for_each_possible_rcu(dev->sadb_rx, sa_entry, hlist, handle)
+		if (sa_entry->handle == handle) {
 			ret = sa_entry->x;
 			xfrm_state_hold(ret);
-			rcu_read_unlock();
-			return ret;
+			break;
 		}
-	}
 	rcu_read_unlock();
-	pr_warn("mlx_sw_sa_id_to_xfrm_state(): didn't find SA entry for %x\n",
-		sw_sa_id);
-	return NULL;
+
+	if (!ret)
+		dev_warn(&dev->netdev->dev,
+			 "SADB_RX lookup miss handle 0x%x\n", handle);
+	return ret;
 }
 
 static struct pet *insert_pet(struct sk_buff *skb)
@@ -539,13 +572,9 @@ static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *rawpet,
 	}
 
 	dev = find_mlx_ipsec_dev_by_netdev(netdev);
-	xs = mlx_sw_sa_id_to_xfrm_state(dev,
-					be32_to_cpu(pet->content.rcv.sa_id));
-
-	if (!xs) {
-		pr_warn("No xfrm_state found for processed packet\n");
+	xs = sadb_rx_lookup(dev, be32_to_cpu(pet->content.rcv.sa_id));
+	if (!xs)
 		goto drop;
-	}
 
 	skb->sp->xvec[skb->sp->len++] = xs;
 	skb->sp->olen++;
@@ -579,6 +608,7 @@ out:
  */
 static void mlx_ipsec_free(struct mlx_ipsec_dev *dev)
 {
+	ida_destroy(&dev->halloc);
 	list_del(&dev->accel_dev_list);
 	kobject_put(&dev->kobj);
 }
@@ -658,10 +688,10 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	init_waitqueue_head(&dev->wq);
 	INIT_LIST_HEAD(&dev->accel_dev_list);
 	INIT_KFIFO(dev->fifo_sa_cmds);
-	hash_init(dev->sw_sa_id2xfrm_state_table);
-	spin_lock_init(&dev->sw_sa_id2xfrm_state_lock);
+	hash_init(dev->sadb_rx);
+	spin_lock_init(&dev->sadb_rx_lock);
 	spin_lock_init(&dev->fifo_sa_cmds_lock);
-	atomic_set(&dev->next_sw_sa_id, 0);
+	ida_init(&dev->halloc);
 	dev->accel_device = accel_device;
 
 	/* [BP]: TODO: Move these constants to a header */
