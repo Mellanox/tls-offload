@@ -34,10 +34,11 @@
 #include <linux/module.h>
 #include <linux/etherdevice.h>
 #include <rdma/ib_mad.h>
+#include <linux/mlx5_ib/driver.h>
 
+#include "fpga.h"
 #include "accel_core.h"
 #include "accel_core_trans.h"
-#include <linux/mlx5_ib/driver.h>
 
 static struct workqueue_struct *mlx_accel_core_workq;
 atomic_t mlx_accel_device_id = ATOMIC_INIT(0);

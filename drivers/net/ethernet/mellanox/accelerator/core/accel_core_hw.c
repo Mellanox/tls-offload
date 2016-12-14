@@ -31,11 +31,13 @@
  *
  */
 
-#include "accel_core.h"
 #include <linux/etherdevice.h>
 #include <linux/mlx5/device.h>
 #include <linux/mlx5/driver.h>
 #include <rdma/ib_mad.h>
+
+#include "fpga.h"
+#include "accel_core.h"
 
 int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
 		       size_t size, u64 addr, u8 *buf)

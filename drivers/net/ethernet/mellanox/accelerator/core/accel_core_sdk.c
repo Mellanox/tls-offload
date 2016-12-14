@@ -37,6 +37,7 @@
 #include <rdma/ib_verbs.h>
 #include <linux/mlx5/device.h>
 
+#include "fpga.h"
 #include "accel_core.h"
 #include "accel_core_xfer.h"
 

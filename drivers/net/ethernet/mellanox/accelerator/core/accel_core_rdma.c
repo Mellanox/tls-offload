@@ -31,12 +31,14 @@
  *
  */
 
-#include "accel_core.h"
 #include <linux/etherdevice.h>
 #include <linux/mlx5_ib/driver.h>
 #include <linux/mlx5/driver.h>
 #include <linux/mlx5/vport.h>
 #include <rdma/ib_mad.h>
+
+#include "fpga.h"
+#include "accel_core.h"
 
 static int mlx_accel_core_rdma_close_qp(struct mlx_accel_core_conn *conn);
 static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn);
