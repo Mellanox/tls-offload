@@ -50,8 +50,7 @@ static bool mlx_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x);
 static struct sk_buff *mlx_ipsec_rx_handler(struct sk_buff *skb, u8 *pet,
 					    u8 petlen);
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *,
-					    struct mlx5e_swp_info *swp_info);
-static u16             mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw);
+					    struct mlx5_swp_info *swp_info);
 static netdev_features_t mlx_ipsec_feature_chk(struct sk_buff *skb,
 					       struct net_device *netdev,
 					       netdev_features_t features,
@@ -68,14 +67,14 @@ static const struct xfrmdev_ops mlx_xfrmdev_ops = {
 	.xdo_dev_offload_ok	= mlx_ipsec_offload_ok,
 };
 
-static struct mlx5e_accel_client_ops mlx_ipsec_client_ops = {
+static struct mlx5_accel_ops mlx_ipsec_ops = {
 	.rx_handler   = mlx_ipsec_rx_handler,
 	.tx_handler   = mlx_ipsec_tx_handler,
 	.feature_chk  = mlx_ipsec_feature_chk,
-	.mtu_handler  = mlx_ipsec_mtu_handler,
 	.get_count    = mlx_ipsec_get_count,
 	.get_strings  = mlx_ipsec_get_strings,
 	.get_stats    = mlx_ipsec_get_stats,
+	.mtu_extra = sizeof(struct pet),
 };
 
 /* must hold mlx_ipsec_mutex to call this function */
@@ -337,16 +336,6 @@ static bool mlx_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x)
 	return true;
 }
 
-static u16 mlx_ipsec_mtu_handler(u16 mtu, bool is_sw2hw)
-{
-	u16 mtu_diff = sizeof(struct pet);
-
-	if (is_sw2hw)
-		return mtu + mtu_diff;
-	else
-		return mtu - mtu_diff;
-}
-
 static __be16 mlx_ipsec_mss_inv(struct sk_buff *skb)
 {
 	return inverse_table[skb_shinfo(skb)->gso_size];
@@ -411,7 +400,7 @@ static void remove_trailer(struct sk_buff *skb, struct xfrm_state *x)
 	iphdr->check = htons(~(~ntohs(iphdr->check) - trailer_len));
 }
 
-static void set_swp(struct sk_buff *skb, struct mlx5e_swp_info *swp_info,
+static void set_swp(struct sk_buff *skb, struct mlx5_swp_info *swp_info,
 		    bool tunnel, struct xfrm_offload *xo)
 {
 	struct iphdr *iiph;
@@ -497,7 +486,7 @@ static void set_pet(struct sk_buff *skb, struct pet *pet,
 }
 
 static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
-					    struct mlx5e_swp_info *swp_info)
+					    struct mlx5_swp_info *swp_info)
 {
 	struct xfrm_offload *xo = xfrm_offload(skb);
 	struct xfrm_state *x;
@@ -622,10 +611,10 @@ void mlx_ipsec_dev_release(struct kobject *kobj)
 }
 
 int mlx_ipsec_netdev_event(struct notifier_block *this,
-		unsigned long event, void *ptr)
+			   unsigned long event, void *ptr)
 {
 	struct net_device *netdev = netdev_notifier_info_to_dev(ptr);
-	struct mlx_ipsec_dev *accel_dev = NULL;
+	struct mlx_ipsec_dev *dev = NULL;
 
 	if (!netdev)
 		goto out;
@@ -638,13 +627,13 @@ int mlx_ipsec_netdev_event(struct notifier_block *this,
 
 	/* Take down all connections using a netdev that is going down */
 	mutex_lock(&mlx_ipsec_mutex);
-	accel_dev = find_mlx_ipsec_dev_by_netdev(netdev);
-	if (!accel_dev) {
+	dev = find_mlx_ipsec_dev_by_netdev(netdev);
+	if (!dev) {
 		pr_debug("mlx_ipsec_netdev_event: Failed to find ipsec device for net device\n");
 		goto unlock;
 	}
-	mlx_accel_core_client_ops_unregister(netdev);
-	mlx_ipsec_free(accel_dev);
+	mlx_accel_core_client_ops_unregister(dev->accel_device);
+	mlx_ipsec_free(dev);
 
 unlock:
 	mutex_unlock(&mlx_ipsec_mutex);
@@ -721,7 +710,7 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	}
 	dev->netdev = netdev;
 
-	ret = mlx_accel_core_client_ops_register(netdev, &mlx_ipsec_client_ops);
+	ret = mlx_accel_core_client_ops_register(accel_device, &mlx_ipsec_ops);
 	if (ret) {
 		pr_err("mlx_ipsec_add_one(): Failed to register client ops %d\n",
 		       ret);
@@ -763,7 +752,7 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	goto out;
 
 err_ops_register:
-	mlx_accel_core_client_ops_unregister(netdev);
+	mlx_accel_core_client_ops_unregister(accel_device);
 err_netdev:
 	dev_put(netdev);
 err_conn:
@@ -798,7 +787,7 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 	}
 
 	mlx_accel_core_conn_destroy(dev->conn);
-	mlx_accel_core_client_ops_unregister(netdev);
+	mlx_accel_core_client_ops_unregister(accel_device);
 
 	rtnl_lock();
 	/* Allow turning off the features */

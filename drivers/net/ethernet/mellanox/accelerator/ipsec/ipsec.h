@@ -40,7 +40,7 @@
 #include <linux/list.h>
 #include <linux/skbuff.h>
 #include <linux/hashtable.h>
-#include <linux/mlx5/en_driver.h>
+#include <linux/mlx5/driver.h>
 #include <linux/mlx5/device.h>
 #include <linux/mlx5/accel_sdk.h>
 #include <net/sock.h>
