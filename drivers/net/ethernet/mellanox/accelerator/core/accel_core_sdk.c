@@ -104,13 +104,12 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 }
 EXPORT_SYMBOL(mlx_accel_core_client_unregister);
 
-int
-mlx_accel_core_client_ops_register(struct net_device *netdev,
-				   struct mlx5e_accel_client_ops *client_ops)
+int mlx_accel_core_client_ops_register(struct mlx_accel_core_device *adev,
+				       struct mlx5_accel_ops *ops)
 {
 	int ret = 0;
 
-	ret = mlx5e_register_accel_ops(netdev, client_ops);
+	ret = mlx5_accel_register(adev->hw_dev, ops);
 	if (ret)
 		pr_err("mlx_ipsec_add_one(): Got error while registering client_ops %d\n",
 		       ret);
@@ -118,9 +117,9 @@ mlx_accel_core_client_ops_register(struct net_device *netdev,
 }
 EXPORT_SYMBOL(mlx_accel_core_client_ops_register);
 
-void mlx_accel_core_client_ops_unregister(struct net_device *netdev)
+void mlx_accel_core_client_ops_unregister(struct mlx_accel_core_device *adev)
 {
-	mlx5e_unregister_accel_ops(netdev);
+	mlx5_accel_unregister(adev->hw_dev);
 }
 EXPORT_SYMBOL(mlx_accel_core_client_ops_unregister);
 
