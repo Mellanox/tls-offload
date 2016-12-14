@@ -1054,6 +1054,7 @@ static int mlx5_load_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 	 * up
 	 */
 	dev->state = MLX5_DEVICE_STATE_UP;
+	mlx5_accel_init(dev);
 
 	err = mlx5_cmd_init(dev);
 	if (err) {
@@ -1299,6 +1300,7 @@ static int mlx5_unload_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 	mlx5_reclaim_startup_pages(dev);
 	mlx5_core_disable_hca(dev, 0);
 	mlx5_cmd_cleanup(dev);
+	mlx5_accel_destroy(dev);
 
 out:
 	clear_bit(MLX5_INTERFACE_STATE_UP, &dev->intf_state);

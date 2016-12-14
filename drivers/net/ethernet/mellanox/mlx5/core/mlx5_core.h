@@ -129,6 +129,8 @@ int mlx5_encap_alloc(struct mlx5_core_dev *dev,
 		     void *encap_header,
 		     u32 *encap_id);
 void mlx5_encap_dealloc(struct mlx5_core_dev *dev, u32 encap_id);
+void mlx5_accel_init(struct mlx5_core_dev *dev);
+void mlx5_accel_destroy(struct mlx5_core_dev *dev);
 
 bool mlx5_lag_intf_add(struct mlx5_interface *intf, struct mlx5_priv *priv);
 

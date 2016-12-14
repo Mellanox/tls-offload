@@ -178,6 +178,7 @@ enum mlx5_dev_event {
 	MLX5_DEV_EVENT_CLIENT_REREG,
 	MLX5_DEV_EVENT_FPGA_ERROR,
 	MLX5_DEV_EVENT_FPGA_QP_ERROR,
+	MLX5_DEV_EVENT_ACCEL_CHANGE,
 };
 
 enum mlx5_port_status {
@@ -1101,5 +1102,32 @@ static inline bool mlx5_rl_is_supported(struct mlx5_core_dev *dev)
 enum {
 	MLX5_TRIGGERED_CMD_COMP = (u64)1 << 32,
 };
+
+struct mlx5_swp_info {
+	u8 outer_l4_ofs;
+	u8 outer_l3_ofs;
+	u8 inner_l4_ofs;
+	u8 inner_l3_ofs;
+	u8 swp_flags;
+};
+
+struct mlx5_accel_ops {
+	struct sk_buff  *(*rx_handler)(struct sk_buff *skb, u8 *pet, u8 petlen);
+	struct sk_buff  *(*tx_handler)(struct sk_buff *skb,
+				       struct mlx5_swp_info *swp);
+	netdev_features_t (*feature_chk)(struct sk_buff *skb,
+					 struct net_device *netdev,
+					 netdev_features_t features,
+					 bool *done);
+	int (*get_count)(struct net_device *netdev);
+	int (*get_strings)(struct net_device *netdev, uint8_t *data);
+	int (*get_stats)(struct net_device *netdev, u64 *data);
+	u16 mtu_extra;
+};
+
+int mlx5_accel_register(struct mlx5_core_dev *dev,
+			struct mlx5_accel_ops *client_ops);
+void mlx5_accel_unregister(struct mlx5_core_dev *dev);
+struct mlx5_accel_ops *mlx5_accel_get(struct mlx5_core_dev *dev);
 
 #endif /* MLX5_DRIVER_H */
