@@ -641,8 +641,11 @@ static void mlx_accel_hw_dev_event_one(struct mlx5_core_dev *mdev,
 				       unsigned long param)
 {
 	struct my_work *work;
-	struct mlx_accel_core_device *accel_device =
-			(struct mlx_accel_core_device *)context;
+	struct mlx_accel_core_device *accel_device = context;
+
+	if ((event != MLX5_DEV_EVENT_FPGA_ERROR) &&
+	    (event != MLX5_DEV_EVENT_FPGA_QP_ERROR))
+		return;
 
 	work = kzalloc(sizeof(*work), GFP_ATOMIC);
 	if (!work)
@@ -654,18 +657,17 @@ static void mlx_accel_hw_dev_event_one(struct mlx5_core_dev *mdev,
 	case MLX5_DEV_EVENT_FPGA_ERROR:
 		INIT_WORK(&work->work, mlx_accel_fpga_error);
 		work->syndrome = MLX5_GET(fpga_error_event,
-					(void *)param, syndrome);
+					  (void *)param, syndrome);
 		break;
 	case MLX5_DEV_EVENT_FPGA_QP_ERROR:
 		INIT_WORK(&work->work, mlx_accel_fpga_qp_error);
 		work->syndrome = MLX5_GET(fpga_qp_error_event,
-					(void *)param, syndrome);
+					  (void *)param, syndrome);
 		work->fpga_qpn = MLX5_GET(fpga_qp_error_event,
-					(void *)param, fpga_qpn);
+					  (void *)param, fpga_qpn);
 		break;
-
 	default:
-		return;
+		break;
 	}
 	queue_work(mlx_accel_core_workq, &work->work);
 }
