@@ -416,16 +416,14 @@ static void set_swp(struct sk_buff *skb, struct mlx5e_swp_info *swp_info,
 		swp_info->swp_flags);
 }
 
-static void set_iv(struct sk_buff *skb)
+static void set_iv(struct sk_buff *skb, struct xfrm_offload *xo)
 {
 	int iv_offset;
 	__be64 seqno;
 
 	/* Place the SN in the IV field */
-	seqno = cpu_to_be64(XFRM_SKB_CB(skb)->seq.output.low +
-		    ((u64)XFRM_SKB_CB(skb)->seq.output.hi << 32));
-	iv_offset = skb->transport_header + sizeof(struct ip_esp_hdr)
-				- skb_headroom(skb);
+	seqno = cpu_to_be64(xo->seq.low + ((u64)xo->seq.hi << 32));
+	iv_offset = skb_transport_offset(skb) + sizeof(struct ip_esp_hdr);
 	skb_store_bits(skb, iv_offset, &seqno, 8);
 }
 
@@ -500,7 +498,7 @@ static struct sk_buff *mlx_ipsec_tx_handler(struct sk_buff *skb,
 		if (!skb_is_gso(skb))
 			remove_trailer(skb, x);
 		set_swp(skb, swp_info, x->props.mode == XFRM_MODE_TUNNEL, xo);
-		set_iv(skb);
+		set_iv(skb, xo);
 		set_pet(skb, pet, xo);
 
 		dev_dbg(&skb->dev->dev, "   TX PKT len %u linear %u bytes + %u bytes in %u frags\n",
