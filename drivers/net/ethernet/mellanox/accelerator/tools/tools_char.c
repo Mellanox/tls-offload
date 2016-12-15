@@ -31,11 +31,11 @@
  *
  */
 
-#include "tools_char.h"
 #include <linux/module.h>
 #include <linux/stat.h>
 #include <linux/fs.h>
-#include <linux/mlx5/accel/tools_chardev.h>
+#include <uapi/linux/mlx5/accel_tools.h>
+#include "tools_char.h"
 
 #define CHUNK_SIZE (32 * 1024)
 

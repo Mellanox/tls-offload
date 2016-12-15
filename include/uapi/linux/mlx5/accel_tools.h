@@ -31,11 +31,11 @@
  *
  */
 
-#ifndef TOOLS_CHARDEV_H
-#define TOOLS_CHARDEV_H
+#ifndef MLX_ACCEL_TOOLS_H
+#define MLX_ACCEL_TOOLS_H
 
 #include <linux/ioctl.h>
-#include "accel_sdk.h"
+#include <linux/mlx5/fpga.h>
 
 #define MLX_ACCEL_TOOLS_NAME_SUFFIX "_accel_tools"
 
@@ -56,4 +56,4 @@ struct mlx_accel_fpga_query {
 /* Query selected and running images */
 #define IOCTL_FPGA_QUERY     _IOR('m', 0x84, struct mlx_accel_fpga_query *)
 
-#endif /* TOOLS_CHARDEV_H */
+#endif /* MLX_ACCEL_TOOLS_H */

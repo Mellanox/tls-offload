@@ -38,7 +38,7 @@
 #include <linux/kobject.h>
 #include <linux/list.h>
 #include <linux/cdev.h>
-#include "../core/accel_core_sdk.h"
+#include <linux/mlx5/accel_sdk.h>
 
 #define MLX_ACCEL_TOOLS_DRIVER_NAME "mlx_accel_tools"
 

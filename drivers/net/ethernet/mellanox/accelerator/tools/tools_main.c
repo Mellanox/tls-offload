@@ -31,8 +31,8 @@
  *
  */
 
-#include "tools.h"
 #include <linux/module.h>
+#include "tools.h"
 #include "tools_char.h"
 
 MODULE_AUTHOR("Ilan Tayari <ilant@mellanox.com>");
