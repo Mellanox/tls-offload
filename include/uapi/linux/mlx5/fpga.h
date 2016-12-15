@@ -31,8 +31,8 @@
  *
  */
 
-#ifndef SDK_H
-#define SDK_H
+#ifndef MLX5_FPGA_H
+#define MLX5_FPGA_H
 
 enum mlx_accel_access_type {
 	MLX_ACCEL_ACCESS_TYPE_I2C = 0x0,
@@ -54,4 +54,4 @@ enum mlx_accel_fpga_status {
 	MLX_ACCEL_FPGA_STATUS_NONE = 0xFFFF,
 };
 
-#endif /* SDK_H */
+#endif /* MLX5_FPGA_H */

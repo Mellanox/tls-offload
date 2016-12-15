@@ -34,6 +34,7 @@
 #define MLX5_ACCEL_FPGA_H
 
 #include <linux/mlx5/driver.h>
+#include <uapi/linux/mlx5/fpga.h>
 
 int mlx5_fpga_shell_counters(struct mlx5_core_dev *dev, bool clear,
 			     struct mlx5_fpga_shell_counters *data);

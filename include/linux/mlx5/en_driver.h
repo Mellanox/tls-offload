@@ -34,6 +34,9 @@
 #ifndef MLX5_EN_DRIVER_H
 #define MLX5_EN_DRIVER_H
 
+#include <linux/mlx5/driver.h>
+#include <uapi/linux/mlx5/fpga.h>
+
 struct mlx5e_swp_info {
 	u8 outer_l4_ofs;
 	u8 outer_l3_ofs;

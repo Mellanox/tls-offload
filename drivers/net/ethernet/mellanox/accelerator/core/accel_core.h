@@ -37,7 +37,7 @@
 #ifdef CONFIG_MLX_ACCEL_QP_SIMULATOR
 #define QP_SIMULATOR
 #endif
-#include "accel_core_sdk.h"
+#include <linux/mlx5/accel_sdk.h>
 #include <linux/in6.h>
 
 #define MLX_RECV_SIZE 2048

@@ -31,8 +31,8 @@
  *
  */
 
-#ifndef __MLX_ACCEL_CORE_SDK_H__
-#define __MLX_ACCEL_CORE_SDK_H__
+#ifndef MLX_ACCEL_SDK_H
+#define MLX_ACCEL_SDK_H
 
 #include <rdma/ib_verbs.h>
 #include <linux/mlx5/driver.h>
@@ -41,7 +41,7 @@
 #include <linux/list.h>
 #include <linux/dma-direction.h>
 #include <linux/kobject.h>
-#include <linux/mlx5/accel/accel_sdk.h>
+#include <uapi/linux/mlx5/fpga.h>
 
 #define MLX_CLIENT_NAME_MAX			64
 #define MLX_ACCEL_DEVICE_NAME_MAX	(MLX5_MAX_NAME_LEN + IB_DEVICE_NAME_MAX)
@@ -197,4 +197,4 @@ void *mlx_accel_core_client_data_get(struct mlx_accel_core_device *accel_device,
 struct kobject *mlx_accel_core_kobj(struct mlx_accel_core_device *accel_device);
 int mlx_accel_get_sbu_caps(struct mlx_accel_core_device *dev, int size,
 			   void *buf);
-#endif /* __MLX_ACCEL_CORE_SDK_H__ */
+#endif /* MLX_ACCEL_SDK_H */

@@ -37,7 +37,7 @@
 #include <linux/string.h>
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
-#include "accel_core_sdk.h"
+#include <linux/mlx5/accel_sdk.h>
 #include "fpga.h"
 
 struct accel_attribute {
