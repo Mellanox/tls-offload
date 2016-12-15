@@ -42,11 +42,11 @@
 #include <linux/hashtable.h>
 #include <linux/mlx5/en_driver.h>
 #include <linux/mlx5/device.h>
+#include <linux/mlx5/accel_sdk.h>
 #include <net/sock.h>
 #include <net/inet_common.h>
 #include <net/xfrm.h>
 
-#include "../core/accel_core_sdk.h"
 #include "ipsec_cmds.h"
 
 #define DRIVER_NAME		"mlx_ipsec"

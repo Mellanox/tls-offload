@@ -30,9 +30,9 @@
  * SOFTWARE.
  *
  */
-#include "linux/ethtool.h"
+
+#include <linux/ethtool.h>
 #include "ipsec.h"
-#include "../core/accel_core_sdk.h"
 
 static const char * const ipsec_stats_desc[] = {
 	"ipsec_dec_in_packets",

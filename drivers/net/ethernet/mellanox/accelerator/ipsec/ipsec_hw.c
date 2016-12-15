@@ -31,10 +31,10 @@
  *
  */
 
-#include "ipsec_hw.h"
 #include <linux/inetdevice.h>
 #include <crypto/internal/geniv.h>
 #include <crypto/aead.h>
+#include "ipsec_hw.h"
 
 static enum sadb_encryption_mode
 mlx_ipsec_get_encryption_mode(struct xfrm_state *x)
