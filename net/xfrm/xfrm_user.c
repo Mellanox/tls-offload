@@ -1830,7 +1830,7 @@ static int xfrm_flush_sa(struct sk_buff *skb, struct nlmsghdr *nlh,
 	c.portid = nlh->nlmsg_pid;
 	c.net = net;
 	km_state_notify(NULL, &c);
-
+	xfrm_garbage_collect(net);
 	return 0;
 }
 
