@@ -47,6 +47,24 @@ struct mlx_accel_client_data {
 	bool added;
 };
 
+#define mlx_accel_dbg(__adev, format, ...) \
+	dev_dbg(&(__adev)->hw_dev->pdev->dev, "%s:%d:(pid %d): " format, \
+		 __func__, __LINE__, current->pid, ##__VA_ARGS__)
+
+#define mlx_accel_err(__adev, format, ...) \
+	dev_err(&(__adev)->hw_dev->pdev->dev, "%s:%d:(pid %d): " format, \
+		__func__, __LINE__, current->pid, ##__VA_ARGS__)
+
+#define mlx_accel_warn(__adev, format, ...) \
+	dev_warn(&(__adev)->hw_dev->pdev->dev, "%s:%d:(pid %d): " format, \
+		__func__, __LINE__, current->pid, ##__VA_ARGS__)
+
+#define mlx_accel_notice(__adev, format, ...) \
+	dev_notice(&(__adev)->hw_dev->pdev->dev, format, ##__VA_ARGS__)
+
+#define mlx_accel_info(__adev, format, ...) \
+	dev_info(&(__adev)->hw_dev->pdev->dev, format, ##__VA_ARGS__)
+
 struct mlx_accel_client_data *
 mlx_accel_client_context_create(struct mlx_accel_core_device *device,
 				struct mlx_accel_core_client *client);
