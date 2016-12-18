@@ -298,6 +298,10 @@ static struct pet *insert_pet(struct sk_buff *skb)
 
 static bool mlx_ipsec_offload_ok(struct sk_buff *skb, struct xfrm_state *x)
 {
+	/* Offload with IP options is not supported yet */
+	if (ip_hdr(skb)->ihl > 5)
+		return false;
+
 	return true;
 }
 
