@@ -548,10 +548,7 @@ static inline bool is_first_ethertype_ip(struct sk_buff *skb)
 {
 	__be16 ethertype = ((struct ethhdr *)skb->data)->h_proto;
 
-	/* IPsec PET ethertype implies next header is IP */
-	return (ethertype == htons(ETH_P_IP) ||
-		ethertype == htons(ETH_P_IPV6) ||
-		ethertype == htons(MLX_IPSEC_PET_ETHERTYPE));
+	return (ethertype == htons(ETH_P_IP) || ethertype == htons(ETH_P_IPV6));
 }
 
 static inline void mlx5e_handle_csum(struct net_device *netdev,
