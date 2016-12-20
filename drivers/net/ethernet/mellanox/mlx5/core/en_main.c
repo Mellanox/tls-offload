@@ -2915,6 +2915,33 @@ static int set_feature_arfs(struct net_device *netdev, bool enable)
 }
 #endif
 
+static int set_feature_hw_esp(struct net_device *netdev, bool enable)
+{
+	struct mlx5e_priv *priv = netdev_priv(netdev);
+	struct mlx5_core_dev *mdev = priv->mdev;
+
+	if (enable && !(mlx5_accel_get(mdev)->features & NETIF_F_HW_ESP))
+		return -EINVAL;
+
+	/* Also set TX checksum support indication */
+	if (enable)
+		MLX5E_SET_FEATURE(netdev, NETIF_F_HW_ESP_TX_CSUM, true);
+	else
+		MLX5E_SET_FEATURE(netdev, NETIF_F_HW_ESP_TX_CSUM, false);
+
+	return 0;
+}
+
+static int set_feature_gso_esp(struct net_device *netdev, bool enable)
+{
+	struct mlx5e_priv *priv = netdev_priv(netdev);
+	struct mlx5_core_dev *mdev = priv->mdev;
+
+	if (enable && !(mlx5_accel_get(mdev)->features & NETIF_F_GSO_ESP))
+		return -EINVAL;
+	return 0;
+}
+
 static int mlx5e_handle_feature(struct net_device *netdev,
 				netdev_features_t wanted_features,
 				netdev_features_t feature,
@@ -2954,6 +2981,10 @@ static int mlx5e_set_features(struct net_device *netdev,
 				    set_feature_rx_all);
 	err |= mlx5e_handle_feature(netdev, features, NETIF_F_HW_VLAN_CTAG_RX,
 				    set_feature_rx_vlan);
+	err |= mlx5e_handle_feature(netdev, features, NETIF_F_HW_ESP,
+				    set_feature_hw_esp);
+	err |= mlx5e_handle_feature(netdev, features, NETIF_F_GSO_ESP,
+				    set_feature_gso_esp);
 #ifdef CONFIG_RFS_ACCEL
 	err |= mlx5e_handle_feature(netdev, features, NETIF_F_NTUPLE,
 				    set_feature_arfs);
@@ -3614,6 +3645,38 @@ static const struct switchdev_ops mlx5e_switchdev_ops = {
 	.switchdev_port_attr_get	= mlx5e_attr_get,
 };
 
+static void mlx5e_build_accel_netdev(struct net_device *netdev)
+{
+	struct mlx5e_priv *priv = netdev_priv(netdev);
+	struct mlx5_core_dev *mdev = priv->mdev;
+	u32 ipsec_caps[MLX5_ST_SZ_DW(ipsec_extended_cap)];
+
+	if (!MLX5_CAP_GEN(mdev, fpga))
+		return;
+
+	if (MLX5_CAP_FPGA(mdev, ieee_vendor_id) != MLX5_FPGA_IEEE_VENDOR_ID)
+		return;
+
+	switch (MLX5_CAP_FPGA(mdev, sandbox_product_id)) {
+	case MLX5_FPGA_CAP_SANDBOX_PRODUCT_ID_IPSEC:
+		if (mlx5_fpga_sbu_caps(mdev, ipsec_caps, sizeof(ipsec_caps)))
+			return;
+
+		if (MLX5_GET(ipsec_extended_cap, ipsec_caps, esp)) {
+			netdev->hw_features |= NETIF_F_HW_ESP;
+			netdev->hw_enc_features |= NETIF_F_HW_ESP |
+						   NETIF_F_HW_ESP_TX_CSUM;
+			if (MLX5_GET(ipsec_extended_cap, ipsec_caps, lso)) {
+				netdev->hw_features |= NETIF_F_GSO_ESP;
+				netdev->hw_enc_features |= NETIF_F_GSO_ESP;
+			}
+		}
+		break;
+	default:
+		break;
+	}
+}
+
 static void mlx5e_build_nic_netdev(struct net_device *netdev)
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
@@ -3701,6 +3764,8 @@ static void mlx5e_build_nic_netdev(struct net_device *netdev)
 	if (MLX5_CAP_GEN(mdev, vport_group_manager))
 		netdev->switchdev_ops = &mlx5e_switchdev_ops;
 #endif
+
+	mlx5e_build_accel_netdev(netdev);
 }
 
 static void mlx5e_create_q_counter(struct mlx5e_priv *priv)

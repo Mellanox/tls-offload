@@ -1124,6 +1124,7 @@ struct mlx5_accel_ops {
 	int (*get_strings)(struct net_device *netdev, uint8_t *data);
 	int (*get_stats)(struct net_device *netdev, u64 *data);
 	u16 mtu_extra;
+	netdev_features_t features;
 };
 
 int mlx5_accel_register(struct mlx5_core_dev *dev,

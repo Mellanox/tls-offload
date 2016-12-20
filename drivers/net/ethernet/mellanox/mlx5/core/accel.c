@@ -75,6 +75,7 @@ static struct mlx5_accel_ops accel_ops_default = {
 	.get_strings = mlx5_accel_get_strings,
 	.get_stats = mlx5_accel_get_stats,
 	.mtu_extra = 0,
+	.features = 0,
 };
 
 struct mlx5_accel_ops *mlx5_accel_get(struct mlx5_core_dev *dev)
