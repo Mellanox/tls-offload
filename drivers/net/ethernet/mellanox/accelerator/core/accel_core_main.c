@@ -215,17 +215,6 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	int err = 0;
 
 #ifdef QP_SIMULATOR
-	memset(accel_device->fpga_caps, 0, sizeof(*accel_device->fpga_caps));
-#else
-	err = mlx5_fpga_caps(accel_device->hw_dev, accel_device->fpga_caps);
-	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to query FPGA capabilities: %d\n", err);
-		goto out;
-	}
-#endif
-
-#ifdef QP_SIMULATOR
 	accel_device->pkey_index = 0;
 #else
 	err = ib_find_pkey(accel_device->ib_dev, accel_device->port,

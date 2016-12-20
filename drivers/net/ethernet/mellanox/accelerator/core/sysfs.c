@@ -38,6 +38,7 @@
 #include <linux/netdevice.h>
 #include <linux/ethtool.h>
 #include "accel_core_sdk.h"
+#include "fpga.h"
 
 struct accel_attribute {
 	struct attribute attr;
@@ -75,6 +76,8 @@ static const struct sysfs_ops accel_sysfs_ops = {
 
 static ssize_t fpga_caps_show(struct mlx_accel_core_device *device, char *buf)
 {
+	struct mlx5_core_dev *mdev = device->hw_dev;
+
 	return scnprintf(buf, PAGE_SIZE,
 			 "FPGA ID: 0x%02x\n"
 			 "FPGA Device: 0x%06x\n"
@@ -96,30 +99,32 @@ static ssize_t fpga_caps_show(struct mlx_accel_core_device *device, char *buf)
 			 "FPGA CrSpace Start Address: 0x%llx\n"
 			 "FPGA DDR Size: 0x%llx\n"
 			 "FPGA CrSpace Size: 0x%llx\n",
-			 MLX5_CAP_FPGA(device, fpga_id),
-			 MLX5_CAP_FPGA(device, fpga_device),
-			 MLX5_CAP_FPGA(device, register_file_ver),
-			 MLX5_CAP_FPGA(device, fpga_ctrl_modify),
-			 MLX5_CAP_FPGA(device, access_reg_query_mode),
-			 MLX5_CAP_FPGA(device, access_reg_modify_mode),
-			 MLX5_CAP_FPGA(device, image_version),
-			 MLX5_CAP_FPGA(device, image_date),
-			 MLX5_CAP_FPGA(device, image_time),
-			 MLX5_CAP_FPGA(device, shell_version),
-			 MLX5_CAP_FPGA(device, ieee_vendor_id),
-			 MLX5_CAP_FPGA(device, sandbox_product_version),
-			 MLX5_CAP_FPGA(device, sandbox_product_id),
-			 MLX5_CAP_FPGA(device, sandbox_basic_caps),
-			 MLX5_CAP_FPGA(device, sandbox_extended_caps_len),
-			 MLX5_CAP64_FPGA(device, sandbox_extended_caps_addr),
-			 MLX5_CAP64_FPGA(device, fpga_ddr_start_addr),
-			 MLX5_CAP64_FPGA(device, fpga_cr_space_start_addr),
-			 1024ULL * MLX5_CAP_FPGA(device, fpga_ddr_size),
-			 1024ULL * MLX5_CAP_FPGA(device, fpga_cr_space_size));
+			 MLX5_CAP_FPGA(mdev, fpga_id),
+			 MLX5_CAP_FPGA(mdev, fpga_device),
+			 MLX5_CAP_FPGA(mdev, register_file_ver),
+			 MLX5_CAP_FPGA(mdev, fpga_ctrl_modify),
+			 MLX5_CAP_FPGA(mdev, access_reg_query_mode),
+			 MLX5_CAP_FPGA(mdev, access_reg_modify_mode),
+			 MLX5_CAP_FPGA(mdev, image_version),
+			 MLX5_CAP_FPGA(mdev, image_date),
+			 MLX5_CAP_FPGA(mdev, image_time),
+			 MLX5_CAP_FPGA(mdev, shell_version),
+			 MLX5_CAP_FPGA(mdev, ieee_vendor_id),
+			 MLX5_CAP_FPGA(mdev, sandbox_product_version),
+			 MLX5_CAP_FPGA(mdev, sandbox_product_id),
+			 MLX5_CAP_FPGA(mdev, sandbox_basic_caps),
+			 MLX5_CAP_FPGA(mdev, sandbox_extended_caps_len),
+			 MLX5_CAP64_FPGA(mdev, sandbox_extended_caps_addr),
+			 MLX5_CAP64_FPGA(mdev, fpga_ddr_start_addr),
+			 MLX5_CAP64_FPGA(mdev, fpga_cr_space_start_addr),
+			 1024ULL * MLX5_CAP_FPGA(mdev, fpga_ddr_size),
+			 1024ULL * MLX5_CAP_FPGA(mdev, fpga_cr_space_size));
 }
 
 static ssize_t shell_caps_show(struct mlx_accel_core_device *device, char *buf)
 {
+	struct mlx5_core_dev *mdev = device->hw_dev;
+
 	return scnprintf(buf, PAGE_SIZE,
 			 "Maximum Number of QPs: %u\n"
 			 "Total Receive Credits: %u\n"
@@ -133,18 +138,18 @@ static ssize_t shell_caps_show(struct mlx_accel_core_device *device, char *buf)
 			 "RC: %u\n"
 			 "DDR Size: %u GB\n"
 			 "QP Message Size: 0x%08x\n",
-			 MLX5_CAP_FPGA(device, shell_caps.max_num_qps),
-			 MLX5_CAP_FPGA(device, shell_caps.total_rcv_credits),
-			 MLX5_CAP_FPGA(device, shell_caps.qp_type),
-			 MLX5_CAP_FPGA(device, shell_caps.rae),
-			 MLX5_CAP_FPGA(device, shell_caps.rwe),
-			 MLX5_CAP_FPGA(device, shell_caps.rre),
-			 MLX5_CAP_FPGA(device, shell_caps.dc),
-			 MLX5_CAP_FPGA(device, shell_caps.ud),
-			 MLX5_CAP_FPGA(device, shell_caps.uc),
-			 MLX5_CAP_FPGA(device, shell_caps.rc),
-			 1 << MLX5_CAP_FPGA(device, shell_caps.log_ddr_size),
-			 MLX5_CAP_FPGA(device,
+			 MLX5_CAP_FPGA(mdev, shell_caps.max_num_qps),
+			 MLX5_CAP_FPGA(mdev, shell_caps.total_rcv_credits),
+			 MLX5_CAP_FPGA(mdev, shell_caps.qp_type),
+			 MLX5_CAP_FPGA(mdev, shell_caps.rae),
+			 MLX5_CAP_FPGA(mdev, shell_caps.rwe),
+			 MLX5_CAP_FPGA(mdev, shell_caps.rre),
+			 MLX5_CAP_FPGA(mdev, shell_caps.dc),
+			 MLX5_CAP_FPGA(mdev, shell_caps.ud),
+			 MLX5_CAP_FPGA(mdev, shell_caps.uc),
+			 MLX5_CAP_FPGA(mdev, shell_caps.rc),
+			 1 << MLX5_CAP_FPGA(mdev, shell_caps.log_ddr_size),
+			 MLX5_CAP_FPGA(mdev,
 				       shell_caps.max_fpga_qp_msg_size));
 }
 

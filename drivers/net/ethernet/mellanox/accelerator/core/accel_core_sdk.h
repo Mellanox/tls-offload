@@ -59,7 +59,6 @@ struct mlx_accel_core_device {
 	enum mlx_accel_fpga_status state;
 	enum mlx_accel_fpga_image last_admin_image;
 	enum mlx_accel_fpga_image last_oper_image;
-	u32	fpga_caps[MLX5_ST_SZ_DW(fpga_cap)];
 
 	struct list_head list;
 	struct list_head client_connections;
