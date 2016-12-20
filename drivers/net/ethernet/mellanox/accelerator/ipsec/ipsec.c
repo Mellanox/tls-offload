@@ -33,6 +33,7 @@
 
 #include <linux/netdevice.h>
 #include <linux/mlx5/qp.h>
+#include <linux/mlx5/driver.h>
 #include <crypto/aead.h>
 #include <linux/highmem.h>
 #include <linux/idr.h>
@@ -75,6 +76,7 @@ static struct mlx5_accel_ops mlx_ipsec_ops = {
 	.get_strings  = mlx_ipsec_get_strings,
 	.get_stats    = mlx_ipsec_get_stats,
 	.mtu_extra = sizeof(struct pet),
+	.features = NETIF_F_HW_ESP | NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP,
 };
 
 /* must hold mlx_ipsec_mutex to call this function */
@@ -645,15 +647,20 @@ out:
 int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 {
 	int ret = 0;
-	int i;
 	struct mlx_ipsec_dev *dev = NULL;
 	struct net_device *netdev = NULL;
 	struct mlx_accel_core_conn_init_attr init_attr = {0};
 
 	pr_debug("mlx_ipsec_add_one called for %s\n", accel_device->name);
 
+	if (MLX5_CAP_FPGA(accel_device->hw_dev, ieee_vendor_id) !=
+			  MLX5_FPGA_IEEE_VENDOR_ID) {
+		ret = -EINVAL;
+		goto out;
+	}
+
 	if (MLX5_CAP_FPGA(accel_device->hw_dev, sandbox_product_id) !=
-			MLX5_FPGA_CAP_SANDBOX_PRODUCT_ID_IPSEC) {
+			  MLX5_FPGA_CAP_SANDBOX_PRODUCT_ID_IPSEC) {
 		ret = -EINVAL;
 		goto out;
 	}
@@ -670,9 +677,6 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 		pr_err("Failed to retrieve ipsec extended capabilities\n");
 		goto err_dev;
 	}
-	/*Need to reverse endianness to use MLX5_GET macros*/
-	for (i = 0; i < sizeof(dev->ipsec_caps) / 4; i++)
-		dev->ipsec_caps[i] = cpu_to_be32(dev->ipsec_caps[i]);
 
 	init_waitqueue_head(&dev->wq);
 	INIT_LIST_HEAD(&dev->accel_dev_list);
@@ -734,13 +738,9 @@ int mlx_ipsec_add_one(struct mlx_accel_core_device *accel_device)
 	if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, esp)) {
 		dev->netdev->wanted_features |= NETIF_F_HW_ESP |
 						NETIF_F_HW_ESP_TX_CSUM;
-		dev->netdev->hw_enc_features |= NETIF_F_HW_ESP |
-						NETIF_F_HW_ESP_TX_CSUM;
 		if (MLX5_GET(ipsec_extended_cap, dev->ipsec_caps, lso)) {
 			dev_dbg(&dev->netdev->dev, "ESP GSO capability turned on\n");
 			dev->netdev->wanted_features |= NETIF_F_GSO_ESP;
-			dev->netdev->hw_features |= NETIF_F_GSO_ESP;
-			dev->netdev->hw_enc_features |= NETIF_F_GSO_ESP;
 		}
 	}
 
@@ -787,24 +787,15 @@ void mlx_ipsec_remove_one(struct mlx_accel_core_device *accel_device)
 		return;
 	}
 
+	rtnl_lock();
+	/* Turn off offload features */
+	netdev->wanted_features &= ~(NETIF_F_HW_ESP | NETIF_F_HW_ESP_TX_CSUM |
+				     NETIF_F_GSO_ESP);
+	netdev_change_features(netdev);
+	rtnl_unlock();
+
 	mlx_accel_core_conn_destroy(dev->conn);
 	mlx_accel_core_client_ops_unregister(accel_device);
-
-	rtnl_lock();
-	/* Allow turning off the features */
-	netdev->hw_features |= (NETIF_F_HW_ESP |
-		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
-	/* Turn them off */
-	netdev->wanted_features &= ~(NETIF_F_HW_ESP |
-		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
-	netdev->hw_enc_features &= ~NETIF_F_GSO_ESP;
-	netdev->vlan_features &= ~(NETIF_F_HW_ESP |
-			NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
-	netdev_change_features(netdev);
-	/* And disallow touching them again */
-	netdev->hw_features &= ~(NETIF_F_HW_ESP |
-		NETIF_F_HW_ESP_TX_CSUM | NETIF_F_GSO_ESP);
-	rtnl_unlock();
 
 	mlx_ipsec_free(dev);
 }
