@@ -1507,6 +1507,23 @@ static int set_pflag_rx_cqe_compress(struct net_device *netdev,
 	return err;
 }
 
+static int set_pflag_striding_rq_allowed(struct net_device *netdev, bool enable)
+{
+	struct mlx5e_priv *priv = netdev_priv(netdev);
+	int err = 0;
+	u8 rq_type = mlx5e_rq_type(priv, enable);
+
+	if (test_bit(MLX5E_STATE_OPENED, &priv->state) &&
+	    (rq_type != priv->params.rq_wq_type)) {
+		netdev_dbg(netdev, "Changing RQ type to %u\n", rq_type);
+		mlx5e_close_locked(netdev);
+		mlx5e_set_rq_type_params(priv, rq_type);
+		err = mlx5e_open_locked(netdev);
+	}
+
+	return err;
+}
+
 static int mlx5e_handle_pflag(struct net_device *netdev,
 			      u32 wanted_flags,
 			      enum mlx5e_priv_flag flag,
@@ -1546,6 +1563,12 @@ static int mlx5e_set_priv_flags(struct net_device *netdev, u32 pflags)
 	err = mlx5e_handle_pflag(netdev, pflags,
 				 MLX5E_PFLAG_RX_CQE_COMPRESS,
 				 set_pflag_rx_cqe_compress);
+	if (err)
+		goto out;
+
+	err = mlx5e_handle_pflag(netdev, pflags,
+				 MLX5E_PFLAG_STRIDING_RQ_ALLOWED,
+				 set_pflag_striding_rq_allowed);
 
 out:
 	mutex_unlock(&priv->state_lock);

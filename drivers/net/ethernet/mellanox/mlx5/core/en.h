@@ -172,11 +172,13 @@ extern const char mlx5e_self_tests[][ETH_GSTRING_LEN];
 static const char mlx5e_priv_flags[][ETH_GSTRING_LEN] = {
 	"rx_cqe_moder",
 	"rx_cqe_compress",
+	"striding_rq_allow",
 };
 
 enum mlx5e_priv_flag {
 	MLX5E_PFLAG_RX_CQE_BASED_MODER = (1 << 0),
 	MLX5E_PFLAG_RX_CQE_COMPRESS = (1 << 1),
+	MLX5E_PFLAG_STRIDING_RQ_ALLOWED = (1 << 2),
 };
 
 #define MLX5E_SET_PFLAG(priv, pflag, enable)			\
@@ -804,6 +806,8 @@ int mlx5e_get_max_linkspeed(struct mlx5_core_dev *mdev, u32 *speed);
 
 void mlx5e_set_rx_cq_mode_params(struct mlx5e_params *params,
 				 u8 cq_period_mode);
+void mlx5e_set_rq_type_params(struct mlx5e_priv *priv, u8 rq_type);
+u8 mlx5e_rq_type(struct mlx5e_priv *priv, bool allow_strq);
 
 static inline void mlx5e_tx_notify_hw(struct mlx5e_sq *sq,
 				      struct mlx5_wqe_ctrl_seg *ctrl, int bf_sz)

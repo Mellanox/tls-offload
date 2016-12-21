@@ -78,7 +78,7 @@ static bool mlx5e_check_fragmented_striding_rq_cap(struct mlx5_core_dev *mdev)
 		MLX5_CAP_ETH(mdev, reg_umr_sq);
 }
 
-static void mlx5e_set_rq_type_params(struct mlx5e_priv *priv, u8 rq_type)
+void mlx5e_set_rq_type_params(struct mlx5e_priv *priv, u8 rq_type)
 {
 	priv->params.rq_wq_type = rq_type;
 	switch (priv->params.rq_wq_type) {
@@ -105,13 +105,22 @@ static void mlx5e_set_rq_type_params(struct mlx5e_priv *priv, u8 rq_type)
 		       MLX5E_GET_PFLAG(priv, MLX5E_PFLAG_RX_CQE_COMPRESS));
 }
 
-static void mlx5e_set_rq_priv_params(struct mlx5e_priv *priv)
+static bool mlx5e_allow_strq(struct mlx5e_priv *priv)
 {
-	u8 rq_type = mlx5e_check_fragmented_striding_rq_cap(priv->mdev) &&
-		    !priv->xdp_prog ?
-		    MLX5_WQ_TYPE_LINKED_LIST_STRIDING_RQ :
-		    MLX5_WQ_TYPE_LINKED_LIST;
-	mlx5e_set_rq_type_params(priv, rq_type);
+	return !!(priv->params.pflags & MLX5E_PFLAG_STRIDING_RQ_ALLOWED);
+}
+
+u8 mlx5e_rq_type(struct mlx5e_priv *priv, bool allow_strq)
+{
+	if (mlx5e_check_fragmented_striding_rq_cap(priv->mdev) &&
+	    !priv->xdp_prog && allow_strq)
+		return MLX5_WQ_TYPE_LINKED_LIST_STRIDING_RQ;
+	return MLX5_WQ_TYPE_LINKED_LIST;
+}
+
+static void mlx5e_set_rq_priv_params(struct mlx5e_priv *priv, bool allow_strq)
+{
+	mlx5e_set_rq_type_params(priv, mlx5e_rq_type(priv, allow_strq));
 }
 
 #define MLX5E_HW2SW_MTU(hwmtu) (hwmtu - (ETH_HLEN + VLAN_HLEN + ETH_FCS_LEN))
@@ -3248,7 +3257,7 @@ static int mlx5e_xdp_set(struct net_device *netdev, struct bpf_prog *prog)
 		bpf_prog_put(old_prog);
 
 	if (reset) /* change RQ type according to priv->xdp_prog */
-		mlx5e_set_rq_priv_params(priv);
+		mlx5e_set_rq_priv_params(priv, mlx5e_allow_strq(priv));
 
 	if (was_opened && reset)
 		mlx5e_open_locked(netdev);
@@ -3546,7 +3555,9 @@ static void mlx5e_build_nic_netdev_priv(struct mlx5_core_dev *mdev,
 			cqe_compress_heuristic(link_speed, pci_bw);
 	}
 
-	mlx5e_set_rq_priv_params(priv);
+	MLX5E_SET_PFLAG(priv, MLX5E_PFLAG_STRIDING_RQ_ALLOWED, true);
+
+	mlx5e_set_rq_priv_params(priv, mlx5e_allow_strq(priv));
 	if (priv->params.rq_wq_type == MLX5_WQ_TYPE_LINKED_LIST_STRIDING_RQ)
 		priv->params.lro_en = true;
 
