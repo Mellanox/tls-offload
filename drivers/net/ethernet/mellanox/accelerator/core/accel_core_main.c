@@ -85,8 +85,8 @@ static void mlx_accel_core_workq_deinit(void)
 void mlx_accel_client_context_destroy(struct mlx_accel_core_device *device,
 				      struct mlx_accel_client_data *context)
 {
-	pr_debug("Deleting client context %p of client %p\n",
-		 context, context->client);
+	mlx_accel_dbg(device, "Deleting client context %p of client %p\n",
+		      context, context->client);
 	if (context->client->destroy)
 		context->client->destroy(device);
 	list_del(&context->list);
@@ -104,18 +104,16 @@ mlx_accel_client_context_create(struct mlx_accel_core_device *device,
 	 */
 
 	context = kmalloc(sizeof(*context), GFP_KERNEL);
-	if (!context) {
-		pr_err("Failed to allocate accel device client context\n");
+	if (!context)
 		return NULL;
-	}
 
 	context->client = client;
 	context->data   = NULL;
 	context->added  = false;
 	list_add(&context->list, &device->client_data_list);
 
-	pr_debug("Adding client context %p device %p client %p\n",
-		 context, device, client);
+	mlx_accel_dbg(device, "Adding client context %p client %p\n",
+		      context, client);
 
 	if (client->create)
 		client->create(device);
@@ -123,7 +121,7 @@ mlx_accel_client_context_create(struct mlx_accel_core_device *device,
 }
 
 static inline struct mlx_accel_core_device *
-	mlx_find_accel_dev_by_hw_dev_unlocked(struct mlx5_core_dev *dev)
+mlx_find_accel_dev_by_hw_dev_unlocked(struct mlx5_core_dev *dev)
 {
 	struct mlx_accel_core_device *accel_device, *tmp;
 
@@ -131,31 +129,19 @@ static inline struct mlx_accel_core_device *
 			list) {
 		if (accel_device->hw_dev == dev)
 			goto found;
-		if (!accel_device->hw_dev) {
-			if (!accel_device->ib_dev) {
-				/* [AY]: TODO: do we want to check this case */
-				/* [BP]: Yes, WARN_ON could be nice */
-				dump_stack();
-				pr_err("Found Invalid accel device\n");
-				continue;
-			}
-			if (accel_device->ib_dev->dma_device == &dev->pdev->dev) {
-				/* [BP]: Can you move this out of the
-				 * function? Currently, this isn't a "find"
-				 * function */
-				accel_device->hw_dev = dev;
-				goto found;
-			}
-		}
+		if (accel_device->hw_dev)
+			continue;
+		if (accel_device->ib_dev->dma_device == &dev->pdev->dev)
+			goto found;
 	}
 
-	return NULL;
+	accel_device = NULL;
 found:
 	return accel_device;
 }
 
 static inline struct mlx_accel_core_device *
-	mlx_find_accel_dev_by_ib_dev_unlocked(struct ib_device *dev)
+mlx_find_accel_dev_by_ib_dev_unlocked(struct ib_device *dev)
 {
 	struct mlx_accel_core_device *accel_device = NULL, *tmp;
 
@@ -163,25 +149,13 @@ static inline struct mlx_accel_core_device *
 			list) {
 		if (accel_device->ib_dev == dev)
 			goto found;
-		if (!accel_device->ib_dev) {
-			if (!accel_device->hw_dev) {
-				/* [AY]: TODO: do we want to check this case */
-				/* [BP]: Yes, WARN_ON could be nice */
-				dump_stack();
-				pr_err("Found Invalid accel device\n");
-				continue;
-			}
-			if (&accel_device->hw_dev->pdev->dev == dev->dma_device) {
-				/* [BP]: Can you move this out of the
-				 * function? Currently, this isn't a "find"
-				 * function */
-				accel_device->ib_dev = dev;
-				goto found;
-			}
-		}
+		if (accel_device->ib_dev)
+			continue;
+		if (&accel_device->hw_dev->pdev->dev == dev->dma_device)
+			goto found;
 	}
 
-	return NULL;
+	accel_device = NULL;
 found:
 	return accel_device;
 }
@@ -215,8 +189,7 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	err = ib_find_pkey(accel_device->ib_dev, accel_device->port,
 			   IB_DEFAULT_PKEY_FULL, &accel_device->pkey_index);
 	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to query pkey: %d\n", err);
+		mlx_accel_err(accel_device, "Failed to query pkey: %d\n", err);
 		goto out;
 	}
 	pr_debug("pkey %x index is %u\n", IB_DEFAULT_PKEY_FULL,
@@ -224,16 +197,15 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 
 	err = mlx_accel_trans_device_init(accel_device);
 	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to initialize transaction machine: %d\n", err);
+		mlx_accel_err(accel_device,
+			      "Failed to initialize transaction: %d\n", err);
 		goto out;
 	}
 
 	accel_device->pd = ib_alloc_pd(accel_device->ib_dev, 0);
 	if (IS_ERR(accel_device->pd)) {
 		err = PTR_ERR(accel_device->pd);
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to create PD: %d\n", err);
+		mlx_accel_err(accel_device, "Failed to create PD: %d\n", err);
 		goto err_trans;
 	}
 
@@ -247,30 +219,30 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 							&core_conn_attr, true);
 	if (IS_ERR(accel_device->core_conn)) {
 		err = PTR_ERR(accel_device->core_conn);
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to create core RC QP: %d\n", err);
+		mlx_accel_err(accel_device,
+			      "Failed to create core RC QP: %d\n", err);
 		accel_device->core_conn = NULL;
 		goto err_pd;
 	}
 
 #ifdef DEBUG
-	dev_dbg(&accel_device->hw_dev->pdev->dev,
-		"Local QPN is %u\n", accel_device->core_conn->qp->qp_num);
+	mlx_accel_dbg(accel_device, "Local QPN is %u\n",
+		      accel_device->core_conn->qp->qp_num);
 	fpga_ip = (__be16 *)&accel_device->core_conn->fpga_qpc.fpga_ip;
-	dev_dbg(&accel_device->hw_dev->pdev->dev,
-		"FPGA device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-		ntohs(fpga_ip[0]), ntohs(fpga_ip[1]),
-		ntohs(fpga_ip[2]), ntohs(fpga_ip[3]),
-		ntohs(fpga_ip[4]), ntohs(fpga_ip[5]),
-		ntohs(fpga_ip[6]), ntohs(fpga_ip[7]));
-	dev_dbg(&accel_device->hw_dev->pdev->dev,
-		"FPGA QPN is %u\n", accel_device->core_conn->fpga_qpn);
+	mlx_accel_dbg(accel_device,
+		      "FPGA device gid is %04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
+		      ntohs(fpga_ip[0]), ntohs(fpga_ip[1]),
+		      ntohs(fpga_ip[2]), ntohs(fpga_ip[3]),
+		      ntohs(fpga_ip[4]), ntohs(fpga_ip[5]),
+		      ntohs(fpga_ip[6]), ntohs(fpga_ip[7]));
+	mlx_accel_dbg(accel_device, "FPGA QPN is %u\n",
+		      accel_device->core_conn->fpga_qpn);
 #endif
 
 	err = mlx_accel_core_rdma_connect(accel_device->core_conn);
 	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to connect core RC QP to FPGA QP: %d\n", err);
+		mlx_accel_err(accel_device,
+			      "Failed to connect core RC QP: %d\n", err);
 		goto err_core_conn;
 	}
 
@@ -278,15 +250,15 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
 		if (err) {
-			dev_err(&accel_device->hw_dev->pdev->dev,
-				"Failed to set SBU bypass on: %d\n", err);
+			mlx_accel_err(accel_device,
+				      "Failed to set bypass on: %d\n", err);
 			goto err_core_conn;
 		}
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_RESET_SB);
 		if (err) {
-			dev_err(&accel_device->hw_dev->pdev->dev,
-				"Failed to reset SBU: %d\n", err);
+			mlx_accel_err(accel_device,
+				      "Failed to reset SBU: %d\n", err);
 			/* TODO: Workaround for bug #891929
 			 * goto err_core_conn;
 			 */
@@ -294,8 +266,8 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_OFF);
 		if (err) {
-			dev_err(&accel_device->hw_dev->pdev->dev,
-				"Failed to set SBU bypass off: %d\n", err);
+			mlx_accel_err(accel_device,
+				      "Failed to set bypass off: %d\n", err);
 			goto err_core_conn;
 		}
 
@@ -331,10 +303,10 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 	    (accel_device->last_oper_image == MLX_ACCEL_IMAGE_USER)) {
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
-		if (err) {
-			dev_err(&accel_device->hw_dev->pdev->dev,
-				"Failed to re-set SBU bypass on: %d\n", err);
-		}
+		if (err)
+			mlx_accel_err(accel_device,
+				      "Failed to re-set SBU bypass on: %d\n",
+				      err);
 	}
 
 	list_for_each_entry(client_context,
@@ -364,30 +336,27 @@ static void mlx_accel_device_check(struct mlx_accel_core_device *accel_device)
 			      &status, &accel_device->last_admin_image,
 			      &accel_device->last_oper_image);
 	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to query FPGA status: %d\n", err);
+		mlx_accel_err(accel_device,
+			      "Failed to query FPGA status: %d\n", err);
 		return;
 	}
 
 	switch (status) {
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
-		dev_info(&accel_device->hw_dev->pdev->dev,
-			 "FPGA image is ready\n");
+		mlx_accel_info(accel_device, "FPGA image is ready\n");
 		mlx_accel_device_init(accel_device);
 		break;
 	case MLX_ACCEL_FPGA_STATUS_FAILURE:
 		accel_device->state = MLX_ACCEL_FPGA_STATUS_FAILURE;
-		dev_info(&accel_device->hw_dev->pdev->dev,
-			 "FPGA device has failed\n");
+		mlx_accel_info(accel_device, "FPGA device has failed\n");
 		break;
 	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
 		accel_device->state = MLX_ACCEL_FPGA_STATUS_IN_PROGRESS;
-		dev_info(&accel_device->hw_dev->pdev->dev,
-			 "FPGA device is not ready yet\n");
+		mlx_accel_info(accel_device, "FPGA device is not ready yet\n");
 		break;
 	default:
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"FPGA status unknown: %u\n", status);
+		mlx_accel_err(accel_device,
+			      "FPGA status unknown: %u\n", status);
 		break;
 	}
 }
@@ -445,8 +414,8 @@ static void mlx_accel_ib_dev_add_one(struct ib_device *ibdev)
 		accel_device = mlx_accel_device_alloc();
 		if (!accel_device)
 			goto out;
-		accel_device->ib_dev = ibdev;
 	}
+	accel_device->ib_dev = ibdev;
 
 	/* An accel device is ready once it has both IB and HW devices */
 	if ((accel_device->ib_dev) && (accel_device->hw_dev))
@@ -470,7 +439,7 @@ static void mlx_accel_ib_dev_remove_one(struct ib_device *ibdev,
 	}
 
 	if (!accel_device->ib_dev) {
-		pr_warn("Removing IB device that was not added\n");
+		dev_dbg(&ibdev->dev, "Removing IB device that was not added\n");
 		goto out;
 	}
 
@@ -497,7 +466,7 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 		goto out;
 	}
 
-	pr_info("mlx_accel_hw_dev_add_one called for %s\n", dev->priv.name);
+	dev_dbg(&dev->pdev->dev, "mlx_accel_hw_dev_add_one called\n");
 
 	mutex_lock(&mlx_accel_core_mutex);
 
@@ -506,8 +475,8 @@ static void *mlx_accel_hw_dev_add_one(struct mlx5_core_dev *dev)
 		accel_device = mlx_accel_device_alloc();
 		if (!accel_device)
 			goto out_unlock;
-		accel_device->hw_dev = dev;
 	}
+	accel_device->hw_dev = dev;
 
 	/* An accel device is ready once it has both IB and HW devices */
 	if ((accel_device->hw_dev) && (accel_device->ib_dev))
@@ -535,7 +504,7 @@ static void mlx_accel_hw_dev_remove_one(struct mlx5_core_dev *dev,
 		kfree(accel_device);
 	}
 
-	pr_info("mlx_accel_hw_dev_remove_one called for %s\n", dev->priv.name);
+	dev_dbg(&dev->pdev->dev, "mlx_accel_hw_dev_remove_one called\n");
 
 	mutex_unlock(&mlx_accel_core_mutex);
 }
@@ -571,23 +540,22 @@ static void mlx_accel_fpga_error(struct work_struct *work)
 	switch (accel_device->state) {
 	case MLX_ACCEL_FPGA_STATUS_NONE:
 	case MLX_ACCEL_FPGA_STATUS_FAILURE:
-		dev_warn(&accel_device->hw_dev->pdev->dev,
-			 "Unexpected FPGA event %u: %s\n",
-			 syndrome, mlx_accel_error_string(syndrome));
+		mlx_accel_warn(accel_device, "Unexpected FPGA event %u: %s\n",
+			       syndrome, mlx_accel_error_string(syndrome));
 		break;
 	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
 		if (syndrome != MLX5_FPGA_ERROR_EVENT_SYNDROME_IMAGE_CHANGED)
-			dev_warn(&accel_device->hw_dev->pdev->dev,
-				 "FPGA Error while loading %u: %s\n",
-				 syndrome, mlx_accel_error_string(syndrome));
+			mlx_accel_warn(accel_device,
+				       "FPGA Error while loading %u: %s\n",
+				       syndrome,
+				       mlx_accel_error_string(syndrome));
 		else
 			mlx_accel_device_check(accel_device);
 		break;
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
 		mlx_accel_device_teardown(accel_device);
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"FPGA Error %u: %s\n",
-			syndrome, mlx_accel_error_string(syndrome));
+		mlx_accel_err(accel_device, "FPGA Error %u: %s\n",
+			      syndrome, mlx_accel_error_string(syndrome));
 		accel_device->state = MLX_ACCEL_FPGA_STATUS_FAILURE;
 		break;
 	}
@@ -602,9 +570,8 @@ static void mlx_accel_fpga_qp_error(struct work_struct *work)
 	u8 syndrome = mywork->syndrome;
 	u32 fpga_qpn = mywork->fpga_qpn;
 
-	dev_warn(&accel_device->ib_dev->dev,
-		 "FPGA Error %u on QP %u: %s\n",
-		 syndrome, fpga_qpn, mlx_accel_qp_error_string(syndrome));
+	mlx_accel_warn(accel_device, "FPGA Error %u on QP %u: %s\n",
+		       syndrome, fpga_qpn, mlx_accel_qp_error_string(syndrome));
 	kfree(mywork);
 }
 

@@ -39,7 +39,7 @@
 #include "fpga.h"
 #include "accel_core.h"
 
-int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
+int mlx_accel_read_i2c(struct mlx_accel_core_device *adev,
 		       size_t size, u64 addr, u8 *buf)
 {
 	u8 actual_size;
@@ -50,12 +50,11 @@ int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
 	while (bytes_done < size) {
 		actual_size = min(max_size, (size - bytes_done));
 
-		rc = mlx5_fpga_access_reg(dev, actual_size,
+		rc = mlx5_fpga_access_reg(adev->hw_dev, actual_size,
 					  addr + bytes_done,
 					  buf + bytes_done, false);
 		if (rc) {
-			pr_err("Failed to read FPGA crspace data for %s\n",
-			       dev_name(&dev->pdev->dev));
+			mlx_accel_err(adev, "Failed to read FPGA crspace\n");
 			return rc;
 		}
 
@@ -65,7 +64,7 @@ int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
 	return 0;
 }
 
-int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
+int mlx_accel_write_i2c(struct mlx_accel_core_device *adev,
 			size_t size, u64 addr, u8 *buf)
 {
 	u8 actual_size;
@@ -76,12 +75,11 @@ int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 	while (bytes_done < size) {
 		actual_size = min(max_size, (size - bytes_done));
 
-		rc = mlx5_fpga_access_reg(dev, actual_size,
+		rc = mlx5_fpga_access_reg(adev->hw_dev, actual_size,
 					  addr + bytes_done,
 					  buf + bytes_done, true);
 		if (rc) {
-			pr_err("Failed to write FPGA crspace data for %s\n",
-			       dev_name(&dev->pdev->dev));
+			mlx_accel_err(adev, "Failed to write FPGA crspace\n");
 			return rc;
 		}
 

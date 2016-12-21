@@ -50,7 +50,7 @@ void mlx_accel_core_client_register(struct mlx_accel_core_client *client)
 	struct mlx_accel_core_device *accel_device;
 	struct mlx_accel_client_data *context;
 
-	pr_info("mlx_accel_core_client_register called for %s\n", client->name);
+	pr_debug("mlx_accel_core_client_register %s\n", client->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
 
@@ -76,8 +76,7 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 	struct mlx_accel_core_device *accel_device;
 	struct mlx_accel_client_data *context, *tmp_context;
 
-	pr_info("mlx_accel_core_client_unregister called for %s\n",
-		client->name);
+	pr_debug("mlx_accel_core_client_unregister %s\n", client->name);
 
 	mutex_lock(&mlx_accel_core_mutex);
 
@@ -85,9 +84,6 @@ void mlx_accel_core_client_unregister(struct mlx_accel_core_client *client)
 		list_for_each_entry_safe(context, tmp_context,
 					 &accel_device->client_data_list,
 					 list) {
-			pr_debug("Unregister client %p. context %p device %p client %p\n",
-				 client, context, accel_device,
-				 context->client);
 			if (context->client != client)
 				continue;
 			mutex_lock(&accel_device->mutex);
@@ -111,8 +107,7 @@ int mlx_accel_core_client_ops_register(struct mlx_accel_core_device *adev,
 
 	ret = mlx5_accel_register(adev->hw_dev, ops);
 	if (ret)
-		pr_err("mlx_ipsec_add_one(): Got error while registering client_ops %d\n",
-		       ret);
+		mlx_accel_err(adev, "Failed to register client_ops: %d", ret);
 	return ret;
 }
 EXPORT_SYMBOL(mlx_accel_core_client_ops_register);
@@ -129,8 +124,7 @@ mlx_accel_core_conn_create(struct mlx_accel_core_device *accel_device,
 {
 	struct mlx_accel_core_conn *ret;
 
-	pr_info("mlx_accel_core_conn_create called for %s\n",
-		accel_device->name);
+	mlx_accel_dbg(accel_device, "mlx_accel_core_conn_create\n");
 
 	ret = mlx_accel_core_rdma_conn_create(accel_device, attr, false);
 	if (IS_ERR(ret))
@@ -143,8 +137,7 @@ EXPORT_SYMBOL(mlx_accel_core_conn_create);
 
 void mlx_accel_core_conn_destroy(struct mlx_accel_core_conn *conn)
 {
-	pr_info("mlx_accel_core_conn_destroy called for %s\n",
-			conn->accel_device->name);
+	mlx_accel_dbg(conn->accel_device, "mlx_accel_core_conn_destroy\n");
 
 	list_del(&conn->list);
 	mlx_accel_core_rdma_conn_destroy(conn);
@@ -153,8 +146,7 @@ EXPORT_SYMBOL(mlx_accel_core_conn_destroy);
 
 int mlx_accel_core_connect(struct mlx_accel_core_conn *conn)
 {
-	pr_info("mlx_accel_core_connect called for %s\n",
-		conn->accel_device->name);
+	mlx_accel_dbg(conn->accel_device, "mlx_accel_core_connect\n");
 
 	return mlx_accel_core_rdma_connect(conn);
 }
@@ -191,8 +183,8 @@ mlx_accel_core_mem_complete(const struct mlx_accel_transaction *complete,
 {
 	struct mem_transfer *xfer;
 
-	pr_debug("Memory transaction %p is complete with status %u\n",
-		 complete, status);
+	mlx_accel_dbg(complete->conn->accel_device,
+		      "transaction %p complete status %u", complete, status);
 
 	xfer = container_of(complete, struct mem_transfer, t);
 	xfer->status = status;
@@ -220,7 +212,7 @@ int mlx_accel_core_mem_transaction(struct mlx_accel_core_device *dev,
 	init_completion(&xfer.comp);
 	ret = mlx_accel_xfer_exec(&xfer.t);
 	if (ret) {
-		pr_debug("Transaction returned value %d\n", ret);
+		mlx_accel_dbg(dev, "Transfer execution failed: %d\n", ret);
 		goto out;
 	}
 	wait_for_completion(&xfer.comp);
@@ -240,8 +232,8 @@ int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 		access_type = dev->core_conn ? MLX_ACCEL_ACCESS_TYPE_RDMA :
 			      MLX_ACCEL_ACCESS_TYPE_I2C;
 
-	pr_debug("**** Reading %lu bytes at 0x%llx using %s\n", size, addr,
-		 access_type ? "RDMA" : "I2C");
+	mlx_accel_dbg(dev, "Reading %lu bytes at 0x%llx using %s",
+		      size, addr, access_type ? "RDMA" : "I2C");
 
 	switch (access_type) {
 	case MLX_ACCEL_ACCESS_TYPE_RDMA:
@@ -253,12 +245,13 @@ int mlx_accel_core_mem_read(struct mlx_accel_core_device *dev,
 	case MLX_ACCEL_ACCESS_TYPE_I2C:
 		if (!dev->hw_dev)
 			return -ENOTCONN;
-		ret = mlx_accel_read_i2c(dev->hw_dev, size, addr, buf);
+		ret = mlx_accel_read_i2c(dev, size, addr, buf);
 		if (ret)
 			return ret;
 		break;
 	default:
-		pr_warn("Unexpected read access_type %u\n", access_type);
+		mlx_accel_warn(dev, "Unexpected read access_type %u\n",
+			       access_type);
 		return -EACCES;
 	}
 
@@ -276,8 +269,8 @@ int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 		access_type = dev->core_conn ? MLX_ACCEL_ACCESS_TYPE_RDMA :
 			      MLX_ACCEL_ACCESS_TYPE_I2C;
 
-	pr_debug("**** Writing %lu bytes at 0x%llx using %s\n", size, addr,
-		 access_type ? "RDMA" : "I2C");
+	mlx_accel_dbg(dev, "Writing %lu bytes at 0x%llx using %s",
+		      size, addr, access_type ? "RDMA" : "I2C");
 
 	switch (access_type) {
 	case MLX_ACCEL_ACCESS_TYPE_RDMA:
@@ -289,12 +282,13 @@ int mlx_accel_core_mem_write(struct mlx_accel_core_device *dev,
 	case MLX_ACCEL_ACCESS_TYPE_I2C:
 		if (!dev->hw_dev)
 			return -ENOTCONN;
-		ret = mlx_accel_write_i2c(dev->hw_dev, size, addr, buf);
+		ret = mlx_accel_write_i2c(dev, size, addr, buf);
 		if (ret)
 			return ret;
 		break;
 	default:
-		pr_warn("Unexpected write access_type %u\n", access_type);
+		mlx_accel_warn(dev, "Unexpected write access_type %u\n",
+			       access_type);
 		return -EACCES;
 	}
 
@@ -367,17 +361,17 @@ int mlx_accel_core_device_reload(struct mlx_accel_core_device *accel_device,
 	}
 	if (image <= MLX_ACCEL_IMAGE_MAX) {
 		err = mlx5_fpga_load(accel_device->hw_dev, image);
-		if (err) {
-			dev_err(&accel_device->hw_dev->pdev->dev,
-				"Failed to request FPGA load: %d\n", err);
-		}
+		if (err)
+			mlx_accel_err(accel_device,
+				      "Failed to request FPGA load: %d\n",
+				      err);
 	} else {
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_RESET);
-		if (err) {
-			dev_err(&accel_device->hw_dev->pdev->dev,
-				"Failed to request FPGA reset: %d\n", err);
-		}
+		if (err)
+			mlx_accel_err(accel_device,
+				      "Failed to request FPGA reset: %d\n",
+				      err);
 	}
 	accel_device->state = MLX_ACCEL_FPGA_STATUS_IN_PROGRESS;
 unlock:
@@ -403,10 +397,9 @@ int mlx_accel_core_flash_select(struct mlx_accel_core_device *accel_device,
 	}
 
 	err = mlx5_fpga_image_select(accel_device->hw_dev, image);
-	if (err) {
-		dev_err(&accel_device->hw_dev->pdev->dev,
-			"Failed to select FPGA flash image: %d\n", err);
-	}
+	if (err)
+		mlx_accel_err(accel_device,
+			      "Failed to select FPGA flash image: %d\n", err);
 unlock:
 	mutex_unlock(&accel_device->mutex);
 	return err;

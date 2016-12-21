@@ -47,7 +47,7 @@ static void mlx_accel_core_recv_complete(struct mlx_accel_core_conn *conn,
 					 struct mlx_accel_core_dma_buf *buf,
 					 struct ib_wc *wc)
 {
-	dev_dbg(&conn->accel_device->hw_dev->pdev->dev, "Free buf %p\n", buf);
+	mlx_accel_dbg(conn->accel_device, "Free buf %p\n", buf);
 	kfree(buf);
 }
 
@@ -72,8 +72,8 @@ static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 
 	if (ib_dma_mapping_error(conn->accel_device->ib_dev,
 				 buf->data_dma_addr)) {
-		pr_warn("post_recv: DMA mapping error on address %p\n",
-			buf->data);
+		mlx_accel_warn(conn->accel_device, "post_recv: DMA mapping error on address %p\n",
+			       buf->data);
 		return -ENOMEM;
 	}
 
@@ -102,7 +102,7 @@ static int mlx_accel_core_rdma_post_recv(struct mlx_accel_core_conn *conn)
 		kfree(buf);
 		goto out;
 	}
-	pr_debug("Posted RECV buf %p\n", buf);
+	mlx_accel_dbg(conn->accel_device, "Posted RECV buf %p\n", buf);
 
 out:
 	return rc;
@@ -125,8 +125,8 @@ int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 						       buf->more_size,
 						       DMA_TO_DEVICE);
 		if (ib_dma_mapping_error(ib_dev, buf->more_dma_addr)) {
-			pr_warn("sendmsg: DMA mapping error on header address %p\n",
-				buf->more);
+			mlx_accel_warn(conn->accel_device, "sendmsg: DMA mapping error on header address %p\n",
+				       buf->more);
 			rc = -ENOMEM;
 			goto out;
 		}
@@ -134,8 +134,8 @@ int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 	buf->data_dma_addr = ib_dma_map_single(ib_dev, buf->data,
 					       buf->data_size, DMA_TO_DEVICE);
 	if (ib_dma_mapping_error(ib_dev, buf->data_dma_addr)) {
-		pr_warn("sendmsg: DMA mapping error on address %p\n",
-			buf->data);
+		mlx_accel_warn(conn->accel_device, "sendmsg: DMA mapping error on address %p\n",
+			       buf->data);
 		rc = -ENOMEM;
 		goto out_header_dma;
 	}
@@ -172,7 +172,8 @@ int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 
 	rc = ib_post_send(conn->qp, &wr, &bad_wr);
 	if (rc) {
-		pr_debug("SEND buf %p post failed: %d\n", buf, rc);
+		mlx_accel_dbg(conn->accel_device, "SEND buf %p post failed: %d\n",
+			      buf, rc);
 		atomic_dec(&conn->inflight_sends);
 		goto out_dma;
 	}
@@ -218,20 +219,23 @@ static void mlx_accel_complete(struct mlx_accel_core_conn *conn,
 
 	if ((wc->status != IB_WC_SUCCESS) &&
 	    (conn->exiting) && (wc->wr_id == MLX_EXIT_WRID)) {
-		pr_debug("QP exiting %u; wr_id is %llx\n",
-			 conn->exiting, wc->wr_id);
+		mlx_accel_dbg(conn->accel_device, "QP exiting %u; wr_id is %llx\n",
+			      conn->exiting, wc->wr_id);
 		if (++conn->exiting >= 3)
 			complete(&conn->exit_completion);
 		return;
 	}
 	buf = (struct mlx_accel_core_dma_buf *)wc->wr_id;
 	if ((wc->status != IB_WC_SUCCESS) && (wc->status != IB_WC_WR_FLUSH_ERR))
-		pr_warn("QP returned buf %p with vendor error %d status msg: %s\n",
-			buf, wc->vendor_err, ib_wc_status_msg(wc->status));
+		mlx_accel_warn(conn->accel_device,
+			       "QP returned buf %p with vendor error %d status msg: %s\n",
+			       buf, wc->vendor_err,
+			       ib_wc_status_msg(wc->status));
 	else
-		pr_debug("Completion of buf %p opcode %u status %d: %s\n", buf,
-			 wc->opcode, wc->vendor_err,
-			 ib_wc_status_msg(wc->status));
+		mlx_accel_dbg(conn->accel_device,
+			      "Completion of buf %p opcode %u status %d: %s\n",
+			      buf, wc->opcode, wc->vendor_err,
+			      ib_wc_status_msg(wc->status));
 
 	ib_dma_unmap_single(conn->accel_device->ib_dev,
 			    buf->data_dma_addr,

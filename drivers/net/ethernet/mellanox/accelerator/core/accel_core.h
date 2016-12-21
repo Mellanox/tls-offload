@@ -85,9 +85,9 @@ int mlx_accel_core_rdma_post_send(struct mlx_accel_core_conn *conn,
 int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn);
 
 /* I2C */
-int mlx_accel_read_i2c(struct mlx5_core_dev *dev,
+int mlx_accel_read_i2c(struct mlx_accel_core_device *adev,
 		       size_t size, u64 addr, u8 *buf);
-int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
+int mlx_accel_write_i2c(struct mlx_accel_core_device *adev,
 			size_t size, u64 addr, u8 *buf);
 
 int mlx_accel_device_register_sysfs(struct mlx_accel_core_device *device);
