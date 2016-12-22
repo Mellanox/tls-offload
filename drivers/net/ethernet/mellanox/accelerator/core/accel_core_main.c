@@ -67,7 +67,7 @@ static const char * const mlx_accel_fpga_qp_error_string[] = {
 	"RNR Expired",
 };
 
-int mlx_accel_core_workq_init(void)
+static int mlx_accel_core_workq_init(void)
 {
 	mlx_accel_core_workq = create_workqueue("mlx_accel_core");
 	if (!mlx_accel_core_workq)
@@ -75,7 +75,7 @@ int mlx_accel_core_workq_init(void)
 	return 0;
 }
 
-void mlx_accel_core_workq_deinit(void)
+static void mlx_accel_core_workq_deinit(void)
 {
 	flush_workqueue(mlx_accel_core_workq);
 	destroy_workqueue(mlx_accel_core_workq);
