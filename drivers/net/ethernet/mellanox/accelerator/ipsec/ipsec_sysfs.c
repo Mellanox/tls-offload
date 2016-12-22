@@ -143,88 +143,9 @@ static ssize_t qp_counters_store(struct mlx_ipsec_dev *dev, const char *buf,
 
 static MLX_IPSEC_ATTR_RW(qp_counters);
 
-#ifdef QP_SIMULATOR
-
-static ssize_t sqpn_show(struct mlx_ipsec_dev *dev, char *buf)
-{
-	return sprintf(buf, "%d\n", dev->conn->qp->qp_num);
-}
-
-static ssize_t sgid_show(struct mlx_ipsec_dev *dev, char *buf)
-{
-	__be16 *sgid = (__be16 *)&dev->conn->fpga_qpc.remote_ip;
-
-	return sprintf(buf, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-			be16_to_cpu(sgid[0]),
-			be16_to_cpu(sgid[1]),
-			be16_to_cpu(sgid[2]),
-			be16_to_cpu(sgid[3]),
-			be16_to_cpu(sgid[4]),
-			be16_to_cpu(sgid[5]),
-			be16_to_cpu(sgid[6]),
-			be16_to_cpu(sgid[7]));
-}
-
-static ssize_t dqpn_show(struct mlx_ipsec_dev *dev, char *buf)
-{
-	return sprintf(buf, "%d\n", dev->conn->fpga_qpn);
-}
-
-static ssize_t dqpn_store(struct mlx_ipsec_dev *dev, const char *buf,
-			  size_t count)
-{
-	if (sscanf(buf, "%u\n", &dev->conn->fpga_qpn) != 1)
-		return -EINVAL;
-	mlx_accel_core_connect(dev->conn);
-	return count;
-}
-
-static ssize_t dgid_show(struct mlx_ipsec_dev *dev, char *buf)
-{
-	__be16 *dgid = (__be16 *)&dev->conn->fpga_qpc.fpga_ip;
-
-	return sprintf(buf, "%04x:%04x:%04x:%04x:%04x:%04x:%04x:%04x\n",
-			be16_to_cpu(dgid[0]),
-			be16_to_cpu(dgid[1]),
-			be16_to_cpu(dgid[2]),
-			be16_to_cpu(dgid[3]),
-			be16_to_cpu(dgid[4]),
-			be16_to_cpu(dgid[5]),
-			be16_to_cpu(dgid[6]),
-			be16_to_cpu(dgid[7]));
-}
-
-static ssize_t dgid_store(struct mlx_ipsec_dev *dev, const char *buf,
-			  size_t count)
-{
-	__be16 *dgid = (__be16 *)&dev->conn->fpga_qpc.fpga_ip;
-	int i = 0;
-	if (sscanf(buf, "%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx:%04hx\n",
-		   &dgid[0], &dgid[1], &dgid[2], &dgid[3],
-		   &dgid[4], &dgid[5], &dgid[6], &dgid[7]) != 8)
-		return -EINVAL;
-
-	for (i = 0; i < 8; i++)
-		dgid[i] = cpu_to_be16(dgid[i]);
-	return count;
-}
-
-static MLX_IPSEC_ATTR_RO(sqpn);
-static MLX_IPSEC_ATTR_RO(sgid);
-static MLX_IPSEC_ATTR_RW(dqpn);
-static MLX_IPSEC_ATTR_RW(dgid);
-
-#endif
-
 static struct attribute *mlx_ipsec_def_attrs[] = {
 	&mlx_ipsec_attr_caps.attr,
 	&mlx_ipsec_attr_qp_counters.attr,
-#ifdef QP_SIMULATOR
-	&mlx_ipsec_attr_sqpn.attr,
-	&mlx_ipsec_attr_sgid.attr,
-	&mlx_ipsec_attr_dqpn.attr,
-	&mlx_ipsec_attr_dgid.attr,
-#endif
 	NULL,
 };
 
