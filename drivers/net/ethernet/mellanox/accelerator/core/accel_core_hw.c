@@ -90,24 +90,3 @@ int mlx_accel_write_i2c(struct mlx5_core_dev *dev,
 
 	return 0;
 }
-
-#ifdef QP_SIMULATOR
-
-int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
-			struct mlx5_fpga_qpc *fpga_qpc, u32 *fpga_qpn)
-{
-	return 0;
-}
-
-int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
-			enum mlx5_fpga_qpc_field_select fields,
-			struct mlx5_fpga_qpc *fpga_qpc)
-{
-	return 0;
-}
-
-int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn)
-{
-	return 0;
-}
-#endif
