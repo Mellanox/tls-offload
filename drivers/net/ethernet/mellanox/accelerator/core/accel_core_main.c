@@ -622,6 +622,7 @@ static void mlx_accel_fpga_error(struct work_struct *work)
 		break;
 	}
 	mutex_unlock(&accel_device->mutex);
+	kfree(mywork);
 }
 
 static void mlx_accel_fpga_qp_error(struct work_struct *work)
@@ -634,6 +635,7 @@ static void mlx_accel_fpga_qp_error(struct work_struct *work)
 	dev_warn(&accel_device->ib_dev->dev,
 		 "FPGA Error %u on QP %u: %s\n",
 		 syndrome, fpga_qpn, mlx_accel_qp_error_string(syndrome));
+	kfree(mywork);
 }
 
 static void mlx_accel_hw_dev_event_one(struct mlx5_core_dev *mdev,
