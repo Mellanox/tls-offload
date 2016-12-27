@@ -223,12 +223,7 @@ int mlx_accel_core_mem_transaction(struct mlx_accel_core_device *dev,
 		pr_debug("Transaction returned value %d\n", ret);
 		goto out;
 	}
-	ret = wait_for_completion_interruptible(&xfer.comp);
-	if (ret) {
-		pr_debug("Wait completed with value %d\n", ret);
-		/* TODO: Cancel the transfer! */
-		goto out;
-	}
+	wait_for_completion(&xfer.comp);
 	if (xfer.status != 0)
 		ret = -EIO;
 out:
