@@ -155,6 +155,8 @@ static struct mlx5_profile profile[] = {
 	},
 };
 
+#define FPGA_LOAD_TIMEOUT_MILI	20000
+#define FPGA_LOAD_POLL_MILI	200
 #define FW_INIT_TIMEOUT_MILI	2000
 #define FW_INIT_WAIT_MS		2
 
@@ -961,6 +963,77 @@ static void mlx5_cleanup_once(struct mlx5_core_dev *dev)
 	mlx5_eq_cleanup(dev);
 }
 
+static int mlx5_fpga_start(struct mlx5_core_dev *dev)
+{
+	int err;
+
+	err = mlx5_fpga_caps(dev, dev->hca_caps_cur[MLX5_CAP_FPGA]);
+	if (err)
+		return err;
+
+	dev_info(&dev->pdev->dev, "FPGA device %u image version %u\n",
+		 MLX5_CAP_FPGA(dev, fpga_device),
+		 MLX5_CAP_FPGA(dev, image_version));
+
+	/* TODO: Init QP, detect SBU, install accel, etc. */
+	return 0;
+}
+
+static void mlx5_fpga_stop(struct mlx5_core_dev *dev)
+{
+	if (!MLX5_CAP_GEN(dev, fpga))
+		return;
+
+	/* TODO: Uninstall accel, Close QP, etc. */
+}
+
+static int mlx5_init_fpga(struct mlx5_core_dev *dev)
+{
+	enum mlx_accel_fpga_status status;
+	enum mlx_accel_fpga_image oper_image;
+	unsigned long timeout;
+	int err;
+
+	if (!MLX5_CAP_GEN(dev, fpga))
+		return 0;
+
+	timeout = jiffies + msecs_to_jiffies(FPGA_LOAD_TIMEOUT_MILI);
+
+again:
+	err = mlx5_fpga_query(dev, &status, NULL, &oper_image);
+	if (err)
+		goto out;
+
+	dev_dbg(&dev->pdev->dev,
+		"FPGA status is %u; Oper image is #%u\n", status, oper_image);
+
+	switch (status) {
+	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
+		err = mlx5_fpga_start(dev);
+		break;
+
+	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
+		if (time_after(jiffies, timeout)) {
+			err = -ETIMEDOUT;
+			break;
+		}
+		msleep_interruptible(FPGA_LOAD_POLL_MILI);
+		goto again;
+
+	default:
+		dev_err(&dev->pdev->dev, "Unknown FPGA status %u\n", status);
+		/* Fall through */
+	case MLX_ACCEL_FPGA_STATUS_FAILURE:
+		dev_warn(&dev->pdev->dev, "FPGA image #%u load failed\n",
+			 oper_image);
+		err = -EIO;
+		break;
+	}
+
+out:
+	return err;
+}
+
 static int mlx5_load_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 			 bool boot)
 {
@@ -1110,6 +1183,10 @@ static int mlx5_load_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 		goto err_sriov;
 	}
 
+	err = mlx5_init_fpga(dev);
+	if (err)
+		dev_err(&pdev->dev, "fpga init failed %d\n", err);
+
 	if (mlx5_device_registered(dev)) {
 		mlx5_attach_device(dev);
 	} else {
@@ -1197,6 +1274,8 @@ static int mlx5_unload_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 
 	if (mlx5_device_registered(dev))
 		mlx5_detach_device(dev);
+
+	mlx5_fpga_stop(dev);
 
 	mlx5_sriov_detach(dev);
 #ifdef CONFIG_MLX5_CORE_EN
