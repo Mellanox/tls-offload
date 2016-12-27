@@ -47,7 +47,7 @@
 #include <linux/mlx5/device.h>
 #include <linux/mlx5/doorbell.h>
 #include <linux/mlx5/srq.h>
-#include <linux/mlx5/accel/accel_sdk.h>
+#include <uapi/linux/mlx5/fpga.h>
 
 enum {
 	MLX5_BOARD_ID_LEN = 64,
