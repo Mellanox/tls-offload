@@ -93,7 +93,7 @@ int mlx5_fpga_sbu_caps(struct mlx5_core_dev *dev, void *caps, int size)
 	u64 addr = MLX5_CAP64_FPGA(dev, sandbox_extended_caps_addr);
 	int cap_size = MLX5_CAP_FPGA(dev, sandbox_extended_caps_len);
 	int ret = 0;
-	int i, read;
+	int read;
 
 	if (cap_size > size) {
 		mlx5_core_warn(dev, "Not enough buffer %u for FPGA SBU caps %u",
@@ -111,8 +111,6 @@ int mlx5_fpga_sbu_caps(struct mlx5_core_dev *dev, void *caps, int size)
 			mlx5_core_warn(dev, "Error reading FPGA SBU caps");
 			return ret;
 		}
-		for (i = 0; i < read / sizeof(u32); i++)
-			((u32 *)caps)[i] = ntohl(((u32 *)caps)[i]);
 
 		cap_size -= read;
 		addr += read;
