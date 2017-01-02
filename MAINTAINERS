@@ -8486,6 +8486,19 @@ F:	net/ipv6/
 F:	include/net/ip*
 F:	arch/x86/net/*
 
+NETWORKING [TLS]
+M:	Ilya Lesokhin <ilyal@mellanox.com>
+M:	Aviad Yehezkel <aviadye@mellanox.com>
+M:	Boris Pismenny <borisp@mellanox.com>
+M:	Haggai Eran <haggaie@mellanox.com>
+L:	netdev@vger.kernel.org
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/davem/net.git
+T:	git git://git.kernel.org/pub/scm/linux/kernel/git/davem/net-next.git
+S:	Maintained
+F:	net/tls/*
+F:	include/uapi/linux/tls.h
+F:	include/net/tls.h
+
 NETWORKING [IPSEC]
 M:	Steffen Klassert <steffen.klassert@secunet.com>
 M:	Herbert Xu <herbert@gondor.apana.org.au>
