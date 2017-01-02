@@ -273,6 +273,7 @@
 #include <net/icmp.h>
 #include <net/inet_common.h>
 #include <net/tcp.h>
+#include <net/tls.h>
 #include <net/xfrm.h>
 #include <net/ip.h>
 #include <net/sock.h>
@@ -2676,6 +2677,21 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		tp->notsent_lowat = val;
 		sk->sk_write_space(sk);
 		break;
+	case TCP_TLS_TX:
+	case TCP_TLS_RX: {
+		int (*fn)(struct sock *sk, int optname,
+			  char __user *optval, unsigned int optlen);
+
+		fn = symbol_get(tls_sk_attach);
+		if (!fn) {
+			err = -EINVAL;
+			break;
+		}
+
+		err = fn(sk, optname, optval, optlen);
+		symbol_put(tls_sk_attach);
+		break;
+	}
 	default:
 		err = -ENOPROTOOPT;
 		break;
