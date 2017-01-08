@@ -113,6 +113,18 @@ void mlx_ipsec_hw_send_complete(struct mlx_accel_core_conn *conn,
 	kfree(buf);
 }
 
+int mlx_ipsec_hw_sadb_wait(struct mlx_ipsec_sa_entry *sa)
+{
+	int res;
+
+	res = wait_event_killable(sa->dev->wq, sa->status != IPSEC_SA_PENDING);
+	if (res != 0) {
+		pr_warn("Failure waiting for IPSec command response from HW\n");
+		return -EINTR;
+	}
+	return 0;
+}
+
 static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 {
 	struct mlx_accel_core_dma_buf *buf = NULL;
@@ -152,17 +164,6 @@ static int mlx_ipsec_hw_cmd(struct mlx_ipsec_sa_entry *sa, u32 cmd_id)
 		goto err_buf;
 	}
 	/* After this point buf will be freed by completion */
-
-	res = wait_event_killable(sa->dev->wq, sa->status != IPSEC_SA_PENDING);
-	if (res != 0) {
-		pr_warn("Failure waiting for IPSec command response from HW\n");
-		goto out;
-	}
-
-	res = sa->status;
-	if (sa->status != IPSEC_RESPONSE_SUCCESS)
-		pr_warn("IPSec command %u failed with error %08x\n",
-			cmd_id, sa->status);
 	goto out;
 
 err_buf:
@@ -173,12 +174,27 @@ out:
 
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa)
 {
-	return mlx_ipsec_hw_cmd(sa, IPSEC_CMD_ADD_SA);
+	int res;
+
+	res = mlx_ipsec_hw_cmd(sa, IPSEC_CMD_ADD_SA);
+	if (res)
+		goto out;
+
+	res = mlx_ipsec_hw_sadb_wait(sa);
+	if (res)
+		goto out;
+
+	res = sa->status;
+	if (sa->status != IPSEC_RESPONSE_SUCCESS)
+		pr_warn("IPSec SADB add command failed with error %08x\n",
+			sa->status);
+out:
+	return res;
 }
 
-void mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
+int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa)
 {
-	mlx_ipsec_hw_cmd(sa, IPSEC_CMD_DEL_SA);
+	return mlx_ipsec_hw_cmd(sa, IPSEC_CMD_DEL_SA);
 }
 
 void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf)

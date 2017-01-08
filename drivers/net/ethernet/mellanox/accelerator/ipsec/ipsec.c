@@ -258,6 +258,7 @@ out:
 static void mlx_xfrm_del_state(struct xfrm_state *x)
 {
 	struct mlx_ipsec_sa_entry *sa_entry;
+	int res;
 
 	if (!x->xso.offload_handle)
 		return;
@@ -267,11 +268,19 @@ static void mlx_xfrm_del_state(struct xfrm_state *x)
 
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND)
 		sadb_rx_del(sa_entry);
+
+	res = mlx_ipsec_hw_sadb_del(sa_entry);
+	if (res) {
+		dev_warn(&sa_entry->dev->netdev->dev,
+			 "Failed to delete HW SADB entry: %d\n", res);
+		return;
+	}
 }
 
 static void mlx_xfrm_free_state(struct xfrm_state *x)
 {
 	struct mlx_ipsec_sa_entry *sa_entry;
+	int res;
 
 	if (!x->xso.offload_handle)
 		return;
@@ -279,7 +288,14 @@ static void mlx_xfrm_free_state(struct xfrm_state *x)
 	sa_entry = (struct mlx_ipsec_sa_entry *)x->xso.offload_handle;
 	WARN_ON(sa_entry->x != x);
 
-	mlx_ipsec_hw_sadb_del(sa_entry);
+	res = mlx_ipsec_hw_sadb_wait(sa_entry);
+	if (res) {
+		/* Leftover object will leak */
+		dev_warn(&sa_entry->dev->netdev->dev,
+			 "Failed to wait for HW SADB delete response: %d\n",
+			 res);
+		return;
+	}
 
 	if (x->xso.flags & XFRM_OFFLOAD_INBOUND)
 		sadb_rx_free(sa_entry);

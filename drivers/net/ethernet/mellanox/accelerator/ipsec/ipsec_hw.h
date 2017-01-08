@@ -37,7 +37,8 @@
 #include "ipsec.h"
 
 int mlx_ipsec_hw_sadb_add(struct mlx_ipsec_sa_entry *sa);
-void mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa);
+int mlx_ipsec_hw_sadb_del(struct mlx_ipsec_sa_entry *sa);
+int mlx_ipsec_hw_sadb_wait(struct mlx_ipsec_sa_entry *sa);
 void mlx_ipsec_hw_qp_recv_cb(void *cb_arg, struct mlx_accel_core_dma_buf *buf);
 
 #endif	/* __IPSEC_HW_H__ */
