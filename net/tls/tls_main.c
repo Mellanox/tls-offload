@@ -149,7 +149,7 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 	}
 
 	if (!ctx) {
-		rc = -EBUSY;
+		rc = -EINVAL;
 		goto out;
 	}
 

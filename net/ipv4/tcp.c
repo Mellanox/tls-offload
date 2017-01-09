@@ -3080,6 +3080,22 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		}
 		return 0;
 	}
+	case TCP_TLS_TX:
+	case TCP_TLS_RX: {
+		int err;
+		int (*fn)(struct sock *sk, int optname,
+			  char __user *optval, int __user *optlen);
+
+		fn = symbol_get(tls_sk_query);
+		if (!fn) {
+			err = -EINVAL;
+			break;
+		}
+
+		err = fn(sk, optname, optval, optlen);
+		symbol_put(tls_sk_query);
+		return err;
+	}
 	default:
 		return -ENOPROTOOPT;
 	}
