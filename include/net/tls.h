@@ -84,6 +84,8 @@ struct tls_context {
 };
 
 
+int tls_sk_query(struct sock *sk, int optname, char __user *optval,
+		int __user *optlen);
 int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 		unsigned int optlen);
 

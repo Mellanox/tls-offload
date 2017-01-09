@@ -33,6 +33,7 @@
  */
 
 #include <linux/module.h>
+
 #include <net/tcp.h>
 #include <net/inet_common.h>
 #include <linux/highmem.h>
@@ -73,6 +74,83 @@ send_end:
 	release_sock(sk);
 	return rc < 0 ? rc : size;
 }
+
+int tls_sk_query(struct sock *sk, int optname, char __user *optval,
+		 int __user *optlen)
+{
+	int rc = 0;
+	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_crypto_info *crypto_info;
+	int len;
+
+	if (get_user(len, optlen))
+		return -EFAULT;
+
+	if (!optval || (len < sizeof(*crypto_info))) {
+		rc = -EINVAL;
+		goto out;
+	}
+
+	if (!ctx) {
+		rc = -EBUSY;
+		goto out;
+	}
+
+	/* get user crypto info */
+	switch (optname) {
+	case TCP_TLS_TX: {
+		crypto_info = &ctx->crypto_send;
+		break;
+	}
+	case TCP_TLS_RX:
+		/* fallthru since for now we don't support */
+	default: {
+		rc = -ENOPROTOOPT;
+		goto out;
+	}
+	}
+
+	if (!TLS_CRYPTO_INFO_READY(crypto_info)) {
+		rc = -EBUSY;
+		goto out;
+	}
+
+	if (len == sizeof(crypto_info)) {
+		rc = copy_to_user(optval, crypto_info, sizeof(*crypto_info));
+		goto out;
+	}
+
+	switch (crypto_info->cipher_type) {
+	case TLS_CIPHER_AES_GCM_128: {
+		struct tls_crypto_info_aes_gcm_128 *crypto_info_aes_gcm_128 =
+				container_of(crypto_info,
+					     struct tls_crypto_info_aes_gcm_128,
+					     info);
+
+		if (len != sizeof(*crypto_info_aes_gcm_128)) {
+			rc = -EINVAL;
+			goto out;
+		}
+		if (TLS_IS_HW_OFFLOAD(crypto_info)) {
+			lock_sock(sk);
+			memcpy(crypto_info_aes_gcm_128->iv,
+			       ctx->offload_ctx->iv,
+			       TLS_CIPHER_AES_GCM_128_IV_SIZE);
+			release_sock(sk);
+		}
+		rc = copy_to_user(optval,
+				  crypto_info_aes_gcm_128,
+				  sizeof(*crypto_info_aes_gcm_128));
+		break;
+	}
+	default:
+		rc = -EINVAL;
+	}
+
+out:
+	return rc;
+}
+EXPORT_SYMBOL(tls_sk_query);
 
 void tls_sk_destruct(struct sock *sk)
 {
