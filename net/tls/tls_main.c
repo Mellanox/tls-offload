@@ -64,7 +64,7 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 	}
 
 	if (!ctx) {
-		rc = -EBUSY;
+		rc = -EINVAL;
 		goto out;
 	}
 
@@ -103,7 +103,7 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 			rc = -EINVAL;
 			goto out;
 		}
-		if (TLS_IS_HW_OFFLOAD(crypto_info)) {
+		if (TLS_IS_STATE_HW(crypto_info)) {
 			lock_sock(sk);
 			memcpy(crypto_info_aes_gcm_128->iv,
 			       ctx->offload_ctx->iv,
