@@ -336,7 +336,8 @@ void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 	int err = 0;
 	struct mlx_accel_client_data *client_context;
 
-	if (accel_device->state == MLX_ACCEL_FPGA_STATUS_SUCCESS) {
+	if ((accel_device->state == MLX_ACCEL_FPGA_STATUS_SUCCESS) &&
+	    (accel_device->last_oper_image == MLX_ACCEL_IMAGE_USER)) {
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
 		if (err) {
