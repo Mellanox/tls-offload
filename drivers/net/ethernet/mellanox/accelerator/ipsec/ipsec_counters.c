@@ -97,9 +97,10 @@ int mlx_ipsec_get_strings(struct net_device *netdev, uint8_t *data)
 
 int mlx_ipsec_get_stats(struct net_device *netdev, u64 *data)
 {
-	int ret;
+	int ret, i;
 	struct mlx_ipsec_dev *dev = mlx_ipsec_find_dev_by_netdev(netdev);
 	u32 num_ipsec_cnt;
+	u32 *word;
 	u64 addr;
 
 	if (!dev) {
@@ -118,5 +119,10 @@ int mlx_ipsec_get_stats(struct net_device *netdev, u64 *data)
 			ret);
 		return 0;
 	}
+
+	/* Each counter is low word, then high. But each word is big-endian */
+	for (word = (u32 *)data, i = 0; i < num_ipsec_cnt * 2; i++)
+		word[i] = ntohl(word[i]);
+
 	return num_ipsec_cnt;
 }
