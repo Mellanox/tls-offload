@@ -298,7 +298,9 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 		if (err) {
 			dev_err(&accel_device->hw_dev->pdev->dev,
 				"Failed to reset SBU: %d\n", err);
-			goto err_core_conn;
+			/* TODO: Workaround for bug #891929
+			 * goto err_core_conn;
+			 */
 		}
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_OFF);
