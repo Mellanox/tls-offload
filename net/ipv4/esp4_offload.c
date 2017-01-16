@@ -212,12 +212,16 @@ static int esp_xmit(struct xfrm_state *x, struct sk_buff *skb,  netdev_features_
 
 	blksize = ALIGN(crypto_aead_blocksize(aead), 4);
 	clen = ALIGN(skb->len + 2 + tfclen, blksize);
-	plen = clen - skb->len - tfclen;
-	tailen = tfclen + plen + alen;
 
-	nfrags = esp_output_head(x, skb, proto, tfclen, tailen, plen, &inplace);
-	if (nfrags < 0)
-		return nfrags;
+	if (!skb_is_gso(skb)) {
+		plen = clen - skb->len - tfclen;
+		tailen = tfclen + plen + alen;
+
+		nfrags = esp_output_head(x, skb, proto, tfclen, tailen,
+					 plen, &inplace);
+		if (nfrags < 0)
+			return nfrags;
+	}
 
 	esph = ip_esp_hdr(skb);
 	esph->spi = x->id.spi;
