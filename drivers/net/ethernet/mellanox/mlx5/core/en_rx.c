@@ -828,8 +828,11 @@ void mlx5e_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	rcu_read_lock();
-	mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, pet, petlen);
+	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, pet, petlen);
 	rcu_read_unlock();
+	if (!skb)
+		goto wq_ll_pop;
+
 	napi_gro_receive(rq->cq.napi, skb);
 
 wq_ll_pop:
@@ -865,8 +868,11 @@ void mlx5e_handle_rx_cqe_rep(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		skb_vlan_pop(skb);
 
 	rcu_read_lock();
-	mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, pet, petlen);
+	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, pet, petlen);
 	rcu_read_unlock();
+	if (!skb)
+		goto wq_ll_pop;
+
 	napi_gro_receive(rq->cq.napi, skb);
 
 wq_ll_pop:
@@ -963,8 +969,12 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	mlx5e_mpwqe_fill_rx_skb(rq, cqe, wi, cqe_bcnt, skb);
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	rcu_read_lock();
-	mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, wi->pet, wi->petlen);
+	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, wi->pet,
+							 wi->petlen);
 	rcu_read_unlock();
+	if (!skb)
+		goto mpwrq_cqe_out;
+
 	napi_gro_receive(rq->cq.napi, skb);
 
 mpwrq_cqe_out:

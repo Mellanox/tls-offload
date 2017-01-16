@@ -411,7 +411,6 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 	skb = accel_ops->tx_handler(skb, &swp_info);
 	if (!skb) {
 		rcu_read_unlock();
-		dev_kfree_skb_any(skb);
 		return NETDEV_TX_OK;
 	}
 	rcu_read_unlock();
