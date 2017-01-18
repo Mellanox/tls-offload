@@ -763,6 +763,7 @@ struct sk_buff *skb_from_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe,
 	struct sk_buff *skb;
 	void *va, *data;
 	bool consumed;
+	int headlen;
 
 	di             = &rq->dma_info[wqe_counter];
 	va             = page_address(di->page);
@@ -789,6 +790,10 @@ struct sk_buff *skb_from_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe,
 		return NULL; /* page/packet was consumed by XDP */
 
 	*plen = parse_pet(data, cqe_bcnt, pet);
+	data += *plen;
+	cqe_bcnt -= *plen;
+
+	headlen = eth_get_headlen(data, cqe_bcnt);
 
 	skb = build_skb(va, RQ_PAGE_SIZE(rq));
 	if (unlikely(!skb)) {
@@ -802,7 +807,14 @@ struct sk_buff *skb_from_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe,
 	mlx5e_page_release(rq, di, true);
 
 	skb_reserve(skb, MLX5_RX_HEADROOM + *plen);
-	skb_put(skb, cqe_bcnt - *plen);
+	skb_put(skb, headlen);
+
+	if (cqe_bcnt - headlen) {
+		page_ref_inc(di->page);
+		skb_add_rx_frag(skb, skb_shinfo(skb)->nr_frags,
+				di->page, data - va + headlen,
+				cqe_bcnt - headlen, 0);
+	}
 
 	return skb;
 }
