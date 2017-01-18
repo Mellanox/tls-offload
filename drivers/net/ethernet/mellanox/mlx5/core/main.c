@@ -963,7 +963,8 @@ static void mlx5_cleanup_once(struct mlx5_core_dev *dev)
 	mlx5_eq_cleanup(dev);
 }
 
-static int mlx5_fpga_start(struct mlx5_core_dev *dev)
+static int mlx5_fpga_start(struct mlx5_core_dev *dev,
+			   enum mlx_accel_fpga_image image)
 {
 	int err;
 
@@ -971,8 +972,8 @@ static int mlx5_fpga_start(struct mlx5_core_dev *dev)
 	if (err)
 		return err;
 
-	dev_info(&dev->pdev->dev, "FPGA device %u image version %u\n",
-		 MLX5_CAP_FPGA(dev, fpga_device),
+	dev_info(&dev->pdev->dev, "FPGA device %u; %s image, version %u\n",
+		 MLX5_CAP_FPGA(dev, fpga_device), image ? "factory" : "user",
 		 MLX5_CAP_FPGA(dev, image_version));
 
 	/* TODO: Init QP, detect SBU, install accel, etc. */
@@ -1009,7 +1010,7 @@ again:
 
 	switch (status) {
 	case MLX_ACCEL_FPGA_STATUS_SUCCESS:
-		err = mlx5_fpga_start(dev);
+		err = mlx5_fpga_start(dev, oper_image);
 		break;
 
 	case MLX_ACCEL_FPGA_STATUS_IN_PROGRESS:
