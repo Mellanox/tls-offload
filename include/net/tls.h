@@ -93,6 +93,8 @@ void tls_clear_device_offload(struct sock *sk, struct tls_context *ctx);
 int tls_set_device_offload(struct sock *sk, struct tls_context *ctx);
 
 int tls_sendmsg_with_offload(struct sock *sk, struct msghdr *msg, size_t size);
+int tls_sendpage_with_offload(struct sock *sk, struct page *page,
+			      int offset, size_t size, int flags);
 
 struct tls_record_info *tls_get_record(struct tls_offload_context *context,
 				       u32 seq);

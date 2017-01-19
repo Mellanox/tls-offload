@@ -75,6 +75,38 @@ send_end:
 	return rc < 0 ? rc : size;
 }
 
+static int tls_sendpage(struct sock *sk, struct page *page,
+			int offset, size_t size, int flags)
+{
+	struct tls_context *ctx = sk->sk_user_data;
+	int rc = 0;
+
+	if (flags & MSG_SENDPAGE_NOTLAST)
+		flags |= MSG_MORE;
+
+	lock_sock(sk);
+
+	if (flags & MSG_OOB) {
+		rc = -ENOTSUPP;
+		goto sendpage_end;
+	}
+
+	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
+
+	/* currently we support only HW offload */
+	if (!TLS_CRYPTO_INFO_READY(&ctx->crypto_send) ||
+	    !TLS_IS_HW_OFFLOAD(&ctx->crypto_send)) {
+		rc = -EBADMSG;
+		goto sendpage_end;
+	}
+
+	rc = tls_sendpage_with_offload(sk, page, offset, size, flags);
+
+sendpage_end:
+	release_sock(sk);
+	return rc < 0 ? rc : size;
+}
+
 int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 		 int __user *optlen)
 {
@@ -287,8 +319,10 @@ EXPORT_SYMBOL(tls_sk_attach);
 
 static int __init tls_init(void)
 {
-	tls_prot = tcp_prot;
-	tls_prot.sendmsg = tls_sendmsg;
+	tls_prot		= tcp_prot;
+	tls_prot.sendmsg	= tls_sendmsg;
+	tls_prot.sendpage	= tls_sendpage;
+
 	return 0;
 }
 
