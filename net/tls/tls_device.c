@@ -293,7 +293,8 @@ static inline int tls_send_record(struct sock *sk,
 static void tls_fill_prepend(struct tls_crypto_info *crypto_info,
 			     struct tls_offload_context *offload_ctx,
 			     char *buf,
-			     size_t plaintext_len)
+			     size_t plaintext_len,
+			     unsigned char record_type)
 {
 	size_t pkt_len, iv_size = offload_ctx->iv_size;
 
@@ -302,7 +303,7 @@ static void tls_fill_prepend(struct tls_crypto_info *crypto_info,
 	/* we cover nonce explicit here as well, so buf should be of
 	 * size KTLS_DTLS_HEADER_SIZE + KTLS_DTLS_NONCE_EXPLICIT_SIZE
 	 */
-	buf[0] = TLS_RECORD_TYPE_DATA;
+	buf[0] = record_type;
 	buf[1] = TLS_VERSION_MINOR(crypto_info->version);
 	buf[2] = TLS_VERSION_MAJOR(crypto_info->version);
 	/* we can use IV for nonce explicit according to spec */
@@ -359,7 +360,8 @@ static inline int tls_push_record(struct sock *sk,
 				  struct tls_offload_context *offload_ctx,
 				  struct tls_record_info *record,
 				  struct page_frag *pfrag,
-				  int more)
+				  int more,
+				  unsigned char record_type)
 {
 	int ret;
 	skb_frag_t *frag;
@@ -369,7 +371,8 @@ static inline int tls_push_record(struct sock *sk,
 	tls_fill_prepend(crypto_info,
 			 offload_ctx,
 			 skb_frag_address(frag),
-			 record->len - offload_ctx->prepand_size);
+			 record->len - offload_ctx->prepand_size,
+			 record_type);
 	frag = &record->frags[record->num_frags];
 
 	if (!skb_page_frag_refill(offload_ctx->tag_size, pfrag, GFP_KERNEL))
@@ -422,7 +425,8 @@ static inline struct tls_record_info *tls_get_open_new_record(
 
 static int tls_push_data(struct sock *sk,
 			 struct iov_iter *msg_iter,
-			 size_t size, int more)
+			 size_t size, int more,
+			 unsigned char record_type)
 {
 	struct tls_context *ctx = sk->sk_user_data;
 	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
@@ -478,7 +482,8 @@ static int tls_push_data(struct sock *sk,
 					     offload_ctx,
 					     record,
 					     pfrag,
-					     more);
+					     more,
+					     record_type);
 			offload_ctx->open_record = NULL;
 			if (rc < 0) {
 				pr_err("tls_push_record failed %d\n", rc);
@@ -499,8 +504,25 @@ static int tls_push_data(struct sock *sk,
 int tls_sendmsg_with_offload(struct sock *sk, struct msghdr *msg,
 			     size_t size)
 {
-	return tls_push_data(sk, &msg->msg_iter, size,
-			     msg->msg_flags & MSG_MORE);
+	if (unlikely(msg->msg_controllen)) {
+		struct iov_iter	_msg_iter;
+		struct kvec iov;
+		unsigned char *control = msg->msg_control;
+		size_t size = msg->msg_controllen - 1;
+		struct tls_context *ctx = sk->sk_user_data;
+		struct tls_offload_context *offload_ctx = ctx->offload_ctx;
+
+		if (msg->msg_controllen < 1 || offload_ctx->open_record)
+			return -EINVAL;
+		iov.iov_base = control + 1;
+		iov.iov_len = size;
+		iov_iter_kvec(&_msg_iter, WRITE | ITER_KVEC, &iov, 1, size);
+
+		return tls_push_data(sk, &_msg_iter, size, 0, control[0]);
+	} else
+		return tls_push_data(sk, &msg->msg_iter, size,
+				msg->msg_flags & MSG_MORE,
+				TLS_RECORD_TYPE_DATA);
 }
 
 int tls_sendpage_with_offload(struct sock *sk, struct page *page,
@@ -515,7 +537,8 @@ int tls_sendpage_with_offload(struct sock *sk, struct page *page,
 	iov.iov_len = size;
 	iov_iter_kvec(&msg_iter, WRITE | ITER_KVEC, &iov, 1, size);
 	rc = tls_push_data(sk, &msg_iter, size,
-			   flags & (MSG_SENDPAGE_NOTLAST | MSG_MORE));
+			   flags & (MSG_SENDPAGE_NOTLAST | MSG_MORE),
+			   TLS_RECORD_TYPE_DATA);
 	kunmap(page);
 	return rc;
 }
