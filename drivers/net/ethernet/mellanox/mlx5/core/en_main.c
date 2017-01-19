@@ -3586,7 +3586,7 @@ static void mlx5e_build_nic_netdev_priv(struct mlx5_core_dev *mdev,
 			cqe_compress_heuristic(link_speed, pci_bw);
 	}
 
-	MLX5E_SET_PFLAG(priv, MLX5E_PFLAG_STRIDING_RQ_ALLOWED, true);
+	MLX5E_SET_PFLAG(priv, MLX5E_PFLAG_STRIDING_RQ_ALLOWED, false);
 
 	mlx5e_set_rq_priv_params(priv, mlx5e_allow_strq(priv));
 	if (priv->params.rq_wq_type == MLX5_WQ_TYPE_LINKED_LIST_STRIDING_RQ)
