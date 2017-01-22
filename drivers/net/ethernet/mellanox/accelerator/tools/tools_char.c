@@ -41,6 +41,7 @@
 
 static int major_number;
 static struct class *char_class;
+struct ida minor_alloc;
 
 struct file_context {
 	struct mlx_accel_tools_dev *sb_dev;
@@ -60,9 +61,9 @@ static int tools_char_open(struct inode *inodep, struct file *filep)
 	context->access_type = MLX_ACCEL_ACCESS_TYPE_DONTCARE;
 	filep->private_data = context;
 	atomic_inc(&sb_dev->open_count);
-	pr_debug("mlx tools %u char device opened %d times\n",
-		 sb_dev->accel_device->id,
-		 atomic_read(&sb_dev->open_count));
+	dev_dbg(&sb_dev->accel_device->hw_dev->pdev->dev,
+		"mlx tools char device opened %d times\n",
+		atomic_read(&sb_dev->open_count));
 	return 0;
 }
 
@@ -72,9 +73,9 @@ static int tools_char_release(struct inode *inodep, struct file *filep)
 
 	WARN_ON(atomic_read(&context->sb_dev->open_count) < 1);
 	atomic_dec(&context->sb_dev->open_count);
-	pr_debug("mlx tools %u char device closed. Still open %d times\n",
-		 context->sb_dev->accel_device->id,
-		 atomic_read(&context->sb_dev->open_count));
+	dev_dbg(&context->sb_dev->accel_device->hw_dev->pdev->dev,
+		"mlx tools char device closed. Still open %d times\n",
+		atomic_read(&context->sb_dev->open_count));
 	kfree(context);
 	return 0;
 }
@@ -86,8 +87,9 @@ static ssize_t tools_char_read(struct file *filep, char __user *buffer,
 	void *kbuf = NULL;
 	struct file_context *context = filep->private_data;
 
-	pr_debug("mlx tools %u char device reading %lu bytes at 0x%llx\n",
-		 context->sb_dev->accel_device->id, len, *offset);
+	dev_dbg(&context->sb_dev->accel_device->hw_dev->pdev->dev,
+		"mlx tools char device reading %lu bytes at 0x%llx\n",
+		len, *offset);
 
 	if (len < 1)
 		return len;
@@ -121,8 +123,9 @@ static ssize_t tools_char_write(struct file *filep, const char __user *buffer,
 	void *kbuf = NULL;
 	struct file_context *context = filep->private_data;
 
-	pr_debug("mlx tools %u char device writing %lu bytes at 0x%llx\n",
-		 context->sb_dev->accel_device->id, len, *offset);
+	dev_dbg(&context->sb_dev->accel_device->hw_dev->pdev->dev,
+		"mlx tools char device writing %lu bytes at 0x%llx\n",
+		len, *offset);
 
 	if (len < 1)
 		return len;
@@ -234,14 +237,20 @@ int mlx_accel_tools_char_add_one(struct mlx_accel_tools_dev *sb_dev)
 {
 	int ret = 0;
 
-	sb_dev->dev = MKDEV(major_number, sb_dev->accel_device->id);
+	ret = ida_simple_get(&minor_alloc, 1, 0, GFP_KERNEL);
+	if (ret < 0) {
+		dev_err(&sb_dev->accel_device->hw_dev->pdev->dev,
+			"Failed to allocate minor number: %d", ret);
+		goto out;
+	}
+	sb_dev->dev = MKDEV(major_number, ret);
 
 	atomic_set(&sb_dev->open_count, 0);
 	cdev_init(&sb_dev->cdev, &tools_fops);
 	ret = cdev_add(&sb_dev->cdev, sb_dev->dev, 1);
 	if (ret) {
 		pr_err("Failed to add cdev: %d\n", ret);
-		goto out;
+		goto err_minor;
 	}
 
 	sb_dev->char_device = device_create(char_class, NULL, sb_dev->dev, NULL,
@@ -252,13 +261,17 @@ int mlx_accel_tools_char_add_one(struct mlx_accel_tools_dev *sb_dev)
 		ret = PTR_ERR(sb_dev->char_device);
 		sb_dev->char_device = NULL;
 		pr_err("Failed to create a char device: %d\n", ret);
-		goto out;
+		goto err_cdev;
 	}
 
-	pr_debug("mlx_accel_tools char device %u:%u created\n", major_number,
-		 sb_dev->accel_device->id);
+	pr_debug("mlx_accel_tools char device %u:%u created\n",
+		 MAJOR(sb_dev->dev), MINOR(sb_dev->dev));
 	goto out;
 
+err_cdev:
+	cdev_del(&sb_dev->cdev);
+err_minor:
+	ida_simple_remove(&minor_alloc, MINOR(sb_dev->dev));
 out:
 	return ret;
 }
@@ -266,11 +279,11 @@ out:
 void mlx_accel_tools_char_remove_one(struct mlx_accel_tools_dev *sb_dev)
 {
 	WARN_ON(atomic_read(&sb_dev->open_count) > 0);
-	device_destroy(char_class,
-		       MKDEV(major_number, sb_dev->accel_device->id));
+	device_destroy(char_class, sb_dev->dev);
 	cdev_del(&sb_dev->cdev);
-	pr_debug("mlx_accel_tools char device %u:%u destroyed\n", major_number,
-		 sb_dev->accel_device->id);
+	ida_simple_remove(&minor_alloc, MINOR(sb_dev->dev));
+	pr_debug("mlx_accel_tools char device %u:%u destroyed\n",
+		 MAJOR(sb_dev->dev), MINOR(sb_dev->dev));
 }
 
 int mlx_accel_tools_char_init(void)
@@ -294,6 +307,8 @@ int mlx_accel_tools_char_init(void)
 		goto err_chrdev;
 	}
 
+	ida_init(&minor_alloc);
+
 	goto out;
 
 err_chrdev:
@@ -305,6 +320,7 @@ out:
 
 void mlx_accel_tools_char_deinit(void)
 {
+	ida_destroy(&minor_alloc);
 	class_destroy(char_class);
 	unregister_chrdev(major_number, MLX_ACCEL_TOOLS_DRIVER_NAME);
 	pr_debug("tools major number freed\n");
