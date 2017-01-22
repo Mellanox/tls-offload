@@ -41,7 +41,6 @@
 #include "accel_core_trans.h"
 
 static struct workqueue_struct *mlx_accel_core_workq;
-atomic_t mlx_accel_device_id = ATOMIC_INIT(0);
 LIST_HEAD(mlx_accel_core_devices);
 LIST_HEAD(mlx_accel_core_clients);
 /* protects access between client un/registration and device add/remove calls */
@@ -197,7 +196,6 @@ static struct mlx_accel_core_device *mlx_accel_device_alloc(void)
 
 	mutex_init(&accel_device->mutex);
 	accel_device->state = MLX_ACCEL_FPGA_STATUS_NONE;
-	accel_device->id = atomic_add_return(1, &mlx_accel_device_id);
 	INIT_LIST_HEAD(&accel_device->client_data_list);
 	INIT_LIST_HEAD(&accel_device->client_connections);
 	list_add_tail(&accel_device->list, &mlx_accel_core_devices);
