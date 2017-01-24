@@ -36,6 +36,7 @@
 #include "tls_sysfs.h"
 #include "tls_cmds.h"
 
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 #ifdef MLX_TLS_SADB_RDMA
 struct mlx_tls_attribute {
 	struct attribute attr;
@@ -191,4 +192,5 @@ int tls_sysfs_init_and_add(struct kobject *kobj, struct kobject *parent,
 			parent,
 			fmt, arg);
 }
+#endif
 #endif

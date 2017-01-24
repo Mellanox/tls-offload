@@ -33,6 +33,7 @@
 #include "fpga.h"
 #include <linux/etherdevice.h>
 
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 static void fpga_qpc_to_mailbox(struct mlx5_fpga_qpc *fpga_qpc, u8 *in)
 {
 	u8 *dst;
@@ -90,10 +91,14 @@ static void fpga_qpc_from_mailbox(struct mlx5_fpga_qpc *fpga_qpc, u8 *out)
 	src = MLX5_ADDR_OF(fpga_qpc, out, fpga_ip);
 	memcpy(&fpga_qpc->fpga_ip, src, sizeof(struct in6_addr));
 }
+#endif
 
 int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
 			struct mlx5_fpga_qpc *fpga_qpc, u32 *fpga_qpn)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	int ret;
 	u32 in[MLX5_ST_SZ_DW(fpga_create_qp_in)];
 	u32 out[MLX5_ST_SZ_DW(fpga_create_qp_out)];
@@ -112,12 +117,16 @@ int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
 	*fpga_qpn = MLX5_GET(fpga_create_qp_out, out, fpga_qpn);
 out:
 	return ret;
+#endif
 }
 
 int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
 			enum mlx5_fpga_qpc_field_select fields,
 			struct mlx5_fpga_qpc *fpga_qpc)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	u32 in[MLX5_ST_SZ_DW(fpga_modify_qp_in)];
 	u32 out[MLX5_ST_SZ_DW(fpga_modify_qp_out)];
 
@@ -129,11 +138,15 @@ int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
 			    MLX5_ADDR_OF(fpga_modify_qp_in, in, fpga_qpc));
 
 	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
+#endif
 }
 
 int mlx5_fpga_query_qp(struct mlx5_core_dev *dev,
 		       u32 fpga_qpn, struct mlx5_fpga_qpc *fpga_qpc)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	int ret;
 	u32 in[MLX5_ST_SZ_DW(fpga_query_qp_in)];
 	u32 out[MLX5_ST_SZ_DW(fpga_query_qp_out)];
@@ -150,10 +163,14 @@ int mlx5_fpga_query_qp(struct mlx5_core_dev *dev,
 			      MLX5_ADDR_OF(fpga_query_qp_out, out, fpga_qpc));
 out:
 	return ret;
+#endif
 }
 
 int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	u32 in[MLX5_ST_SZ_DW(fpga_destroy_qp_in)];
 	u32 out[MLX5_ST_SZ_DW(fpga_destroy_qp_out)];
 
@@ -162,11 +179,15 @@ int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn)
 	MLX5_SET(fpga_destroy_qp_in, in, fpga_qpn, fpga_qpn);
 
 	return mlx5_cmd_exec(dev, in, sizeof(in), out, sizeof(out));
+#endif
 }
 
 int mlx5_fpga_query_qp_counters(struct mlx5_core_dev *dev, u32 fpga_qpn,
 				bool clear, struct mlx5_fpga_qp_counters *data)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	int ret;
 	u32 in[MLX5_ST_SZ_DW(fpga_query_qp_counters_in)];
 	u32 out[MLX5_ST_SZ_DW(fpga_query_qp_counters_out)];
@@ -194,11 +215,15 @@ int mlx5_fpga_query_qp_counters(struct mlx5_core_dev *dev, u32 fpga_qpn,
 
 out:
 	return ret;
+#endif
 }
 
 int mlx5_fpga_shell_counters(struct mlx5_core_dev *dev, bool clear,
 			     struct mlx5_fpga_shell_counters *data)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	u32 in[MLX5_ST_SZ_DW(fpga_shell_counters)];
 	u32 out[MLX5_ST_SZ_DW(fpga_shell_counters)];
 	int err;
@@ -222,4 +247,5 @@ int mlx5_fpga_shell_counters(struct mlx5_core_dev *dev, bool clear,
 
 out:
 	return err;
+#endif
 }

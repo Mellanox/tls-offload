@@ -37,9 +37,11 @@
 
 #include "tls.h"
 
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 #ifdef MLX_TLS_SADB_RDMA
 int tls_sysfs_init_and_add(struct kobject *kobj, struct kobject *parent,
 			   const char *fmt, char *arg);
+#endif
 #endif
 
 #endif	/* __IPSEC_SYSFS_H__ */

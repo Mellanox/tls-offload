@@ -963,6 +963,7 @@ static void mlx5_cleanup_once(struct mlx5_core_dev *dev)
 	mlx5_eq_cleanup(dev);
 }
 
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 static int mlx5_fpga_start(struct mlx5_core_dev *dev,
 			   enum mlx_accel_fpga_image image)
 {
@@ -1034,6 +1035,7 @@ again:
 out:
 	return err;
 }
+#endif
 
 static int mlx5_load_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 			 bool boot)
@@ -1185,9 +1187,11 @@ static int mlx5_load_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 		goto err_sriov;
 	}
 
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	err = mlx5_init_fpga(dev);
 	if (err)
 		dev_err(&pdev->dev, "fpga init failed %d\n", err);
+#endif
 
 	if (mlx5_device_registered(dev)) {
 		mlx5_attach_device(dev);
@@ -1277,7 +1281,9 @@ static int mlx5_unload_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 	if (mlx5_device_registered(dev))
 		mlx5_detach_device(dev);
 
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	mlx5_fpga_stop(dev);
+#endif
 
 	mlx5_sriov_detach(dev);
 #ifdef CONFIG_MLX5_CORE_EN

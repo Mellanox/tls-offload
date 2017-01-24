@@ -367,7 +367,9 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	int err;
 	struct mlx_accel_core_conn *ret = NULL;
 	struct mlx_accel_core_conn *conn = NULL;
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	union ib_gid *gid = NULL;
+#endif
 
 	conn = kzalloc(sizeof(*conn), GFP_KERNEL);
 	if (!conn) {
@@ -421,6 +423,9 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[6]),
 		 ntohs(((__be16 *)&conn->fpga_qpc.remote_ip)[7]));
 
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	conn->sgid_index = 1;
+#else
 	gid = (union ib_gid *)&conn->fpga_qpc.remote_ip;
 	err = mlx5_ib_reserved_gid_add(accel_device->ib_dev, accel_device->port,
 				       IB_GID_TYPE_ROCE_UDP_ENCAP,
@@ -432,6 +437,7 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 		ret = ERR_PTR(err);
 		goto err;
 	}
+#endif
 
 	err = mlx_accel_core_rdma_create_res(conn,
 					     conn_init_attr->tx_size,
@@ -454,6 +460,7 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	conn->fpga_qpc.next_rcv_psn = 1;
 	conn->fpga_qpc.next_send_psn = 0;
 
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	err = mlx5_fpga_create_qp(accel_device->hw_dev,
 				  &conn->fpga_qpc,
 				  &conn->fpga_qpn);
@@ -464,11 +471,14 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	}
 
 	pr_debug("FPGA QPN is %u\n", conn->fpga_qpn);
+#endif
 	ret = conn;
 	goto out;
 
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 err_create_res:
 	mlx_accel_core_rdma_destroy_res(conn);
+#endif
 err_rsvd_gid:
 	mlx5_ib_reserved_gid_del(accel_device->ib_dev, accel_device->port,
 				 conn->sgid_index);
@@ -540,10 +550,14 @@ static void mlx_accel_core_rdma_destroy_res(struct mlx_accel_core_conn *conn)
 
 void mlx_accel_core_rdma_conn_destroy(struct mlx_accel_core_conn *conn)
 {
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	mlx5_fpga_destroy_qp(conn->accel_device->hw_dev, conn->fpga_qpn);
+#endif
 	mlx_accel_core_rdma_destroy_res(conn);
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	mlx5_ib_reserved_gid_del(conn->accel_device->ib_dev, conn->port_num,
 				 conn->sgid_index);
+#endif
 	kfree(conn);
 }
 
@@ -633,6 +647,7 @@ int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn)
 {
 	int rc = 0;
 
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_ACTIVE;
 	rc = mlx5_fpga_modify_qp(conn->accel_device->hw_dev,
 				 conn->fpga_qpn,
@@ -642,6 +657,7 @@ int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn)
 		pr_warn("Failed to activate FPGA RC QP: %d\n", rc);
 		goto err;
 	}
+#endif
 
 	rc = mlx_accel_core_rdma_reset_qp(conn);
 	if (rc) {
@@ -672,11 +688,13 @@ int mlx_accel_core_rdma_connect(struct mlx_accel_core_conn *conn)
 	goto err;
 
 err_fpga_qp:
+#if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	conn->fpga_qpc.state = MLX5_FPGA_QP_STATE_INIT;
 	if (mlx5_fpga_modify_qp(conn->accel_device->hw_dev,
 				conn->fpga_qpn, MLX5_FPGA_QPC_STATE,
 				&conn->fpga_qpc))
 		pr_warn("Failed to revert FPGA QP to INIT\n");
+#endif
 err:
 	return rc;
 }

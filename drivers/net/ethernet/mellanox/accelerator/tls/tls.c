@@ -497,8 +497,10 @@ out:
 static void mlx_tls_free(struct mlx_tls_dev *dev)
 {
 	list_del(&dev->accel_dev_list);
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 #ifdef MLX_TLS_SADB_RDMA
 	kobject_put(&dev->kobj);
+#endif
 #endif
 	/* TODO - Test the corner case of removing the last reference
 	 * while receiving packets that should be handled by the rx_handler.
@@ -601,6 +603,7 @@ int mlx_tls_add_one(struct mlx_accel_core_device *accel_device)
 		goto err_netdev;
 	}
 
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 #ifdef MLX_TLS_SADB_RDMA
 	ret = tls_sysfs_init_and_add(&dev->kobj,
 				     mlx_accel_core_kobj(dev->accel_device),
@@ -612,6 +615,7 @@ int mlx_tls_add_one(struct mlx_accel_core_device *accel_device)
 		goto err_ops_register;
 	}
 #endif
+#endif
 
 	mutex_lock(&mlx_tls_mutex);
 	list_add(&dev->accel_dev_list, &mlx_tls_devs);
@@ -620,9 +624,11 @@ int mlx_tls_add_one(struct mlx_accel_core_device *accel_device)
 	dev->netdev->tlsdev_ops = &mlx_tls_ops;
 	goto out;
 
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 #ifdef MLX_TLS_SADB_RDMA
 err_ops_register:
 	mlx_accel_core_client_ops_unregister(accel_device);
+#endif
 #endif
 err_netdev:
 	dev_put(netdev);
