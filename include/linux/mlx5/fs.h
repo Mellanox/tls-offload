@@ -37,6 +37,8 @@
 #include <linux/mlx5/mlx5_ifc.h>
 
 #define MLX5_FS_DEFAULT_FLOW_TAG 0x0
+#define MLX5_FS_SNIFFER_FLOW_TAG 0xFFFFFD
+#define MLX5_FS_FLOW_TAG_MASK 0xFFFFFF
 
 enum {
 	MLX5_FLOW_CONTEXT_ACTION_FWD_NEXT_PRIO	= 1 << 16,
