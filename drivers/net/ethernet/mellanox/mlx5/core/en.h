@@ -173,12 +173,14 @@ static const char mlx5e_priv_flags[][ETH_GSTRING_LEN] = {
 	"rx_cqe_moder",
 	"rx_cqe_compress",
 	"striding_rq_allow",
+	"sniffer",
 };
 
 enum mlx5e_priv_flag {
 	MLX5E_PFLAG_RX_CQE_BASED_MODER = (1 << 0),
 	MLX5E_PFLAG_RX_CQE_COMPRESS = (1 << 1),
 	MLX5E_PFLAG_STRIDING_RQ_ALLOWED = (1 << 2),
+	MLX5E_PFLAG_SNIFFER = (1 << 3),
 };
 
 #define MLX5E_SET_PFLAG(priv, pflag, enable)			\
@@ -642,6 +644,16 @@ struct mlx5e_ethtool_steering {
 	int                             tot_num_rules;
 };
 
+enum mlx5e_sniffer_types {
+	MLX5E_SNIFFER_TX,
+	MLX5E_SNIFFER_NUM_TYPE,
+};
+
+struct mlx5e_flow_sniffer {
+	struct mlx5_flow_table *tx_ft;
+	struct mlx5_flow_handle *tx_fh;
+};
+
 struct mlx5e_flow_steering {
 	struct mlx5_flow_namespace      *ns;
 	struct mlx5e_ethtool_steering   ethtool;
@@ -650,6 +662,7 @@ struct mlx5e_flow_steering {
 	struct mlx5e_l2_table           l2;
 	struct mlx5e_ttc_table          ttc;
 	struct mlx5e_arfs_tables        arfs;
+	struct mlx5e_flow_sniffer	sniffer;
 };
 
 struct mlx5e_rqt {
@@ -700,6 +713,7 @@ struct mlx5e_priv {
 	struct mlx5e_rqt           indir_rqt;
 	struct mlx5e_tir           indir_tir[MLX5E_NUM_INDIR_TIRS];
 	struct mlx5e_tir           direct_tir[MLX5E_MAX_NUM_CHANNELS];
+	u32                        sniffer_tirn[MLX5E_SNIFFER_NUM_TYPE];
 	u32                        tx_rates[MLX5E_MAX_NUM_SQS];
 
 	struct mlx5e_flow_steering fs;
@@ -809,6 +823,8 @@ void mlx5e_set_rx_cq_mode_params(struct mlx5e_params *params,
 				 u8 cq_period_mode);
 void mlx5e_set_rq_type_params(struct mlx5e_priv *priv, u8 rq_type);
 u8 mlx5e_rq_type(struct mlx5e_priv *priv, bool allow_strq);
+
+int set_pflag_sniffer(struct net_device *netdev, bool enable);
 
 static inline void mlx5e_tx_notify_hw(struct mlx5e_sq *sq,
 				      struct mlx5_wqe_ctrl_seg *ctrl, int bf_sz)
