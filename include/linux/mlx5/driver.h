@@ -1113,7 +1113,8 @@ struct mlx5_swp_info {
 };
 
 struct mlx5_accel_ops {
-	struct sk_buff  *(*rx_handler)(struct sk_buff *skb, u8 *pet, u8 petlen);
+	struct sk_buff  *(*rx_handler)(struct sk_buff *skb, u8 *metadata,
+				       u8 metadata_len);
 	struct sk_buff  *(*tx_handler)(struct sk_buff *skb,
 				       struct mlx5_swp_info *swp);
 	netdev_features_t (*feature_chk)(struct sk_buff *skb,

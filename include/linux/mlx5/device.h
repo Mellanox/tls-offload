@@ -1100,7 +1100,7 @@ static inline u16 mlx5_to_sw_pkey_sz(int pkey_sz)
 				MLX5_BY_PASS_NUM_DONT_TRAP_PRIOS +\
 				MLX5_BY_PASS_NUM_MULTICAST_PRIOS)
 
-#define MLX_IPSEC_PET_ETHERTYPE (0x8CE4)
-#define MLX_IPSEC_PET_LEN       8
+#define MLX5_METADATA_ETHER_TYPE	(0x8CE4)
+#define MLX5_METADATA_ETHER_LEN		8
 
 #endif /* MLX5_DEVICE_H */

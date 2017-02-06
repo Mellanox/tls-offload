@@ -733,7 +733,7 @@ static inline bool mlx5e_xdp_handle(struct mlx5e_rq *rq,
 	}
 }
 
-static inline int parse_pet(u8 *va, u16 byte_cnt, u8 *pet)
+static inline int parse_metadata(u8 *va, u16 byte_cnt, u8 *metadata)
 {
 	struct ethhdr *old_eth;
 	struct ethhdr *new_eth;
@@ -743,21 +743,22 @@ static inline int parse_pet(u8 *va, u16 byte_cnt, u8 *pet)
 		return 0;
 
 	ethtype = (__be16 *)(va + ETH_ALEN * 2);
-	if (*ethtype != cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE))
+	if (*ethtype != cpu_to_be16(MLX5_METADATA_ETHER_TYPE))
 		return 0;
 
-	memcpy(pet, ethtype + 1, MLX_IPSEC_PET_LEN);
+	memcpy(metadata, ethtype + 1, MLX5_METADATA_ETHER_LEN);
 	old_eth = (struct ethhdr *)va;
-	new_eth = (struct ethhdr *)(va + MLX_IPSEC_PET_LEN);
+	new_eth = (struct ethhdr *)(va + MLX5_METADATA_ETHER_LEN);
 	memmove(new_eth, old_eth, 2 * ETH_ALEN);
 	/* Ethertype is already in its new place */
 
-	return MLX_IPSEC_PET_LEN;
+	return MLX5_METADATA_ETHER_LEN;
 }
 
 static inline
 struct sk_buff *skb_from_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe,
-			     u16 wqe_counter, u32 cqe_bcnt, u8 *pet, int *plen)
+			     u16 wqe_counter, u32 cqe_bcnt,
+			     u8 *metadata, int *metadata_len)
 {
 	struct mlx5e_dma_info *di;
 	struct sk_buff *skb;
@@ -789,9 +790,9 @@ struct sk_buff *skb_from_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe,
 	if (consumed)
 		return NULL; /* page/packet was consumed by XDP */
 
-	*plen = parse_pet(data, cqe_bcnt, pet);
-	data += *plen;
-	cqe_bcnt -= *plen;
+	*metadata_len = parse_metadata(data, cqe_bcnt, metadata);
+	data += *metadata_len;
+	cqe_bcnt -= *metadata_len;
 
 	headlen = eth_get_headlen(data, cqe_bcnt);
 
@@ -806,7 +807,7 @@ struct sk_buff *skb_from_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe,
 	page_ref_inc(di->page);
 	mlx5e_page_release(rq, di, true);
 
-	skb_reserve(skb, MLX5_RX_HEADROOM + *plen);
+	skb_reserve(skb, MLX5_RX_HEADROOM + *metadata_len);
 	skb_put(skb, headlen);
 
 	if (cqe_bcnt - headlen) {
@@ -826,21 +827,23 @@ void mlx5e_handle_rx_cqe(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	struct sk_buff *skb;
 	u16 wqe_counter;
 	u32 cqe_bcnt;
-	u8 pet[MLX_IPSEC_PET_LEN];
-	int petlen = 0;
+	u8 metadata[MLX5_METADATA_ETHER_LEN];
+	int metadata_len = 0;
 
 	wqe_counter_be = cqe->wqe_counter;
 	wqe_counter    = be16_to_cpu(wqe_counter_be);
 	wqe            = mlx5_wq_ll_get_wqe(&rq->wq, wqe_counter);
 	cqe_bcnt       = be32_to_cpu(cqe->byte_cnt);
 
-	skb = skb_from_cqe(rq, cqe, wqe_counter, cqe_bcnt, pet, &petlen);
+	skb = skb_from_cqe(rq, cqe, wqe_counter, cqe_bcnt, metadata,
+			   &metadata_len);
 	if (!skb)
 		goto wq_ll_pop;
 
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	rcu_read_lock();
-	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, pet, petlen);
+	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, metadata,
+							 metadata_len);
 	rcu_read_unlock();
 	if (!skb)
 		goto wq_ll_pop;
@@ -862,15 +865,16 @@ void mlx5e_handle_rx_cqe_rep(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	__be16 wqe_counter_be;
 	u16 wqe_counter;
 	u32 cqe_bcnt;
-	u8 pet[MLX_IPSEC_PET_LEN];
-	int petlen;
+	u8 metadata[MLX5_METADATA_ETHER_LEN];
+	int metadata_len;
 
 	wqe_counter_be = cqe->wqe_counter;
 	wqe_counter    = be16_to_cpu(wqe_counter_be);
 	wqe            = mlx5_wq_ll_get_wqe(&rq->wq, wqe_counter);
 	cqe_bcnt       = be32_to_cpu(cqe->byte_cnt);
 
-	skb = skb_from_cqe(rq, cqe, wqe_counter, cqe_bcnt, pet, &petlen);
+	skb = skb_from_cqe(rq, cqe, wqe_counter, cqe_bcnt, metadata,
+			   &metadata_len);
 	if (!skb)
 		goto wq_ll_pop;
 
@@ -880,7 +884,8 @@ void mlx5e_handle_rx_cqe_rep(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 		skb_vlan_pop(skb);
 
 	rcu_read_lock();
-	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, pet, petlen);
+	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, metadata,
+							 metadata_len);
 	rcu_read_unlock();
 	if (!skb)
 		goto wq_ll_pop;
@@ -908,14 +913,14 @@ static inline void mlx5e_mpwqe_fill_rx_skb(struct mlx5e_rq *rq,
 	u16 byte_cnt = min_t(u32, PAGE_SIZE - head_offset, cqe_bcnt);
 	u8 *va = page_address(wi->umr.dma_info[page_idx].page) + head_offset;
 
-	wi->petlen = parse_pet(va, byte_cnt, wi->pet);
-	if (wi->petlen) {
-		va += wi->petlen;
-		cqe_bcnt -= wi->petlen;
-		byte_cnt -= wi->petlen;
-		head_offset += wi->petlen;
-		wqe_offset += wi->petlen;
-		headlen -= wi->petlen;
+	wi->metadata_len = parse_metadata(va, byte_cnt, wi->metadata);
+	if (wi->metadata_len) {
+		va += wi->metadata_len;
+		cqe_bcnt -= wi->metadata_len;
+		byte_cnt -= wi->metadata_len;
+		head_offset += wi->metadata_len;
+		wqe_offset += wi->metadata_len;
+		headlen -= wi->metadata_len;
 	}
 
 	if (byte_cnt > MLX5_MPWRQ_SMALL_PACKET_THRESHOLD)
@@ -981,8 +986,8 @@ void mlx5e_handle_rx_cqe_mpwrq(struct mlx5e_rq *rq, struct mlx5_cqe64 *cqe)
 	mlx5e_mpwqe_fill_rx_skb(rq, cqe, wi, cqe_bcnt, skb);
 	mlx5e_complete_rx_cqe(rq, cqe, cqe_bcnt, skb);
 	rcu_read_lock();
-	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, wi->pet,
-							 wi->petlen);
+	skb = mlx5_accel_get(rq->priv->mdev)->rx_handler(skb, wi->metadata,
+							 wi->metadata_len);
 	rcu_read_unlock();
 	if (!skb)
 		goto mpwrq_cqe_out;
