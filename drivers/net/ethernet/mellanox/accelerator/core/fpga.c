@@ -34,6 +34,7 @@
 #include <linux/etherdevice.h>
 
 #if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if !IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 static void fpga_qpc_to_mailbox(struct mlx5_fpga_qpc *fpga_qpc, u8 *in)
 {
 	u8 *dst;
@@ -92,11 +93,12 @@ static void fpga_qpc_from_mailbox(struct mlx5_fpga_qpc *fpga_qpc, u8 *out)
 	memcpy(&fpga_qpc->fpga_ip, src, sizeof(struct in6_addr));
 }
 #endif
+#endif
 
 int mlx5_fpga_create_qp(struct mlx5_core_dev *dev,
 			struct mlx5_fpga_qpc *fpga_qpc, u32 *fpga_qpn)
 {
-#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM) || IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	return -EPERM;
 #else
 	int ret;
@@ -124,7 +126,7 @@ int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
 			enum mlx5_fpga_qpc_field_select fields,
 			struct mlx5_fpga_qpc *fpga_qpc)
 {
-#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM) || IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	return -EPERM;
 #else
 	u32 in[MLX5_ST_SZ_DW(fpga_modify_qp_in)];
@@ -144,7 +146,7 @@ int mlx5_fpga_modify_qp(struct mlx5_core_dev *dev, u32 fpga_qpn,
 int mlx5_fpga_query_qp(struct mlx5_core_dev *dev,
 		       u32 fpga_qpn, struct mlx5_fpga_qpc *fpga_qpc)
 {
-#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM) || IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	return -EPERM;
 #else
 	int ret;
@@ -168,7 +170,7 @@ out:
 
 int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn)
 {
-#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM) || IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	return -EPERM;
 #else
 	u32 in[MLX5_ST_SZ_DW(fpga_destroy_qp_in)];
@@ -185,7 +187,7 @@ int mlx5_fpga_destroy_qp(struct mlx5_core_dev *dev, u32 fpga_qpn)
 int mlx5_fpga_query_qp_counters(struct mlx5_core_dev *dev, u32 fpga_qpn,
 				bool clear, struct mlx5_fpga_qp_counters *data)
 {
-#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM) || IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	return -EPERM;
 #else
 	int ret;
@@ -221,7 +223,7 @@ out:
 int mlx5_fpga_shell_counters(struct mlx5_core_dev *dev, bool clear,
 			     struct mlx5_fpga_shell_counters *data)
 {
-#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM) || IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	return -EPERM;
 #else
 	u32 in[MLX5_ST_SZ_DW(fpga_shell_counters)];

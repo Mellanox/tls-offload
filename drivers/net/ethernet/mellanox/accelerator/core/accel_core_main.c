@@ -246,6 +246,9 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 #if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
 	dev_notice(&accel_device->hw_dev->pdev->dev,
 		   "**** QP Simulator mode; Waiting for QP setup ****\n");
+#elif IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
+	dev_notice(&accel_device->hw_dev->pdev->dev,
+		   "**** TLS mode; Shell QP and BRB not supported ****\n");
 #else
 	err = mlx_accel_core_rdma_connect(accel_device->core_conn);
 	if (err) {
@@ -257,6 +260,7 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 
 	if (accel_device->last_oper_image == MLX_ACCEL_IMAGE_USER) {
 #if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if !IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
 		if (err) {
@@ -281,6 +285,7 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 			goto err_core_conn;
 		}
 #endif
+#endif
 
 		list_for_each_entry(client_context,
 				    &accel_device->client_data_list, list) {
@@ -293,9 +298,11 @@ static void mlx_accel_device_init(struct mlx_accel_core_device *accel_device)
 	goto out;
 
 #if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if !IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 err_core_conn:
 	mlx_accel_core_rdma_conn_destroy(accel_device->core_conn);
 	accel_device->core_conn = NULL;
+#endif
 #endif
 err_pd:
 	ib_dealloc_pd(accel_device->pd);
@@ -310,19 +317,23 @@ out:
 void mlx_accel_device_teardown(struct mlx_accel_core_device *accel_device)
 {
 #if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if !IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	int err = 0;
+#endif
 #endif
 	struct mlx_accel_client_data *client_context;
 
 	if ((accel_device->state == MLX_ACCEL_FPGA_STATUS_SUCCESS) &&
 	    (accel_device->last_oper_image == MLX_ACCEL_IMAGE_USER)) {
 #if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if !IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 		err = mlx5_fpga_ctrl_op(accel_device->hw_dev,
 					MLX5_FPGA_CTRL_OP_SB_BYPASS_ON);
 		if (err)
 			mlx_accel_err(accel_device,
 				      "Failed to re-set SBU bypass on: %d\n",
 				      err);
+#endif
 #endif
 	}
 
