@@ -461,6 +461,7 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 	conn->fpga_qpc.next_send_psn = 0;
 
 #if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if !IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 	err = mlx5_fpga_create_qp(accel_device->hw_dev,
 				  &conn->fpga_qpc,
 				  &conn->fpga_qpn);
@@ -472,12 +473,15 @@ mlx_accel_core_rdma_conn_create(struct mlx_accel_core_device *accel_device,
 
 	pr_debug("FPGA QPN is %u\n", conn->fpga_qpn);
 #endif
+#endif
 	ret = conn;
 	goto out;
 
 #if !IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+#if !IS_ENABLED(CONFIG_MLX_ACCEL_TLS)
 err_create_res:
 	mlx_accel_core_rdma_destroy_res(conn);
+#endif
 #endif
 err_rsvd_gid:
 	mlx5_ib_reserved_gid_del(accel_device->ib_dev, accel_device->port,
