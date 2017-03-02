@@ -87,16 +87,11 @@ EXPORT_SYMBOL(mlx5_accel_get);
 int mlx5_accel_register(struct mlx5_core_dev *dev,
 			struct mlx5_accel_ops *ops)
 {
-	struct mlx5_accel_ops *accel_ops;
-
 	WARN_ON(!ops->tx_handler || !ops->rx_handler);
 	WARN_ON(!ops->get_count || !ops->get_strings || !ops->get_stats);
 	WARN_ON(!ops->feature_chk);
 
-	rcu_read_lock();
-	accel_ops = mlx5_accel_get(dev);
-	rcu_read_unlock();
-	if (accel_ops != &accel_ops_default) {
+	if (rcu_access_pointer(dev->accel_ops) != &accel_ops_default) {
 		pr_err("mlx5_register_accel_ops(): Error registering accel ops over non-default pointer\n");
 		return -EACCES;
 	}
