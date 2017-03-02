@@ -168,6 +168,17 @@ static void mlx5e_update_carrier_work(struct work_struct *work)
 	mutex_unlock(&priv->state_lock);
 }
 
+static void mlx5e_accel_change(struct work_struct *work)
+{
+	struct mlx5e_priv *priv = container_of(work, struct mlx5e_priv,
+					       accel_change_work);
+	/* Re-apply user MTU */
+	rtnl_lock();
+	priv->netdev->netdev_ops->ndo_change_mtu(priv->netdev,
+			priv->netdev->mtu);
+	rtnl_unlock();
+}
+
 static void mlx5e_tx_timeout_work(struct work_struct *work)
 {
 	struct mlx5e_priv *priv = container_of(work, struct mlx5e_priv,
@@ -377,11 +388,7 @@ static void mlx5e_async_event(struct mlx5_core_dev *mdev, void *vpriv,
 		queue_work(priv->wq, &priv->update_carrier_work);
 		break;
 	case MLX5_DEV_EVENT_ACCEL_CHANGE:
-		/* Re-apply user MTU */
-		rtnl_lock();
-		priv->netdev->netdev_ops->ndo_change_mtu(priv->netdev,
-							 priv->netdev->mtu);
-		rtnl_unlock();
+		queue_work(priv->wq, &priv->accel_change_work);
 		break;
 
 	default:
@@ -3626,6 +3633,7 @@ static void mlx5e_build_nic_netdev_priv(struct mlx5_core_dev *mdev,
 	INIT_WORK(&priv->update_carrier_work, mlx5e_update_carrier_work);
 	INIT_WORK(&priv->set_rx_mode_work, mlx5e_set_rx_mode_work);
 	INIT_WORK(&priv->tx_timeout_work, mlx5e_tx_timeout_work);
+	INIT_WORK(&priv->accel_change_work, mlx5e_accel_change);
 	INIT_DELAYED_WORK(&priv->update_stats_work, mlx5e_update_stats_work);
 }
 
