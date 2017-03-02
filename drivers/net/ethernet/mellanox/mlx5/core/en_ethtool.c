@@ -165,9 +165,15 @@ static bool mlx5e_query_global_pause_combined(struct mlx5e_priv *priv)
 static int mlx5e_get_sset_count(struct net_device *dev, int sset)
 {
 	struct mlx5e_priv *priv = netdev_priv(dev);
+	int accel_eth_ss_stats;
 
 	switch (sset) {
 	case ETH_SS_STATS:
+		rcu_read_lock();
+		accel_eth_ss_stats =
+				mlx5_accel_get(priv->mdev)->get_count(dev);
+		rcu_read_unlock();
+
 		return NUM_SW_COUNTERS +
 		       MLX5E_NUM_Q_CNTRS(priv) +
 		       NUM_VPORT_COUNTERS + NUM_PPORT_COUNTERS +
@@ -177,7 +183,7 @@ static int mlx5e_get_sset_count(struct net_device *dev, int sset)
 		       MLX5E_NUM_PFC_COUNTERS(priv) +
 		       ARRAY_SIZE(mlx5e_pme_status_desc) +
 		       ARRAY_SIZE(mlx5e_pme_error_desc) +
-		       mlx5_accel_get(priv->mdev)->get_count(dev);
+		       accel_eth_ss_stats;
 	case ETH_SS_PRIV_FLAGS:
 		return ARRAY_SIZE(mlx5e_priv_flags);
 	case ETH_SS_TEST:
