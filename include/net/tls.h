@@ -48,6 +48,7 @@
 
 #define TLS_CRYPTO_INFO_READY(info)	((info)->cipher_type)
 #define TLS_IS_STATE_HW(info)		((info)->state == TLS_STATE_HW)
+#define TLS_IS_STATE_SW(info)		((info)->state == TLS_STATE_SW)
 
 #define TLS_RECORD_TYPE_DATA		0x17
 
@@ -66,6 +67,37 @@ struct tls_offload_context {
 	struct tls_record_info *retransmit_hint;
 	u32 expectedSN;
 	spinlock_t lock;	/* protects records list */
+};
+
+#define TLS_DATA_PAGES			(TLS_MAX_PAYLOAD_SIZE / PAGE_SIZE)
+/* +1 for aad, +1 for tag, +1 for chaining */
+#define TLS_SG_DATA_SIZE		(TLS_DATA_PAGES + 3)
+#define ALG_MAX_PAGES 16 /* for skb_to_sgvec */
+#define TLS_AAD_SPACE_SIZE		21
+#define TLS_AAD_SIZE			13
+#define TLS_TAG_SIZE			16
+
+#define TLS_NONCE_SIZE			8
+#define TLS_PREPEND_SIZE		(TLS_HEADER_SIZE + TLS_NONCE_SIZE)
+#define TLS_OVERHEAD		(TLS_PREPEND_SIZE + TLS_TAG_SIZE)
+
+struct tls_sw_context {
+	struct sock *sk;
+	void (*sk_write_space)(struct sock *sk);
+	struct crypto_aead *aead_send;
+
+	/* Sending context */
+	struct scatterlist sg_tx_data[TLS_SG_DATA_SIZE];
+	struct scatterlist sg_tx_data2[ALG_MAX_PAGES + 1];
+	char aad_send[TLS_AAD_SPACE_SIZE];
+	char tag_send[TLS_TAG_SIZE];
+	skb_frag_t tx_frag;
+	int wmem_len;
+	int order_npages;
+	struct scatterlist sgaad_send[2];
+	struct scatterlist sgtag_send[2];
+	struct sk_buff_head tx_queue;
+	int unsent;
 };
 
 struct tls_context {
@@ -101,6 +133,12 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx);
 int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 int tls_device_sendpage(struct sock *sk, struct page *page,
 			int offset, size_t size, int flags);
+
+int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx);
+void tls_clear_sw_offload(struct sock *sk);
+int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
+int tls_sw_sendpage(struct sock *sk, struct page *page,
+		    int offset, size_t size, int flags);
 
 struct tls_record_info *tls_get_record(struct tls_offload_context *context,
 				       u32 seq);
@@ -172,6 +210,12 @@ static inline void tls_fill_prepend(struct tls_context *ctx,
 static inline struct tls_context *tls_get_ctx(const struct sock *sk)
 {
 	return sk->sk_user_data;
+}
+
+static inline struct tls_sw_context *tls_sw_ctx(
+		const struct tls_context *tls_ctx)
+{
+	return (struct tls_sw_context *)tls_ctx->priv_ctx;
 }
 
 static inline struct tls_offload_context *tls_offload_ctx(
