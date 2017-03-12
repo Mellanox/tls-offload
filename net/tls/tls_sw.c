@@ -90,8 +90,10 @@ static void tls_tx_work(struct work_struct *w)
 	release_sock(sk);
 }
 
-static inline void tls_make_prepend(struct sock *sk, char *buf,
-				    size_t plaintext_len)
+static inline void tls_make_prepend(struct sock *sk,
+				    char *buf,
+				    size_t plaintext_len,
+				    unsigned char record_type)
 {
 	size_t pkt_len;
 	struct tls_sw_context *ctx = sw_ctx(sk);
@@ -103,7 +105,7 @@ static inline void tls_make_prepend(struct sock *sk, char *buf,
 	/* we cover nonce explicit here as well, so buf should be of
 	 * size TLS_HEADER_SIZE + TLS_NONCE_EXPLICIT_SIZE
 	 */
-	buf[0] = TLS_RECORD_TYPE_DATA;
+	buf[0] = record_type;
 	buf[1] = ctx->version[0];
 	buf[2] = ctx->version[1];
 	/* we can use IV for nonce explicit according to spec */
@@ -117,13 +119,14 @@ static inline void tls_make_aad(struct sock *sk,
 				int recv,
 				char *buf,
 				size_t size,
-				char *nonce_explicit)
+				char *nonce_explicit,
+				unsigned char record_type)
 {
 	struct tls_sw_context *ctx = sw_ctx(sk);
 
 	memcpy(buf, nonce_explicit, TLS_NONCE_SIZE);
 
-	buf[8] = TLS_RECORD_TYPE_DATA;
+	buf[8] = record_type;
 	buf[9] = ctx->version[0];
 	buf[10] = ctx->version[1];
 	buf[11] = size >> 8;
@@ -237,12 +240,12 @@ static void tls_kernel_sendpage(struct sock *sk)
 }
 
 static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
-			     int pages, int bytes)
+			     int pages, int bytes, unsigned char record_type)
 {
 	int ret;
 	struct tls_sw_context *ctx = sw_ctx(sk);
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv_send);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv_send, record_type);
 
 	sg_chain(ctx->sgaad_send, 2, sgin);
 	//sg_unmark_end(&sgin[pages - 1]);
@@ -253,7 +256,7 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 	if (ret < 0)
 		goto out;
 
-	tls_make_prepend(sk, page_address(ctx->pages_send), bytes);
+	tls_make_prepend(sk, page_address(ctx->pages_send), bytes, record_type);
 
 	ctx->send_len = bytes;
 	ctx->send_offset = 0;
@@ -299,7 +302,8 @@ static int tls_push(struct sock *sk)
 		goto out;
 	}
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv_send);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv_send,
+		     TLS_RECORD_TYPE_DATA);
 
 	sg_chain(ctx->sgaad_send, 2, ctx->sg_tx_data2);
 	sg_chain(ctx->sg_tx_data2,
@@ -310,7 +314,8 @@ static int tls_push(struct sock *sk)
 	if (ret < 0)
 		goto out;
 
-	tls_make_prepend(sk, page_address(ctx->pages_send), bytes);
+	tls_make_prepend(sk, page_address(ctx->pages_send), bytes,
+			 TLS_RECORD_TYPE_DATA);
 
 	ctx->send_len = bytes;
 	ctx->send_offset = 0;
@@ -382,8 +387,22 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	bool eor = !(msg->msg_flags & MSG_MORE);
 	struct sk_buff *skb = NULL;
 	size_t copy, copied = 0;
+	unsigned char record_type = TLS_RECORD_TYPE_DATA;
 
 	lock_sock(sk);
+
+	if (msg->msg_flags & MSG_OOB) {
+		if (!eor || ctx->unsent) {
+			ret = -EINVAL;
+			goto send_end;
+		}
+
+		ret = copy_from_iter(&record_type, 1, &msg->msg_iter);
+		if (ret != 1) {
+			return -EFAULT;
+			goto send_end;
+		}
+	}
 
 	while (msg_data_left(msg)) {
 		bool merge = true;
@@ -420,7 +439,7 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 				goto send_end;
 
 			// Try to send msg
-			tls_push_zerocopy(sk, sgin, pages, bytes);
+			tls_push_zerocopy(sk, sgin, pages, bytes, record_type);
 			for (; pages > 0; pages--)
 				put_page(sg_page(&sgin[pages - 1]));
 			if (err < 0) {
