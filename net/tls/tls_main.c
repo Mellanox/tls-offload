@@ -46,6 +46,7 @@ MODULE_DESCRIPTION("Transport Layer Security Support");
 MODULE_LICENSE("Dual BSD/GPL");
 
 static struct proto tls_device_prot;
+static struct proto tls_sw_prot;
 
 int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 		 int __user *optlen)
@@ -138,6 +139,7 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 	struct tls_context *ctx = sk->sk_user_data;
 	struct tls_crypto_info *crypto_info;
 	bool allocated_tls_ctx = false;
+	struct proto *prot;
 
 	if (!optval || (optlen < sizeof(*crypto_info))) {
 		rc = -EINVAL;
@@ -181,12 +183,6 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 		goto err_sk_user_data;
 	}
 
-	/* currently we support only HW offload */
-	if (!TLS_IS_HW_OFFLOAD(crypto_info)) {
-		rc = -ENOPROTOOPT;
-		goto err_crypto_info;
-	}
-
 	/* check version */
 	if (crypto_info->version != TLS_1_2_VERSION) {
 		rc = -ENOTSUPP;
@@ -219,6 +215,12 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 
 	if (TLS_IS_STATE_HW(crypto_info)) {
 		rc = tls_set_device_offload(sk, ctx);
+		prot = &tls_device_prot;
+		if (rc)
+			goto err_crypto_info;
+	} else if (TLS_IS_SW_OFFLOAD(crypto_info)) {
+		rc = tls_set_sw_offload(sk, ctx);
+		prot = &tls_sw_prot;
 		if (rc)
 			goto err_crypto_info;
 	}
@@ -228,8 +230,9 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 		goto err_set_device_offload;
 	}
 
-	/* TODO: add protection */
-	sk->sk_prot = &tls_device_prot;
+	rc = 0;
+
+	sk->sk_prot = prot;
 	goto out;
 
 err_set_device_offload:
@@ -249,6 +252,9 @@ static int __init tls_init(void)
 	tls_device_prot			= tcp_prot;
 	tls_device_prot.sendmsg		= tls_device_sendmsg;
 	tls_device_prot.sendpage	= tls_device_sendpage;
+
+	tls_sw_prot			= tcp_prot;
+	tls_sw_prot.sendmsg		= tls_sw_sendmsg;
 
 	return 0;
 }

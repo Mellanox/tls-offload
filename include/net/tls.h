@@ -48,6 +48,7 @@
 
 #define TLS_CRYPTO_INFO_READY(info)	((info)->cipher_type)
 #define TLS_IS_STATE_HW(info)		((info)->state == TLS_STATE_HW)
+#define TLS_IS_SW_OFFLOAD(info)		((info)->state == TLS_STATE_SW)
 
 #define TLS_RECORD_TYPE_DATA		0x17
 
@@ -75,6 +76,74 @@ struct tls_offload_context {
 	char *iv;
 };
 
+#define TLS_DATA_PAGES			(TLS_MAX_PAYLOAD_SIZE / PAGE_SIZE)
+/* +1 for aad, +1 for tag, +1 for chaining */
+#define TLS_SG_DATA_SIZE		(TLS_DATA_PAGES + 3)
+#define ALG_MAX_PAGES 16 /* for skb_to_sgvec */
+#define TLS_AAD_SPACE_SIZE		21
+#define TLS_AAD_SIZE			13
+#define TLS_TAG_SIZE			16
+
+#define TLS_NONCE_SIZE			8
+#define TLS_HEADER_SIZE		5
+#define TLS_PREPEND_SIZE		(TLS_HEADER_SIZE + TLS_NONCE_SIZE)
+#define TLS_OVERHEAD		(TLS_PREPEND_SIZE + TLS_TAG_SIZE)
+
+struct tls_key {
+	char *key;
+	size_t keylen;
+	char salt[4];
+	size_t saltlen;
+};
+
+struct tls_sw_context {
+	struct sock *sk;
+	u16 prepend_size;
+	u16 tag_size;
+	u16 iv_size;
+	char *iv;
+
+	int control;
+	int attached;
+
+	int rx_stopped;
+	int tx_stopped;
+
+	/* int async_decrypt; */
+	int async_encrypt;
+
+	/* Context for {set,get}sockopt() */
+	unsigned char *iv_send;
+	struct tls_key key_send;
+
+	struct crypto_aead *aead_send;
+
+	/* Sending context */
+	struct scatterlist sg_tx_data[TLS_SG_DATA_SIZE];
+	struct scatterlist sg_tx_data2[ALG_MAX_PAGES + 1];
+	char aad_send[TLS_AAD_SPACE_SIZE];
+	char tag_send[TLS_TAG_SIZE];
+	struct page *pages_send;
+	int send_offset;
+	int send_len;
+	int order_npages;
+	struct scatterlist sgaad_send[2];
+	struct scatterlist sgtag_send[2];
+	struct work_struct send_work;
+	struct sk_buff_head tx_queue;
+
+	void (*saved_sk_write_space)(struct sock *sk);
+
+	/* our cipher type and its crypto API representation (e.g. "gcm(aes)")*/
+	unsigned int cipher_type;
+	char *cipher_crypto;
+
+	/* TLS version for header */
+	char version[2];
+
+	int unsent;
+};
+
 struct tls_context {
 	union {
 		struct tls_crypto_info crypto_send;
@@ -96,6 +165,10 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx);
 int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 int tls_device_sendpage(struct sock *sk, struct page *page,
 			int offset, size_t size, int flags);
+
+int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx);
+void tls_clear_sw_offload(struct sock *sk);
+int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 
 struct tls_record_info *tls_get_record(struct tls_offload_context *context,
 				       u32 seq);
