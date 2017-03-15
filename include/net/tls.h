@@ -85,16 +85,8 @@ struct tls_offload_context {
 #define TLS_TAG_SIZE			16
 
 #define TLS_NONCE_SIZE			8
-#define TLS_HEADER_SIZE		5
 #define TLS_PREPEND_SIZE		(TLS_HEADER_SIZE + TLS_NONCE_SIZE)
 #define TLS_OVERHEAD		(TLS_PREPEND_SIZE + TLS_TAG_SIZE)
-
-struct tls_key {
-	char *key;
-	size_t keylen;
-	char salt[4];
-	size_t saltlen;
-};
 
 struct tls_sw_context {
 	struct sock *sk;
@@ -102,19 +94,6 @@ struct tls_sw_context {
 	u16 tag_size;
 	u16 iv_size;
 	char *iv;
-
-	int control;
-	int attached;
-
-	int rx_stopped;
-	int tx_stopped;
-
-	/* int async_decrypt; */
-	int async_encrypt;
-
-	/* Context for {set,get}sockopt() */
-	unsigned char *iv_send;
-	struct tls_key key_send;
 
 	struct crypto_aead *aead_send;
 
@@ -126,19 +105,11 @@ struct tls_sw_context {
 	struct page *pages_send;
 	int send_offset;
 	int send_len;
+	int wmem_len;
 	int order_npages;
 	struct scatterlist sgaad_send[2];
 	struct scatterlist sgtag_send[2];
-	struct work_struct send_work;
 	struct sk_buff_head tx_queue;
-
-	/* our cipher type and its crypto API representation (e.g. "gcm(aes)")*/
-	unsigned int cipher_type;
-	char *cipher_crypto;
-
-	/* TLS version for header */
-	char version[2];
-
 	int unsent;
 };
 

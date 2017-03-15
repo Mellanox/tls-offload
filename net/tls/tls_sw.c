@@ -26,9 +26,6 @@
 
 #include <net/tls.h>
 
-/* Async worker */
-static struct workqueue_struct *tls_tx_wq;
-
 static struct tls_sw_context *sw_ctx(const struct sock *sk)
 {
 	struct tls_context *ctx = sk->sk_user_data;
@@ -105,13 +102,13 @@ static inline void tls_make_prepend(struct sock *sk,
 	 * size TLS_HEADER_SIZE + TLS_NONCE_EXPLICIT_SIZE
 	 */
 	buf[0] = record_type;
-	buf[1] = ctx->version[0];
-	buf[2] = ctx->version[1];
+	buf[1] = TLS_1_2_VERSION_MAJOR;
+	buf[2] = TLS_1_2_VERSION_MINOR;
 	/* we can use IV for nonce explicit according to spec */
-	buf[3] = pkt_len >> 8;
-	buf[4] = pkt_len & 0xFF;
+		buf[3] = pkt_len >> 8;
+		buf[4] = pkt_len & 0xFF;
 	memcpy(buf + TLS_NONCE_OFFSET,
-	       ctx->iv_send, TLS_CIPHER_AES_GCM_128_IV_SIZE);
+	       ctx->iv, TLS_CIPHER_AES_GCM_128_IV_SIZE);
 }
 
 static inline void tls_make_aad(struct sock *sk,
@@ -121,13 +118,11 @@ static inline void tls_make_aad(struct sock *sk,
 				char *nonce_explicit,
 				unsigned char record_type)
 {
-	struct tls_sw_context *ctx = sw_ctx(sk);
-
 	memcpy(buf, nonce_explicit, TLS_NONCE_SIZE);
 
 	buf[8] = record_type;
-	buf[9] = ctx->version[0];
-	buf[10] = ctx->version[1];
+	buf[9] = TLS_1_2_VERSION_MAJOR;
+	buf[10] = TLS_1_2_VERSION_MINOR;
 	buf[11] = size >> 8;
 	buf[12] = size & 0xFF;
 }
@@ -151,7 +146,7 @@ static int tls_do_encryption(struct sock *sk, struct scatterlist *sgin,
 
 	aead_request_set_tfm(aead_req, ctx->aead_send);
 	aead_request_set_ad(aead_req, TLS_AAD_SPACE_SIZE);
-	aead_request_set_crypt(aead_req, sgin, sgout, data_len, ctx->iv_send);
+	aead_request_set_crypt(aead_req, sgin, sgout, data_len, ctx->iv);
 
 	ret = crypto_aead_encrypt(aead_req);
 
@@ -228,14 +223,12 @@ static int tls_kernel_sendpage(struct sock *sk, int flags)
 			/* Successfully sent the whole packet, account for it.*/
 			head = skb_peek(&ctx->tx_queue);
 			skb_dequeue(&ctx->tx_queue);
-			/* TODO: for non-zerocopy case, need to
-			 * adjust wmem / forward_alloc
-			 * sk->sk_forward_alloc += ctx->send_len;
-			 * sk->sk_wmem_queued -= ctx->send_len;
-			 */
+			sk->sk_wmem_queued -= ctx->wmem_len;
+			sk_mem_uncharge(sk, ctx->wmem_len);
+			ctx->wmem_len = 0;
 			kfree_skb(head);
 			ctx->unsent -= ctx->send_len;
-			increment_seqno(ctx->iv_send, sk);
+			increment_seqno(ctx->iv, sk);
 			__free_pages(pages_send, ctx->order_npages);
 			return ret;
 		}
@@ -253,7 +246,7 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 	int ret;
 	struct tls_sw_context *ctx = sw_ctx(sk);
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv_send, record_type);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv, record_type);
 
 	sg_chain(ctx->sgaad_send, 2, sgin);
 	//sg_unmark_end(&sgin[pages - 1]);
@@ -286,7 +279,7 @@ out:
 	return 0;
 }
 
-static int tls_push(struct sock *sk)
+static int tls_push(struct sock *sk, unsigned char record_type)
 {
 	struct tls_sw_context *ctx = sw_ctx(sk);
 	int bytes = min_t(int, ctx->unsent, (int)TLS_MAX_PAYLOAD_SIZE);
@@ -310,8 +303,8 @@ static int tls_push(struct sock *sk)
 		goto out;
 	}
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv_send,
-		     TLS_RECORD_TYPE_DATA);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->iv,
+		     record_type);
 
 	sg_chain(ctx->sgaad_send, 2, ctx->sg_tx_data2);
 	sg_chain(ctx->sg_tx_data2,
@@ -503,15 +496,7 @@ reg_send:
 					       pfrag->page,
 					       pfrag->offset,
 					       copy);
-		/* if (copy_from_iter_nocache(
-		 *		page_address(pfrag->page) + pfrag->offset,
-		 *		copy, &msg->msg_iter) != copy) {
-		 *	ret = -EFAULT;
-		 *	break;
-		 * }
-		 */
-		//ret = 0;
-
+		ctx->wmem_len += copy;
 		if (ret)
 			goto send_end;
 
@@ -529,7 +514,7 @@ reg_send:
 		ctx->unsent += copy;
 
 		if (ctx->unsent >= TLS_MAX_PAYLOAD_SIZE) {
-			ret = tls_push(sk);
+			ret = tls_push(sk, record_type);
 			if (ret)
 				goto send_end;
 		}
@@ -537,7 +522,7 @@ reg_send:
 		continue;
 
 wait_for_memory:
-		ret = tls_push(sk);
+		ret = tls_push(sk, record_type);
 		if (ret)
 			goto send_end;
 //push_wait:
@@ -548,7 +533,7 @@ wait_for_memory:
 	}
 
 	if (eor)
-		ret = tls_push(sk);
+		ret = tls_push(sk, record_type);
 
 send_end:
 	ret = sk_stream_error(sk, msg->msg_flags, ret);
@@ -565,18 +550,7 @@ void tls_sw_sk_destruct(struct sock *sk)
 {
 	struct tls_sw_context *ctx = sw_ctx(sk);
 
-	ctx->tx_stopped = 1;
-
-	if (1 /* use_count == 0 */) {
-		//destroy_workqueue(tls_tx_wq);
-		tls_tx_wq = NULL;
-	}
-
-	ctx->rx_stopped = 1;
-
-	kfree(ctx->iv_send);
-
-	kfree(ctx->key_send.key);
+	kfree(ctx->iv);
 
 	crypto_free_aead(ctx->aead_send);
 
@@ -597,14 +571,6 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 	u16 nonece_size, tag_size, iv_size;
 	char *iv;
 	int rc = 0;
-
-	if (!tls_tx_wq) { // TODO lock, refcount
-		tls_tx_wq = create_workqueue("tls");
-		if (!tls_tx_wq) {
-			rc = -ENOMEM;
-			goto out;
-		}
-	}
 
 	if (!ctx) {
 		rc = -EINVAL;
@@ -650,16 +616,9 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 	}
 	memcpy(offload_ctx->iv, iv, iv_size);
 
-	offload_ctx->iv_send = offload_ctx->iv;
-	memset(&offload_ctx->key_send, 0, sizeof(offload_ctx->key_send));
-
-	offload_ctx->cipher_crypto = NULL;
-	memset(offload_ctx->version, 0, sizeof(offload_ctx->version));
-
 	offload_ctx->pages_send = NULL;
 	offload_ctx->unsent = 0;
-
-	offload_ctx->attached = 0;
+	offload_ctx->wmem_len = 0;
 
 	/* Preallocation for sending
 	 *   scatterlist: AAD | data | TAG (for crypto API)
@@ -684,14 +643,9 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 
 	sg_unmark_end(&offload_ctx->sgaad_send[1]);
 
-	offload_ctx->cipher_type = TLS_CIPHER_AES_GCM_128;
-	offload_ctx->cipher_crypto = "rfc5288(gcm(aes))";
-	offload_ctx->version[0] = TLS_1_2_VERSION_MAJOR;
-	offload_ctx->version[1] = TLS_1_2_VERSION_MINOR;
-
 	if (!offload_ctx->aead_send) {
 		offload_ctx->aead_send =
-				crypto_alloc_aead(offload_ctx->cipher_crypto,
+				crypto_alloc_aead("rfc5288(gcm(aes))",
 						  CRYPTO_ALG_INTERNAL, 0);
 		if (IS_ERR(offload_ctx->aead_send)) {
 			rc = PTR_ERR(offload_ctx->aead_send);
@@ -704,8 +658,6 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 	sk->sk_write_space = tls_write_space;
 	sk->sk_destruct = tls_sw_sk_destruct;
 
-	offload_ctx->tx_stopped = 0;
-	offload_ctx->attached = 1;
 	skb_queue_head_init(&offload_ctx->tx_queue);
 	offload_ctx->sk = sk;
 
