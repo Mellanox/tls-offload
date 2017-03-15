@@ -338,7 +338,7 @@ static struct pet *insert_pet(struct sk_buff *skb)
 
 	memmove(skb->data, skb->data + sizeof(struct pet), 2 * ETH_ALEN);
 
-	eth->h_proto = cpu_to_be16(MLX_IPSEC_PET_ETHERTYPE);
+	eth->h_proto = cpu_to_be16(MLX5_METADATA_ETHER_TYPE);
 
 	memset(pet->content.raw, 0, sizeof(pet->content.raw));
 
