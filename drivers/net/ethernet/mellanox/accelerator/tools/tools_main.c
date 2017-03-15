@@ -91,18 +91,28 @@ static void mlx_accel_tools_destroy(struct mlx_accel_core_device *accel_device)
 
 static int __init mlx_accel_tools_init(void)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	pr_err("mlx_accel_tools_init dummy because simulator mode\n");
+	return 0;
+#else
 	int ret = mlx_accel_tools_char_init();
 
 	if (ret)
 		return ret;
 	mlx_accel_core_client_register(&mlx_accel_tools_client);
 	return 0;
+#endif
 }
 
 static void __exit mlx_accel_tools_exit(void)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	pr_err("mlx_accel_tools_exit dummy because simulator mode\n");
+	return;
+#else
 	mlx_accel_core_client_unregister(&mlx_accel_tools_client);
 	mlx_accel_tools_char_deinit();
+#endif
 }
 
 module_init(mlx_accel_tools_init);

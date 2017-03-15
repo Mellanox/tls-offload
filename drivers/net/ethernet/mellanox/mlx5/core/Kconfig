@@ -32,3 +32,10 @@ config MLX5_CORE_EN_DCB
 	  This flag is depended on the kernel's DCB support.
 
 	  If unsure, set to Y
+
+config MLX5_CORE_FPGA_QP_SIM
+	bool "Use QP based simulator instead of the actual FPGA"
+	depends on MLX5_CORE_EN
+	default n
+	---help---
+	  Use QP based simulator instead of the actual FPGA.

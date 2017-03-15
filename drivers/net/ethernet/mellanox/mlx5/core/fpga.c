@@ -37,6 +37,9 @@
 int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 			 u8 *buf, bool write)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	u32 in[MLX5_ST_SZ_DW(fpga_access_reg) + MLX5_FPGA_ACCESS_REG_SIZE_MAX];
 	u32 out[MLX5_ST_SZ_DW(fpga_access_reg) + MLX5_FPGA_ACCESS_REG_SIZE_MAX];
 	int err;
@@ -64,11 +67,15 @@ int mlx5_fpga_access_reg(struct mlx5_core_dev *dev, u8 size, u64 addr,
 		memcpy(buf, MLX5_ADDR_OF(fpga_access_reg, out, data), size);
 
 	return 0;
+#endif
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_access_reg);
 
 int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	int err;
 	u32 in[MLX5_ST_SZ_DW(fpga_cap)];
 	u32 out[MLX5_ST_SZ_DW(fpga_cap)];
@@ -85,11 +92,15 @@ int mlx5_fpga_caps(struct mlx5_core_dev *dev, u32 *caps)
 			     sizeof(out));
 #endif
 	return 0;
+#endif
 }
 EXPORT_SYMBOL_GPL(mlx5_fpga_caps);
 
 int mlx5_fpga_sbu_caps(struct mlx5_core_dev *dev, void *caps, int size)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	u64 addr = MLX5_CAP64_FPGA(dev, sandbox_extended_caps_addr);
 	int cap_size = MLX5_CAP_FPGA(dev, sandbox_extended_caps_len);
 	int ret = 0;
@@ -118,12 +129,16 @@ int mlx5_fpga_sbu_caps(struct mlx5_core_dev *dev, void *caps, int size)
 	}
 
 	return ret;
+#endif
 }
 EXPORT_SYMBOL(mlx5_fpga_sbu_caps);
 
 static int mlx5_fpga_ctrl_write(struct mlx5_core_dev *dev, u8 op,
 				enum mlx_accel_fpga_image image)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	u32 in[MLX5_ST_SZ_DW(fpga_ctrl)];
 	u32 out[MLX5_ST_SZ_DW(fpga_ctrl)];
 
@@ -133,6 +148,7 @@ static int mlx5_fpga_ctrl_write(struct mlx5_core_dev *dev, u8 op,
 
 	return mlx5_core_access_reg(dev, in, sizeof(in), out, sizeof(out),
 				    MLX5_REG_FPGA_CTRL, 0, true);
+#endif
 }
 
 int mlx5_fpga_load(struct mlx5_core_dev *dev, enum mlx_accel_fpga_image image)
@@ -159,6 +175,9 @@ int mlx5_fpga_query(struct mlx5_core_dev *dev,
 		    enum mlx_accel_fpga_image *admin_image,
 		    enum mlx_accel_fpga_image *oper_image)
 {
+#if IS_ENABLED(CONFIG_MLX5_CORE_FPGA_QP_SIM)
+	return -EPERM;
+#else
 	u32 in[MLX5_ST_SZ_DW(fpga_ctrl)];
 	u32 out[MLX5_ST_SZ_DW(fpga_ctrl)];
 	int err;
@@ -178,5 +197,6 @@ int mlx5_fpga_query(struct mlx5_core_dev *dev,
 
 out:
 	return err;
+#endif
 }
 EXPORT_SYMBOL(mlx5_fpga_query);
