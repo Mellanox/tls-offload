@@ -66,28 +66,27 @@ static void tls_err_abort(struct sock *sk)
 	sk->sk_error_report(sk);
 }
 
+static int tls_kernel_sendpage(struct sock *sk, int flags);
+
 /* Called with lower socket held */
 static void tls_write_space(struct sock *sk)
 {
 	struct tls_sw_context *ctx = sw_ctx(sk);
+	struct tls_context *tls_ctx = sk->sk_user_data;
 
-	queue_work(tls_tx_wq, &ctx->send_work);
-}
+	if (ctx->pages_send) {
+		gfp_t sk_allocation = sk->sk_allocation;
+		int rc;
 
-static void tls_kernel_sendpage(struct sock *sk);
+		sk->sk_allocation = GFP_ATOMIC;
+		rc = tls_kernel_sendpage(sk, MSG_DONTWAIT | MSG_NOSIGNAL);
+		sk->sk_allocation = sk_allocation;
 
-static void tls_tx_work(struct work_struct *w)
-{
-	struct tls_sw_context *ctx =
-			container_of(w, struct tls_sw_context, send_work);
-	struct sock *sk = ctx->sk;
+		if (rc < 0)
+			return;
+	}
 
-	pr_debug("tls_tx_work %p ctx %p\n", sk, ctx);
-	lock_sock(sk);
-
-	if (!ctx->tx_stopped)
-		tls_kernel_sendpage(sk);
-	release_sock(sk);
+	tls_ctx->sk_write_space(sk);
 }
 
 static inline void tls_make_prepend(struct sock *sk,
@@ -159,7 +158,7 @@ static int tls_do_encryption(struct sock *sk, struct scatterlist *sgin,
 	kfree(aead_req);
 	if (ret < 0)
 		return ret;
-	tls_kernel_sendpage(sk);
+	tls_kernel_sendpage(sk, MSG_DONTWAIT);
 
 	return ret;
 }
@@ -207,15 +206,22 @@ static int tls_pre_encrypt(struct sock *sk, size_t data_len)
 	return ret;
 }
 
-static void tls_kernel_sendpage(struct sock *sk)
+static int tls_kernel_sendpage(struct sock *sk, int flags)
 {
 	int ret;
 	struct sk_buff *head;
 	struct tls_sw_context *ctx = sw_ctx(sk);
+	struct page *pages_send = ctx->pages_send;
 
-	ret = do_tcp_sendpages(sk, ctx->pages_send, ctx->send_offset,
+	/* Need to clear pages_send before calling
+	 * do_tcp_sendpages. Otherwise, if do_tcp_sendpages
+	 * blocks on write space tls_write_space will try to
+	 * push the same record again.
+	 */
+	ctx->pages_send = NULL;
+	ret = do_tcp_sendpages(sk, pages_send, ctx->send_offset,
 			       ctx->send_len + TLS_OVERHEAD - ctx->send_offset,
-			       MSG_DONTWAIT);
+			       flags);
 	if (ret > 0) {
 		ctx->send_offset += ret;
 		if (ctx->send_offset >= ctx->send_len + TLS_OVERHEAD) {
@@ -230,13 +236,15 @@ static void tls_kernel_sendpage(struct sock *sk)
 			kfree_skb(head);
 			ctx->unsent -= ctx->send_len;
 			increment_seqno(ctx->iv_send, sk);
-			__free_pages(ctx->pages_send, ctx->order_npages);
-			ctx->pages_send = NULL;
-			sk->sk_write_space(sk);
+			__free_pages(pages_send, ctx->order_npages);
+			return ret;
 		}
 	} else if (ret != -EAGAIN) {
 		tls_err_abort(sk);
 	}
+
+	ctx->pages_send = pages_send;
+	return ret;
 }
 
 static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
@@ -559,9 +567,6 @@ void tls_sw_sk_destruct(struct sock *sk)
 
 	ctx->tx_stopped = 1;
 
-	/* restore callback and abandon socket */
-	cancel_work_sync(&ctx->send_work);
-
 	if (1 /* use_count == 0 */) {
 		//destroy_workqueue(tls_tx_wq);
 		tls_tx_wq = NULL;
@@ -679,7 +684,6 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		   offload_ctx->tag_send, sizeof(offload_ctx->tag_send));
 
 	sg_unmark_end(&offload_ctx->sgaad_send[1]);
-	INIT_WORK(&offload_ctx->send_work, tls_tx_work);
 
 	offload_ctx->cipher_type = TLS_CIPHER_AES_GCM_128;
 	offload_ctx->cipher_crypto = "rfc5288(gcm(aes))";
