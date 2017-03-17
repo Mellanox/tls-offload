@@ -89,11 +89,9 @@ struct tls_offload_context {
 #define TLS_OVERHEAD		(TLS_PREPEND_SIZE + TLS_TAG_SIZE)
 
 struct tls_sw_context {
+	struct tls_offload_context ctx;
+
 	struct sock *sk;
-	u16 prepend_size;
-	u16 tag_size;
-	u16 iv_size;
-	char *iv;
 
 	struct crypto_aead *aead_send;
 
@@ -151,6 +149,48 @@ static inline bool tls_is_sk_tx_device_offloaded(struct sock *sk)
 {
 	return	smp_load_acquire(&sk->sk_destruct) ==
 			&tls_device_sk_destruct;
+}
+
+static inline void tls_err_abort(struct sock *sk)
+{
+	xchg(&sk->sk_err, -EBADMSG);
+	sk->sk_error_report(sk);
+}
+
+static inline void tls_increment_seqno(unsigned char *seq, struct sock *sk)
+{
+	int i;
+
+	for (i = 7; i >= 0; i--) {
+		++seq[i];
+		if (seq[i] != 0)
+			break;
+	}
+
+	if (i == -1)
+		tls_err_abort(sk);
+}
+
+static inline void tls_fill_prepend(struct tls_crypto_info *crypto_info,
+			     struct tls_offload_context *offload_ctx,
+			     char *buf,
+			     size_t plaintext_len,
+			     unsigned char record_type)
+{
+	size_t pkt_len, iv_size = offload_ctx->iv_size;
+
+	pkt_len = plaintext_len + iv_size + offload_ctx->tag_size;
+
+	/* we cover nonce explicit here as well, so buf should be of
+	 * size KTLS_DTLS_HEADER_SIZE + KTLS_DTLS_NONCE_EXPLICIT_SIZE
+	 */
+	buf[0] = record_type;
+	buf[1] = TLS_VERSION_MINOR(crypto_info->version);
+	buf[2] = TLS_VERSION_MAJOR(crypto_info->version);
+	/* we can use IV for nonce explicit according to spec */
+	buf[3] = pkt_len >> 8;
+	buf[4] = pkt_len & 0xFF;
+	memcpy(buf + TLS_NONCE_OFFSET, offload_ctx->iv, iv_size);
 }
 
 #endif /* _TLS_OFFLOAD_H */
