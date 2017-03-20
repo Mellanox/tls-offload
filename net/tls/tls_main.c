@@ -255,6 +255,7 @@ static int __init tls_init(void)
 
 	tls_sw_prot			= tcp_prot;
 	tls_sw_prot.sendmsg		= tls_sw_sendmsg;
+	tls_sw_prot.sendpage            = tls_sw_sendpage;
 
 	return 0;
 }

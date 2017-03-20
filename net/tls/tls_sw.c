@@ -627,3 +627,126 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 out:
 	return rc;
 }
+
+int tls_sw_sendpage(struct sock *sk, struct page *page,
+		    int offset, size_t size, int flags)
+{
+	struct tls_sw_context *ctx = sw_ctx(sk);
+	int ret = 0, i;
+	long timeo = sock_sndtimeo(sk, flags & MSG_DONTWAIT);
+	bool eor;
+	struct sk_buff *skb = NULL;
+	size_t queued = 0;
+	unsigned char record_type = TLS_RECORD_TYPE_DATA;
+
+	if (flags & MSG_SENDPAGE_NOTLAST)
+		flags |= MSG_MORE;
+
+	/* No MSG_EOR from splice, only look at MSG_MORE */
+	eor = !(flags & MSG_MORE);
+
+	lock_sock(sk);
+
+	if (flags & MSG_OOB) {
+		ret = -ENOTSUPP;
+		goto sendpage_end;
+	}
+	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
+
+	/* Call the sk_stream functions to manage the sndbuf mem. */
+	while (size > 0) {
+		size_t send_size = min(size, TLS_MAX_PAYLOAD_SIZE);
+
+		if (!sk_stream_memory_free(sk) ||
+		    (ctx->unsent + send_size > TLS_MAX_PAYLOAD_SIZE)) {
+			ret = tls_push(sk, record_type);
+			if (ret)
+				goto sendpage_end;
+			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+			ret = sk_stream_wait_memory(sk, &timeo);
+			if (ret)
+				goto sendpage_end;
+		}
+
+		if (sk->sk_err)
+			goto sendpage_end;
+
+		skb = skb_peek_tail(&ctx->tx_queue);
+		if (skb) {
+			i = skb_shinfo(skb)->nr_frags;
+
+			if (skb_can_coalesce(skb, i, page, offset)) {
+				skb_frag_size_add(
+					&skb_shinfo(skb)->frags[i - 1],
+					send_size);
+				skb_shinfo(skb)->tx_flags |= SKBTX_SHARED_FRAG;
+				goto coalesced;
+			}
+
+			if (i >= ALG_MAX_PAGES) {
+				struct sk_buff *tskb;
+
+				tskb = alloc_skb(0, sk->sk_allocation);
+				while (!tskb) {
+					ret = tls_push(sk, record_type);
+					if (ret)
+						goto sendpage_end;
+					set_bit(SOCK_NOSPACE,
+						&sk->sk_socket->flags);
+					ret = sk_stream_wait_memory(sk, &timeo);
+					if (ret)
+						goto sendpage_end;
+
+					tskb = alloc_skb(0, sk->sk_allocation);
+				}
+
+				if (skb)
+					skb->next = tskb;
+				else
+					__skb_queue_tail(&ctx->tx_queue,
+							 tskb);
+				skb = tskb;
+				i = 0;
+			}
+		} else {
+			skb = alloc_skb(0, sk->sk_allocation);
+			__skb_queue_tail(&ctx->tx_queue, skb);
+			i = 0;
+		}
+
+		get_page(page);
+		skb_fill_page_desc(skb, i, page, offset, send_size);
+		skb_shinfo(skb)->tx_flags |= SKBTX_SHARED_FRAG;
+
+coalesced:
+		skb->len += send_size;
+		skb->data_len += send_size;
+		skb->truesize += send_size;
+		sk->sk_wmem_queued += send_size;
+		ctx->wmem_len += send_size;
+		sk_mem_charge(sk, send_size);
+		ctx->unsent += send_size;
+		queued += send_size;
+		offset += queued;
+		size -= send_size;
+
+		if (eor || ctx->unsent >= TLS_MAX_PAYLOAD_SIZE) {
+			ret = tls_push(sk, record_type);
+			if (ret)
+				goto sendpage_end;
+		}
+	}
+
+	if (eor || ctx->unsent >= TLS_MAX_PAYLOAD_SIZE)
+		ret = tls_push(sk, record_type);
+
+sendpage_end:
+	ret = sk_stream_error(sk, flags, ret);
+
+	if (ret < 0)
+		ret = sk_stream_error(sk, flags, ret);
+
+	release_sock(sk);
+
+	return ret < 0 ? ret : queued;
+}

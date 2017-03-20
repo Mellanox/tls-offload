@@ -136,6 +136,8 @@ int tls_device_sendpage(struct sock *sk, struct page *page,
 int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx);
 void tls_clear_sw_offload(struct sock *sk);
 int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
+int tls_sw_sendpage(struct sock *sk, struct page *page,
+		    int offset, size_t size, int flags);
 
 struct tls_record_info *tls_get_record(struct tls_offload_context *context,
 				       u32 seq);
