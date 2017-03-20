@@ -132,8 +132,6 @@ struct tls_sw_context {
 	struct work_struct send_work;
 	struct sk_buff_head tx_queue;
 
-	void (*saved_sk_write_space)(struct sock *sk);
-
 	/* our cipher type and its crypto API representation (e.g. "gcm(aes)")*/
 	unsigned int cipher_type;
 	char *cipher_crypto;

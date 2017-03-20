@@ -573,7 +573,6 @@ void tls_sw_sk_destruct(struct sock *sk)
 	}
 
 	ctx->rx_stopped = 1;
-	sk->sk_write_space = ctx->saved_sk_write_space;
 
 	kfree(ctx->iv_send);
 
