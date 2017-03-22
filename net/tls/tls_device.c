@@ -131,11 +131,6 @@ static void delete_all_records(struct tls_offload_context *offload_ctx)
 	}
 }
 
-static inline bool pending_open_record(struct tls_offload_context *offload_ctx)
-{
-	return !!offload_ctx->num_pending_frags;
-}
-
 void tls_clear_device_offload(struct sock *sk, struct tls_context *tls_ctx)
 {
 	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
@@ -191,97 +186,6 @@ void tls_device_sk_destruct(struct sock *sk)
 	tls_sk_destruct(sk, ctx);
 }
 EXPORT_SYMBOL(tls_device_sk_destruct);
-
-static inline int tls_push_frags(struct sock *sk,
-				 struct tls_offload_context *offload_ctx,
-				 skb_frag_t *frag,
-				 u16 num_frags,
-				 u16 first_offset,
-				 int flags)
-{
-	int sendpage_flags = flags | MSG_SENDPAGE_NOTLAST;
-	int ret = 0;
-	size_t size;
-	int offset = first_offset;
-
-	size = skb_frag_size(frag) - offset;
-	offset += frag->page_offset;
-
-	while (1) {
-		if (--num_frags)
-			sendpage_flags = flags;
-
-		 /* is sending application-limited? */
-		tcp_rate_check_app_limited(sk);
-retry:
-		ret = do_tcp_sendpages(sk,
-				       skb_frag_page(frag),
-				       offset,
-				       size,
-				       sendpage_flags);
-
-		if (ret != size) {
-			if (ret > 0) {
-				offset += ret;
-				size -= ret;
-				goto retry;
-			}
-
-			offset -= frag->page_offset;
-			offload_ctx->pending_offset = offset;
-			offload_ctx->pending_frags = frag;
-			offload_ctx->num_pending_frags = num_frags + 1;
-			return ret;
-		}
-
-		if (!num_frags)
-			break;
-
-		frag++;
-		offset = frag->page_offset;
-		size = skb_frag_size(frag);
-	}
-
-	return 0;
-}
-
-static int push_paritial_record(struct sock *sk,
-				struct tls_offload_context *offload_ctx,
-				int flags) {
-	skb_frag_t *frag = offload_ctx->pending_frags;
-	u16 offset = offload_ctx->pending_offset;
-	u16 num_frags = offload_ctx->pending_offset;
-
-	/* Need to clear num_pending_frags before calling
-	 * do_tcp_sendpages. Otherwise, if do_tcp_sendpages
-	 * blocks on write space tls_write_space will try to
-	 * push the same record again.
-	 */
-	offload_ctx->num_pending_frags = 0;
-
-	return tls_push_frags(sk, offload_ctx, frag,
-			      num_frags, offset, flags);
-}
-
-static void tls_write_space(struct sock *sk)
-{
-	struct tls_context *tls_ctx = tls_get_ctx(sk);
-	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
-
-	if (pending_open_record(ctx)) {
-		gfp_t sk_allocation = sk->sk_allocation;
-		int rc;
-
-		sk->sk_allocation = GFP_ATOMIC;
-		rc = push_paritial_record(sk, ctx, MSG_DONTWAIT | MSG_NOSIGNAL);
-		sk->sk_allocation = sk_allocation;
-
-		if (rc < 0)
-			return;
-	}
-
-	tls_ctx->sk_write_space(sk);
-}
 
 static inline void tls_append_frag(struct tls_record_info *record,
 				   struct page_frag *pfrag,
@@ -350,7 +254,7 @@ static inline int tls_push_record(struct sock *sk,
 	tls_increment_seqno(ctx->iv, sk);
 
 	/* all ready, send */
-	return tls_push_frags(sk, offload_ctx, record->frags,
+	return tls_push_frags(sk, ctx, record->frags,
 			      record->num_frags, 0, flags);
 
 }
@@ -441,8 +345,8 @@ static int tls_push_data(struct sock *sk,
 	max_open_record_len = TLS_MAX_PAYLOAD_SIZE
 			+ TLS_HEADER_SIZE - tls_ctx->tag_size;
 
-	if (pending_open_record(ctx)) {
-		rc = push_paritial_record(sk, ctx, flags);
+	if (tls_is_pending_open_record(tls_ctx)) {
+		rc = tls_push_paritial_record(sk, tls_ctx, flags);
 		if (rc < 0)
 			return rc;
 	}
@@ -675,7 +579,6 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	spin_lock_init(&offload_ctx->lock);
 
 	inet_csk(sk)->icsk_clean_acked = &tls_icsk_clean_acked;
-	sk->sk_write_space = tls_write_space;
 
 	/* After this line the tx_handler might access the offload context */
 	smp_store_release(&sk->sk_destruct,

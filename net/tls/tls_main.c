@@ -48,6 +48,96 @@ MODULE_LICENSE("Dual BSD/GPL");
 static struct proto tls_device_prot;
 static struct proto tls_sw_prot;
 
+int tls_push_frags(struct sock *sk,
+		   struct tls_context *ctx,
+		   skb_frag_t *frag,
+		   u16 num_frags,
+		   u16 first_offset,
+		   int flags)
+{
+	int sendpage_flags = flags | MSG_SENDPAGE_NOTLAST;
+	int ret = 0;
+	size_t size;
+	int offset = first_offset;
+
+	size = skb_frag_size(frag) - offset;
+	offset += frag->page_offset;
+
+	while (1) {
+		if (--num_frags)
+			sendpage_flags = flags;
+
+		 /* is sending application-limited? */
+		tcp_rate_check_app_limited(sk);
+retry:
+		ret = do_tcp_sendpages(sk,
+				       skb_frag_page(frag),
+				       offset,
+				       size,
+				       sendpage_flags);
+
+		if (ret != size) {
+			if (ret > 0) {
+				offset += ret;
+				size -= ret;
+				goto retry;
+			}
+
+			offset -= frag->page_offset;
+			ctx->pending_offset = offset;
+			ctx->pending_frags = frag;
+			ctx->num_pending_frags = num_frags + 1;
+			return ret;
+		}
+
+		if (!num_frags)
+			break;
+
+		frag++;
+		offset = frag->page_offset;
+		size = skb_frag_size(frag);
+	}
+
+	return 0;
+}
+
+int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
+			     int flags) {
+	skb_frag_t *frag = ctx->pending_frags;
+	u16 offset = ctx->pending_offset;
+	u16 num_frags = ctx->pending_offset;
+
+	/* Need to clear num_pending_frags before calling
+	 * do_tcp_sendpages. Otherwise, if do_tcp_sendpages
+	 * blocks on write space tls_write_space will try to
+	 * push the same record again.
+	 */
+	ctx->num_pending_frags = 0;
+
+	return tls_push_frags(sk, ctx, frag,
+			      num_frags, offset, flags);
+}
+
+static void tls_write_space(struct sock *sk)
+{
+	struct tls_context *ctx = tls_get_ctx(sk);
+
+	if (tls_is_pending_open_record(ctx)) {
+		gfp_t sk_allocation = sk->sk_allocation;
+		int rc;
+
+		sk->sk_allocation = GFP_ATOMIC;
+		rc = tls_push_paritial_record(sk, ctx,
+					      MSG_DONTWAIT | MSG_NOSIGNAL);
+		sk->sk_allocation = sk_allocation;
+
+		if (rc < 0)
+			return;
+	}
+
+	ctx->sk_write_space(sk);
+}
+
 int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 		 int __user *optlen)
 {
@@ -210,6 +300,7 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 
 	ctx->sk_write_space = sk->sk_write_space;
 	ctx->sk_destruct = sk->sk_destruct;
+	sk->sk_write_space = tls_write_space;
 
 	if (TLS_IS_STATE_HW(crypto_info)) {
 		rc = tls_set_device_offload(sk, ctx);

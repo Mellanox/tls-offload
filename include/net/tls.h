@@ -67,10 +67,6 @@ struct tls_offload_context {
 	struct tls_record_info *retransmit_hint;
 	u32 expectedSN;
 	spinlock_t lock;	/* protects records list */
-
-	skb_frag_t *pending_frags;
-	u16 num_pending_frags;
-	u16 pending_offset;
 };
 
 #define TLS_DATA_PAGES			(TLS_MAX_PAYLOAD_SIZE / PAGE_SIZE)
@@ -119,6 +115,11 @@ struct tls_context {
 	u16 iv_size;
 	char *iv;
 
+	/* TODO: change sw code to use below fields and push_frags function */
+	skb_frag_t *pending_frags;
+	u16 num_pending_frags;
+	u16 pending_offset;
+
 	void (*sk_write_space)(struct sock *sk);
 	void (*sk_destruct)(struct sock *sk);
 };
@@ -148,6 +149,18 @@ void tls_sk_destruct(struct sock *sk, struct tls_context *ctx);
 void tls_icsk_clean_acked(struct sock *sk);
 
 void tls_device_sk_destruct(struct sock *sk);
+
+
+int tls_push_frags(struct sock *sk, struct tls_context *ctx,
+		   skb_frag_t *frag, u16 num_frags, u16 first_offset,
+		   int flags);
+int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
+			     int flags);
+
+static inline bool tls_is_pending_open_record(struct tls_context *ctx)
+{
+	return !!ctx->num_pending_frags;
+}
 
 static inline bool tls_is_sk_tx_device_offloaded(struct sock *sk)
 {
