@@ -150,12 +150,11 @@ void tls_clear_device_offload(struct sock *sk, struct tls_context *ctx)
 
 	delete_all_records(offload_ctx);
 	detach_sock_from_netdev(sk, ctx);
-	kfree(offload_ctx->iv);
 }
 
 void tls_icsk_clean_acked(struct sock *sk)
 {
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *ctx = tls_get_ctx(sk);
 	struct tls_offload_context *offload_ctx;
 	struct tcp_sock *tp = tcp_sk(sk);
 	struct tls_record_info *info, *temp;
@@ -188,7 +187,7 @@ EXPORT_SYMBOL(tls_icsk_clean_acked);
 
 void tls_device_sk_destruct(struct sock *sk)
 {
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *ctx = tls_get_ctx(sk);
 
 	tls_clear_device_offload(sk, ctx);
 	tls_sk_destruct(sk, ctx);
@@ -272,7 +271,7 @@ static int push_paritial_record(struct sock *sk,
 
 static void tls_write_space(struct sock *sk)
 {
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *ctx = tls_get_ctx(sk);
 	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
 
 	if (pending_open_record(offload_ctx)) {
@@ -315,7 +314,7 @@ static inline void tls_append_frag(struct tls_record_info *record,
 }
 
 static inline int tls_push_record(struct sock *sk,
-				  struct tls_crypto_info *crypto_info,
+				  struct tls_context *ctx,
 				  struct tls_offload_context *offload_ctx,
 				  struct tls_record_info *record,
 				  struct page_frag *pfrag,
@@ -329,14 +328,13 @@ static inline int tls_push_record(struct sock *sk,
 
 	/* fill prepand */
 	frag = &record->frags[0];
-	tls_fill_prepend(crypto_info,
-			 offload_ctx,
+	tls_fill_prepend(ctx,
 			 skb_frag_address(frag),
-			 record->len - offload_ctx->prepand_size,
+			 record->len - ctx->prepand_size,
 			 record_type);
 
 	if (unlikely(!skb_page_frag_refill(
-				offload_ctx->tag_size,
+				ctx->tag_size,
 				pfrag, GFP_KERNEL))) {
 		/* HW doesn't care about the data in the tag
 		 * so in case pfrag has no room
@@ -349,13 +347,13 @@ static inline int tls_push_record(struct sock *sk,
 		tag_pfrag->offset = 0;
 	}
 
-	tls_append_frag(record, tag_pfrag, offload_ctx->tag_size);
+	tls_append_frag(record, tag_pfrag, ctx->tag_size);
 	record->end_seq = tp->write_seq + record->len;
 	spin_lock_irq(&offload_ctx->lock);
 	list_add_tail(&record->list, &offload_ctx->records_list);
 	spin_unlock_irq(&offload_ctx->lock);
 
-	tls_increment_seqno(offload_ctx->iv, sk);
+	tls_increment_seqno(ctx->iv, sk);
 
 	/* all ready, send */
 	return tls_send_record(sk, offload_ctx, record, 0, 0, flags);
@@ -420,9 +418,8 @@ static int tls_push_data(struct sock *sk,
 			 size_t size, int flags,
 			 unsigned char record_type)
 {
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *ctx = tls_get_ctx(sk);
 	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
-	struct tls_crypto_info *crypto_info = &ctx->crypto_send;
 	struct tls_record_info *record = offload_ctx->open_record;
 	struct page_frag *pfrag;
 	int copy, rc = 0;
@@ -446,7 +443,7 @@ static int tls_push_data(struct sock *sk,
 	 * we need to leave room for an authentication tag.
 	 */
 	max_open_record_len = TLS_MAX_PAYLOAD_SIZE
-			+ TLS_HEADER_SIZE - offload_ctx->tag_size;
+			+ TLS_HEADER_SIZE - ctx->tag_size;
 
 	if (pending_open_record(offload_ctx)) {
 		rc = push_paritial_record(sk, offload_ctx, flags);
@@ -456,7 +453,7 @@ static int tls_push_data(struct sock *sk,
 
 	do {
 		if (tls_do_allocation(sk, offload_ctx, pfrag,
-				      offload_ctx->prepand_size)) {
+				      ctx->prepand_size)) {
 			rc = sk_stream_wait_memory(sk, &timeo);
 			if (!rc)
 				continue;
@@ -473,7 +470,7 @@ handle_error:
 				size = orig_size;
 				destroy_record(record);
 				offload_ctx->open_record = NULL;
-			} else if (record->len > offload_ctx->prepand_size) {
+			} else if (record->len > ctx->prepand_size) {
 				goto last_record;
 			}
 
@@ -503,7 +500,7 @@ last_record:
 		    (record->len >= max_open_record_len) ||
 		    (record->num_frags >= MAX_SKB_FRAGS - 1)) {
 			rc = tls_push_record(sk,
-					     crypto_info,
+					     ctx,
 					     offload_ctx,
 					     record,
 					     pfrag,
@@ -525,7 +522,7 @@ last_record:
 
 static inline bool record_is_open(struct sock *sk)
 {
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *ctx = tls_get_ctx(sk);
 	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
 	struct tls_record_info *record = offload_ctx->open_record;
 
@@ -662,17 +659,17 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	if (rc)
 		goto err_dummy_record;
 
-	offload_ctx = ctx->offload_ctx;
-	offload_ctx->prepand_size = TLS_HEADER_SIZE + nonece_size;
-	offload_ctx->tag_size = tag_size;
-	offload_ctx->iv_size = iv_size;
-	offload_ctx->iv = kmalloc(iv_size, GFP_KERNEL);
-	if (!offload_ctx->iv) {
+	ctx->prepand_size = TLS_HEADER_SIZE + nonece_size;
+	ctx->tag_size = tag_size;
+	ctx->iv_size = iv_size;
+	ctx->iv = kmalloc(iv_size, GFP_KERNEL);
+	if (!ctx->iv) {
 		rc = ENOMEM;
 		goto detach_sock;
 	}
-	memcpy(offload_ctx->iv, iv, iv_size);
+	memcpy(ctx->iv, iv, iv_size);
 
+	offload_ctx = ctx->offload_ctx;
 	dummy_record->end_seq = offload_ctx->expectedSN;
 	dummy_record->len = 0;
 	dummy_record->num_frags = 0;
@@ -680,7 +677,7 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	INIT_LIST_HEAD(&offload_ctx->records_list);
 	list_add_tail(&dummy_record->list, &offload_ctx->records_list);
 	spin_lock_init(&offload_ctx->lock);
-	ctx->offload_ctx = offload_ctx;
+
 	inet_csk(sk)->icsk_clean_acked = &tls_icsk_clean_acked;
 	sk->sk_write_space = tls_write_space;
 

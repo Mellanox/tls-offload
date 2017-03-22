@@ -52,7 +52,7 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 		 int __user *optlen)
 {
 	int rc = 0;
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *ctx = tls_get_ctx(sk);
 	struct tls_crypto_info *crypto_info;
 	int len;
 
@@ -107,7 +107,7 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 		if (TLS_IS_STATE_HW(crypto_info)) {
 			lock_sock(sk);
 			memcpy(crypto_info_aes_gcm_128->iv,
-			       ctx->offload_ctx->iv,
+			       ctx->iv,
 			       TLS_CIPHER_AES_GCM_128_IV_SIZE);
 			release_sock(sk);
 		}
@@ -128,6 +128,7 @@ EXPORT_SYMBOL(tls_sk_query);
 void tls_sk_destruct(struct sock *sk, struct tls_context *ctx)
 {
 	ctx->sk_destruct(sk);
+	kfree(ctx->iv);
 	kfree(ctx);
 	module_put(THIS_MODULE);
 }
@@ -136,7 +137,7 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 		  unsigned int optlen)
 {
 	int rc = 0;
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *ctx = tls_get_ctx(sk);
 	struct tls_crypto_info *crypto_info;
 	bool allocated_tls_ctx = false;
 	struct proto *prot;

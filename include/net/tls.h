@@ -70,10 +70,6 @@ struct tls_offload_context {
 
 	u16 unpushed_frag;
 	u16 unpushed_frag_offset;
-	u16 prepand_size;
-	u16 tag_size;
-	u16 iv_size;
-	char *iv;
 };
 
 #define TLS_DATA_PAGES			(TLS_MAX_PAYLOAD_SIZE / PAGE_SIZE)
@@ -116,7 +112,14 @@ struct tls_context {
 		struct tls_crypto_info crypto_send;
 		struct tls_crypto_info_aes_gcm_128 crypto_send_aes_gcm_128;
 	};
+
 	struct tls_offload_context *offload_ctx;
+
+	u16 prepand_size;
+	u16 tag_size;
+	u16 iv_size;
+	char *iv;
+
 	void (*sk_write_space)(struct sock *sk);
 	void (*sk_destruct)(struct sock *sk);
 };
@@ -173,26 +176,29 @@ static inline void tls_increment_seqno(unsigned char *seq, struct sock *sk)
 		tls_err_abort(sk);
 }
 
-static inline void tls_fill_prepend(struct tls_crypto_info *crypto_info,
-			     struct tls_offload_context *offload_ctx,
+static inline void tls_fill_prepend(struct tls_context *ctx,
 			     char *buf,
 			     size_t plaintext_len,
 			     unsigned char record_type)
 {
-	size_t pkt_len, iv_size = offload_ctx->iv_size;
+	size_t pkt_len, iv_size = ctx->iv_size;
 
-	pkt_len = plaintext_len + iv_size + offload_ctx->tag_size;
+	pkt_len = plaintext_len + iv_size + ctx->tag_size;
 
 	/* we cover nonce explicit here as well, so buf should be of
 	 * size KTLS_DTLS_HEADER_SIZE + KTLS_DTLS_NONCE_EXPLICIT_SIZE
 	 */
 	buf[0] = record_type;
-	buf[1] = TLS_VERSION_MINOR(crypto_info->version);
-	buf[2] = TLS_VERSION_MAJOR(crypto_info->version);
+	buf[1] = TLS_VERSION_MINOR(ctx->crypto_send.version);
+	buf[2] = TLS_VERSION_MAJOR(ctx->crypto_send.version);
 	/* we can use IV for nonce explicit according to spec */
 	buf[3] = pkt_len >> 8;
 	buf[4] = pkt_len & 0xFF;
-	memcpy(buf + TLS_NONCE_OFFSET, offload_ctx->iv, iv_size);
+	memcpy(buf + TLS_NONCE_OFFSET, ctx->iv, iv_size);
 }
 
+static inline struct tls_context *tls_get_ctx(const struct sock *sk)
+{
+	return sk->sk_user_data;
+}
 #endif /* _TLS_OFFLOAD_H */

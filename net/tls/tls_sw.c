@@ -28,8 +28,8 @@
 
 static struct tls_sw_context *sw_ctx(const struct sock *sk)
 {
-	struct tls_context *ctx = sk->sk_user_data;
-	return (struct tls_sw_context *)ctx->offload_ctx;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	return (struct tls_sw_context *)tls_ctx->offload_ctx;
 }
 
 static int tls_kernel_sendpage(struct sock *sk, int flags);
@@ -37,8 +37,8 @@ static int tls_kernel_sendpage(struct sock *sk, int flags);
 /* Called with lower socket held */
 static void tls_write_space(struct sock *sk)
 {
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = sw_ctx(sk);
-	struct tls_context *tls_ctx = sk->sk_user_data;
 
 	if (ctx->pages_send) {
 		gfp_t sk_allocation = sk->sk_allocation;
@@ -75,6 +75,7 @@ static int tls_do_encryption(struct sock *sk, struct scatterlist *sgin,
 			     struct scatterlist *sgout, size_t data_len,
 			     struct sk_buff *skb)
 {
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = sw_ctx(sk);
 	int ret;
 	unsigned int req_size = sizeof(struct aead_request) +
@@ -90,7 +91,7 @@ static int tls_do_encryption(struct sock *sk, struct scatterlist *sgin,
 
 	aead_request_set_tfm(aead_req, ctx->aead_send);
 	aead_request_set_ad(aead_req, TLS_AAD_SPACE_SIZE);
-	aead_request_set_crypt(aead_req, sgin, sgout, data_len, ctx->ctx.iv);
+	aead_request_set_crypt(aead_req, sgin, sgout, data_len, tls_ctx->iv);
 
 	ret = crypto_aead_encrypt(aead_req);
 
@@ -149,6 +150,7 @@ static int tls_kernel_sendpage(struct sock *sk, int flags)
 {
 	int ret;
 	struct sk_buff *head;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = sw_ctx(sk);
 	struct page *pages_send = ctx->pages_send;
 
@@ -172,7 +174,7 @@ static int tls_kernel_sendpage(struct sock *sk, int flags)
 			ctx->wmem_len = 0;
 			kfree_skb(head);
 			ctx->unsent -= ctx->send_len;
-			tls_increment_seqno(ctx->ctx.iv, sk);
+			tls_increment_seqno(tls_ctx->iv, sk);
 			__free_pages(pages_send, ctx->order_npages);
 			return ret;
 		}
@@ -189,9 +191,9 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 {
 	int ret;
 	struct tls_sw_context *ctx = sw_ctx(sk);
-	struct tls_context *sk_ctx = sk->sk_user_data;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->ctx.iv, record_type);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->iv, record_type);
 
 	sg_chain(ctx->sgaad_send, 2, sgin);
 	//sg_unmark_end(&sgin[pages - 1]);
@@ -202,7 +204,7 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 	if (ret < 0)
 		goto out;
 
-	tls_fill_prepend(&sk_ctx->crypto_send, &ctx->ctx,
+	tls_fill_prepend(tls_ctx,
 			 page_address(ctx->pages_send),
 			 bytes, TLS_RECORD_TYPE_DATA);
 
@@ -232,7 +234,7 @@ static int tls_push(struct sock *sk, unsigned char record_type)
 	int bytes = min_t(int, ctx->unsent, (int)TLS_MAX_PAYLOAD_SIZE);
 	int nsg, ret = 0;
 	struct sk_buff *head = skb_peek(&ctx->tx_queue);
-	struct tls_context *sk_ctx = sk->sk_user_data;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 
 	if (!head)
 		return 0;
@@ -251,8 +253,7 @@ static int tls_push(struct sock *sk, unsigned char record_type)
 		goto out;
 	}
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, ctx->ctx.iv,
-		     record_type);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->iv, record_type);
 
 	sg_chain(ctx->sgaad_send, 2, ctx->sg_tx_data2);
 	sg_chain(ctx->sg_tx_data2,
@@ -263,7 +264,7 @@ static int tls_push(struct sock *sk, unsigned char record_type)
 	if (ret < 0)
 		goto out;
 
-	tls_fill_prepend(&sk_ctx->crypto_send, &ctx->ctx,
+	tls_fill_prepend(tls_ctx,
 			 page_address(ctx->pages_send),
 			 bytes, TLS_RECORD_TYPE_DATA);
 
@@ -497,9 +498,10 @@ send_end:
 
 void tls_sw_sk_destruct(struct sock *sk)
 {
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = sw_ctx(sk);
 
-	kfree(ctx->ctx.iv);
+	kfree(tls_ctx->iv);
 
 	crypto_free_aead(ctx->aead_send);
 
@@ -507,7 +509,7 @@ void tls_sw_sk_destruct(struct sock *sk)
 		__free_pages(ctx->pages_send, ctx->order_npages);
 
 	skb_queue_purge(&ctx->tx_queue);
-	tls_sk_destruct(sk, sk->sk_user_data);
+	tls_sk_destruct(sk, tls_ctx);
 }
 
 int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
@@ -555,15 +557,15 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		goto out;
 	}
 
-	offload_ctx->ctx.prepand_size = TLS_HEADER_SIZE + nonece_size;
-	offload_ctx->ctx.tag_size = tag_size;
-	offload_ctx->ctx.iv_size = iv_size;
-	offload_ctx->ctx.iv = kmalloc(iv_size, GFP_KERNEL);
-	if (!offload_ctx->ctx.iv) {
+	ctx->prepand_size = TLS_HEADER_SIZE + nonece_size;
+	ctx->tag_size = tag_size;
+	ctx->iv_size = iv_size;
+	ctx->iv = kmalloc(iv_size, GFP_KERNEL);
+	if (!ctx->iv) {
 		rc = ENOMEM;
 		goto out;
 	}
-	memcpy(offload_ctx->ctx.iv, iv, iv_size);
+	memcpy(ctx->iv, iv, iv_size);
 
 	offload_ctx->pages_send = NULL;
 	offload_ctx->unsent = 0;
