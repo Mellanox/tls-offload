@@ -68,8 +68,9 @@ struct tls_offload_context {
 	u32 expectedSN;
 	spinlock_t lock;	/* protects records list */
 
-	u16 unpushed_frag;
-	u16 unpushed_frag_offset;
+	skb_frag_t *pending_frags;
+	u16 num_pending_frags;
+	u16 pending_offset;
 };
 
 #define TLS_DATA_PAGES			(TLS_MAX_PAYLOAD_SIZE / PAGE_SIZE)
