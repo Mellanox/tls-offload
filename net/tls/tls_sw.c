@@ -497,8 +497,6 @@ void tls_sw_sk_destruct(struct sock *sk)
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
 
-	kfree(tls_ctx->iv);
-
 	crypto_free_aead(ctx->aead_send);
 
 	if (ctx->pages_send)
