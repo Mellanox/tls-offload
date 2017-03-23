@@ -84,9 +84,9 @@ static struct mlx_tls_dev *find_mlx_tls_dev_by_netdev(
 
 struct mlx_tls_offload_context *get_tls_context(struct sock *sk)
 {
-	struct tls_context *ctx = sk->sk_user_data;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 
-	return container_of(ctx->offload_ctx,
+	return container_of(tls_offload_ctx(tls_ctx),
 			    struct mlx_tls_offload_context,
 			    context);
 }
