@@ -107,11 +107,6 @@ int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
 	u16 offset = ctx->pending_offset;
 	u16 num_frags = ctx->pending_offset;
 
-	/* Need to clear num_pending_frags before calling
-	 * do_tcp_sendpages. Otherwise, if do_tcp_sendpages
-	 * blocks on write space tls_write_space will try to
-	 * push the same record again.
-	 */
 	ctx->num_pending_frags = 0;
 
 	return tls_push_frags(sk, ctx, frag,
