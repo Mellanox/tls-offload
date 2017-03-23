@@ -88,11 +88,12 @@ static int attach_sock_to_netdev(struct sock *sk, struct tls_context *ctx)
 		goto out;
 	}
 
-	rc = netdev->tlsdev_ops->tls_dev_add(netdev,
-					     sk,
-					     TLS_OFFLOAD_CTX_DIR_TX,
-					     &ctx->crypto_send,
-					     &ctx->offload_ctx);
+	rc = netdev->tlsdev_ops->tls_dev_add(
+			netdev,
+			sk,
+			TLS_OFFLOAD_CTX_DIR_TX,
+			&ctx->crypto_send,
+			(struct tls_offload_context **)(&ctx->priv_ctx));
 	if (rc) {
 		pr_err("The netdev has refused to offload this socket\n");
 		goto out;
@@ -138,42 +139,42 @@ static inline bool pending_open_record(struct tls_offload_context *offload_ctx)
 				list);
 }
 
-void tls_clear_device_offload(struct sock *sk, struct tls_context *ctx)
+void tls_clear_device_offload(struct sock *sk, struct tls_context *tls_ctx)
 {
-	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
-
-	if (!offload_ctx)
-		return;
-
-	if (offload_ctx->open_record && !pending_open_record(offload_ctx))
-		destroy_record(offload_ctx->open_record);
-
-	delete_all_records(offload_ctx);
-	detach_sock_from_netdev(sk, ctx);
-}
-
-void tls_icsk_clean_acked(struct sock *sk)
-{
-	struct tls_context *ctx = tls_get_ctx(sk);
-	struct tls_offload_context *offload_ctx;
-	struct tcp_sock *tp = tcp_sk(sk);
-	struct tls_record_info *info, *temp;
-	unsigned long flags;
+	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
 
 	if (!ctx)
 		return;
 
-	offload_ctx = ctx->offload_ctx;
+	if (ctx->open_record && !pending_open_record(ctx))
+		destroy_record(ctx->open_record);
 
-	spin_lock_irqsave(&offload_ctx->lock, flags);
-	info = offload_ctx->retransmit_hint;
+	delete_all_records(ctx);
+	detach_sock_from_netdev(sk, tls_ctx);
+}
+
+void tls_icsk_clean_acked(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context *ctx;
+	struct tcp_sock *tp = tcp_sk(sk);
+	struct tls_record_info *info, *temp;
+	unsigned long flags;
+
+	if (!tls_ctx)
+		return;
+
+	ctx = tls_offload_ctx(tls_ctx);
+
+	spin_lock_irqsave(&ctx->lock, flags);
+	info = ctx->retransmit_hint;
 	if (info && !before(tp->snd_una, info->end_seq)) {
-		offload_ctx->retransmit_hint = NULL;
+		ctx->retransmit_hint = NULL;
 		list_del(&info->list);
 		destroy_record(info);
 	}
 
-	list_for_each_entry_safe(info, temp, &offload_ctx->records_list, list) {
+	list_for_each_entry_safe(info, temp, &ctx->records_list, list) {
 		if (before(tp->snd_una, info->end_seq))
 			break;
 		list_del(&info->list);
@@ -181,7 +182,7 @@ void tls_icsk_clean_acked(struct sock *sk)
 		destroy_record(info);
 	}
 
-	spin_unlock_irqrestore(&offload_ctx->lock, flags);
+	spin_unlock_irqrestore(&ctx->lock, flags);
 }
 EXPORT_SYMBOL(tls_icsk_clean_acked);
 
@@ -271,23 +272,22 @@ static int push_paritial_record(struct sock *sk,
 
 static void tls_write_space(struct sock *sk)
 {
-	struct tls_context *ctx = tls_get_ctx(sk);
-	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
 
-	if (pending_open_record(offload_ctx)) {
+	if (pending_open_record(ctx)) {
 		gfp_t sk_allocation = sk->sk_allocation;
 		int rc;
 
 		sk->sk_allocation = GFP_ATOMIC;
-		rc = push_paritial_record(sk, offload_ctx,
-					MSG_DONTWAIT | MSG_NOSIGNAL);
+		rc = push_paritial_record(sk, ctx, MSG_DONTWAIT | MSG_NOSIGNAL);
 		sk->sk_allocation = sk_allocation;
 
 		if (rc < 0)
 			return;
 	}
 
-	ctx->sk_write_space(sk);
+	tls_ctx->sk_write_space(sk);
 }
 
 static inline void tls_append_frag(struct tls_record_info *record,
@@ -418,9 +418,9 @@ static int tls_push_data(struct sock *sk,
 			 size_t size, int flags,
 			 unsigned char record_type)
 {
-	struct tls_context *ctx = tls_get_ctx(sk);
-	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
-	struct tls_record_info *record = offload_ctx->open_record;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
+	struct tls_record_info *record = ctx->open_record;
 	struct page_frag *pfrag;
 	int copy, rc = 0;
 	size_t orig_size = size;
@@ -443,22 +443,22 @@ static int tls_push_data(struct sock *sk,
 	 * we need to leave room for an authentication tag.
 	 */
 	max_open_record_len = TLS_MAX_PAYLOAD_SIZE
-			+ TLS_HEADER_SIZE - ctx->tag_size;
+			+ TLS_HEADER_SIZE - tls_ctx->tag_size;
 
-	if (pending_open_record(offload_ctx)) {
-		rc = push_paritial_record(sk, offload_ctx, flags);
+	if (pending_open_record(ctx)) {
+		rc = push_paritial_record(sk, ctx, flags);
 		if (rc < 0)
 			return rc;
 	}
 
 	do {
-		if (tls_do_allocation(sk, offload_ctx, pfrag,
-				      ctx->prepand_size)) {
+		if (tls_do_allocation(sk, ctx, pfrag,
+				      tls_ctx->prepand_size)) {
 			rc = sk_stream_wait_memory(sk, &timeo);
 			if (!rc)
 				continue;
 
-			record = offload_ctx->open_record;
+			record = ctx->open_record;
 			if (!record)
 				break;
 handle_error:
@@ -469,15 +469,15 @@ handle_error:
 				 */
 				size = orig_size;
 				destroy_record(record);
-				offload_ctx->open_record = NULL;
-			} else if (record->len > ctx->prepand_size) {
+				ctx->open_record = NULL;
+			} else if (record->len > tls_ctx->prepand_size) {
 				goto last_record;
 			}
 
 			break;
 		}
 
-		record = offload_ctx->open_record;
+		record = ctx->open_record;
 		copy = min_t(size_t, size, (pfrag->size - pfrag->offset));
 		copy = min_t(size_t, copy, (max_open_record_len - record->len));
 
@@ -500,8 +500,8 @@ last_record:
 		    (record->len >= max_open_record_len) ||
 		    (record->num_frags >= MAX_SKB_FRAGS - 1)) {
 			rc = tls_push_record(sk,
+					     tls_ctx,
 					     ctx,
-					     offload_ctx,
 					     record,
 					     pfrag,
 					     tls_push_record_flags,
@@ -522,11 +522,11 @@ last_record:
 
 static inline bool record_is_open(struct sock *sk)
 {
-	struct tls_context *ctx = tls_get_ctx(sk);
-	struct tls_offload_context *offload_ctx = ctx->offload_ctx;
-	struct tls_record_info *record = offload_ctx->open_record;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
+	struct tls_record_info *record = ctx->open_record;
 
-	return (record && !pending_open_record(offload_ctx));
+	return (record && !pending_open_record(ctx));
 }
 
 int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
@@ -630,7 +630,7 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 		goto out;
 	}
 
-	if (ctx->offload_ctx) {
+	if (ctx->priv_ctx) {
 		rc = -EEXIST;
 		goto out;
 	}
@@ -669,7 +669,7 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	}
 	memcpy(ctx->iv, iv, iv_size);
 
-	offload_ctx = ctx->offload_ctx;
+	offload_ctx = ctx->priv_ctx;
 	dummy_record->end_seq = offload_ctx->expectedSN;
 	dummy_record->len = 0;
 	dummy_record->num_frags = 0;

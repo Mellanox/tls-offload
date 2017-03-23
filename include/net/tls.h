@@ -111,7 +111,7 @@ struct tls_context {
 		struct tls_crypto_info_aes_gcm_128 crypto_send_aes_gcm_128;
 	};
 
-	struct tls_offload_context *offload_ctx;
+	void *priv_ctx;
 
 	u16 prepand_size;
 	u16 tag_size;
@@ -199,4 +199,18 @@ static inline struct tls_context *tls_get_ctx(const struct sock *sk)
 {
 	return sk->sk_user_data;
 }
+
+static inline struct tls_sw_context *tls_sw_ctx(
+		const struct tls_context *tls_ctx)
+{
+	return (struct tls_sw_context *)tls_ctx->priv_ctx;
+}
+
+static inline struct tls_offload_context *tls_offload_ctx(
+		const struct tls_context *tls_ctx)
+{
+	return (struct tls_offload_context *)tls_ctx->priv_ctx;
+}
+
+
 #endif /* _TLS_OFFLOAD_H */
