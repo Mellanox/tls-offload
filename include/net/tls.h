@@ -85,8 +85,6 @@ struct tls_offload_context {
 #define TLS_OVERHEAD		(TLS_PREPEND_SIZE + TLS_TAG_SIZE)
 
 struct tls_sw_context {
-	struct tls_offload_context ctx;
-
 	struct sock *sk;
 
 	struct crypto_aead *aead_send;
