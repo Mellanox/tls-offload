@@ -201,7 +201,7 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 
 	tls_fill_prepend(tls_ctx,
 			 page_address(ctx->pages_send),
-			 bytes, TLS_RECORD_TYPE_DATA);
+			 bytes, record_type);
 
 	ctx->send_len = bytes;
 	ctx->send_offset = 0;
@@ -261,7 +261,7 @@ static int tls_push(struct sock *sk, unsigned char record_type)
 
 	tls_fill_prepend(tls_ctx,
 			 page_address(ctx->pages_send),
-			 bytes, TLS_RECORD_TYPE_DATA);
+			 bytes, record_type);
 
 	ctx->send_len = bytes;
 	ctx->send_offset = 0;
