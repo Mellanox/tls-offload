@@ -105,7 +105,7 @@ int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
 			     int flags) {
 	skb_frag_t *frag = ctx->pending_frags;
 	u16 offset = ctx->pending_offset;
-	u16 num_frags = ctx->pending_offset;
+	u16 num_frags = ctx->num_pending_frags;
 
 	ctx->num_pending_frags = 0;
 
