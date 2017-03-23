@@ -83,7 +83,7 @@ struct tls_offload_context {
 
 struct tls_sw_context {
 	struct sock *sk;
-
+	void (*sk_write_space)(struct sock *sk);
 	struct crypto_aead *aead_send;
 
 	/* Sending context */
@@ -91,9 +91,7 @@ struct tls_sw_context {
 	struct scatterlist sg_tx_data2[ALG_MAX_PAGES + 1];
 	char aad_send[TLS_AAD_SPACE_SIZE];
 	char tag_send[TLS_TAG_SIZE];
-	struct page *pages_send;
-	int send_offset;
-	int send_len;
+	skb_frag_t tx_frag;
 	int wmem_len;
 	int order_npages;
 	struct scatterlist sgaad_send[2];

@@ -28,27 +28,6 @@
 
 static int tls_kernel_sendpage(struct sock *sk, int flags);
 
-/* Called with lower socket held */
-static void tls_write_space(struct sock *sk)
-{
-	struct tls_context *tls_ctx = tls_get_ctx(sk);
-	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
-
-	if (ctx->pages_send) {
-		gfp_t sk_allocation = sk->sk_allocation;
-		int rc;
-
-		sk->sk_allocation = GFP_ATOMIC;
-		rc = tls_kernel_sendpage(sk, MSG_DONTWAIT | MSG_NOSIGNAL);
-		sk->sk_allocation = sk_allocation;
-
-		if (rc < 0)
-			return;
-	}
-
-	tls_ctx->sk_write_space(sk);
-}
-
 static inline void tls_make_aad(struct sock *sk,
 				int recv,
 				char *buf,
@@ -104,13 +83,13 @@ static int tls_pre_encrypt(struct sock *sk, size_t data_len)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
-
 	int i;
 	unsigned int npages;
 	size_t aligned_size;
 	size_t encrypt_len;
 	struct scatterlist *sg;
 	int ret = 0;
+	struct page *tx_pages;
 
 	encrypt_len = data_len + TLS_OVERHEAD;
 	npages = encrypt_len / PAGE_SIZE;
@@ -123,9 +102,9 @@ static int tls_pre_encrypt(struct sock *sk, size_t data_len)
 	/* The first entry in sg_tx_data is AAD so skip it */
 	sg_init_table(ctx->sg_tx_data, TLS_SG_DATA_SIZE);
 	sg_set_buf(&ctx->sg_tx_data[0], ctx->aad_send, sizeof(ctx->aad_send));
-	ctx->pages_send = alloc_pages(GFP_KERNEL | __GFP_COMP,
-				      ctx->order_npages);
-	if (!ctx->pages_send) {
+	tx_pages = alloc_pages(GFP_KERNEL | __GFP_COMP,
+			       ctx->order_npages);
+	if (!tx_pages) {
 		ret = -ENOMEM;
 		return ret;
 	}
@@ -134,50 +113,54 @@ static int tls_pre_encrypt(struct sock *sk, size_t data_len)
 	/* For the first page, leave room for prepend. It will be
 	 * copied into the page later
 	 */
-	sg_set_page(sg, ctx->pages_send, PAGE_SIZE - TLS_PREPEND_SIZE,
+	sg_set_page(sg, tx_pages, PAGE_SIZE - TLS_PREPEND_SIZE,
 		    TLS_PREPEND_SIZE);
 	for (i = 1; i < npages; i++)
-		sg_set_page(sg + i, ctx->pages_send + i, PAGE_SIZE, 0);
+		sg_set_page(sg + i, tx_pages + i, PAGE_SIZE, 0);
+
+	__skb_frag_set_page(&ctx->tx_frag, tx_pages);
+
 	return ret;
+}
+
+static void tls_release_tx_frag(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
+	struct page *tx_page = skb_frag_page(&ctx->tx_frag);
+
+	if (!tls_is_pending_open_record(tls_ctx) && tx_page) {
+		struct sk_buff *head;
+		/* Successfully sent the whole packet, account for it*/
+
+		head = skb_peek(&ctx->tx_queue);
+		skb_dequeue(&ctx->tx_queue);
+		sk->sk_wmem_queued -= ctx->wmem_len;
+		sk_mem_uncharge(sk, ctx->wmem_len);
+		ctx->wmem_len = 0;
+		kfree_skb(head);
+		ctx->unsent -= skb_frag_size(&ctx->tx_frag) - TLS_OVERHEAD;
+		tls_increment_seqno(tls_ctx->iv, sk);
+		__free_pages(tx_page,
+			     ctx->order_npages);
+		__skb_frag_set_page(&ctx->tx_frag, NULL);
+	}
+	ctx->sk_write_space(sk);
 }
 
 static int tls_kernel_sendpage(struct sock *sk, int flags)
 {
 	int ret;
-	struct sk_buff *head;
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
-	struct page *pages_send = ctx->pages_send;
 
-	/* Need to clear pages_send before calling
-	 * do_tcp_sendpages. Otherwise, if do_tcp_sendpages
-	 * blocks on write space tls_write_space will try to
-	 * push the same record again.
-	 */
-	ctx->pages_send = NULL;
-	ret = do_tcp_sendpages(sk, pages_send, ctx->send_offset,
-			       ctx->send_len + TLS_OVERHEAD - ctx->send_offset,
-			       flags);
-	if (ret > 0) {
-		ctx->send_offset += ret;
-		if (ctx->send_offset >= ctx->send_len + TLS_OVERHEAD) {
-			/* Successfully sent the whole packet, account for it.*/
-			head = skb_peek(&ctx->tx_queue);
-			skb_dequeue(&ctx->tx_queue);
-			sk->sk_wmem_queued -= ctx->wmem_len;
-			sk_mem_uncharge(sk, ctx->wmem_len);
-			ctx->wmem_len = 0;
-			kfree_skb(head);
-			ctx->unsent -= ctx->send_len;
-			tls_increment_seqno(tls_ctx->iv, sk);
-			__free_pages(pages_send, ctx->order_npages);
-			return ret;
-		}
-	} else if (ret != -EAGAIN) {
+	skb_frag_size_add(&ctx->tx_frag, TLS_OVERHEAD);
+	ret = tls_push_frags(sk, tls_ctx, &ctx->tx_frag, 1, 0, flags);
+	if (ret >= 0)
+		tls_release_tx_frag(sk);
+	else if (ret != -EAGAIN)
 		tls_err_abort(sk);
-	}
 
-	ctx->pages_send = pages_send;
 	return ret;
 }
 
@@ -200,11 +183,10 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 		goto out;
 
 	tls_fill_prepend(tls_ctx,
-			 page_address(ctx->pages_send),
+			 page_address(skb_frag_page(&ctx->tx_frag)),
 			 bytes, record_type);
 
-	ctx->send_len = bytes;
-	ctx->send_offset = 0;
+	skb_frag_size_set(&ctx->tx_frag, bytes);
 
 	ret = tls_do_encryption(sk,
 				ctx->sgaad_send,
@@ -260,11 +242,11 @@ static int tls_push(struct sock *sk, unsigned char record_type)
 		goto out;
 
 	tls_fill_prepend(tls_ctx,
-			 page_address(ctx->pages_send),
+			 page_address(skb_frag_page(&ctx->tx_frag)),
 			 bytes, record_type);
 
-	ctx->send_len = bytes;
-	ctx->send_offset = 0;
+	skb_frag_size_set(&ctx->tx_frag, bytes);
+	tls_ctx->pending_offset = 0;
 	head->sk = sk;
 
 	ret = tls_do_encryption(sk,
@@ -363,7 +345,7 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 
 		skb = skb_peek_tail(&ctx->tx_queue);
 		// Try for zerocopy
-		if (!skb && !ctx->pages_send && eor) {
+		if (!skb && !skb_frag_page(&ctx->tx_frag) && eor) {
 			int pages;
 			int err;
 			// TODO can send partial pages?
@@ -496,11 +478,12 @@ void tls_sw_sk_destruct(struct sock *sk)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
+	struct page *tx_page = skb_frag_page(&ctx->tx_frag);
 
 	crypto_free_aead(ctx->aead_send);
 
-	if (ctx->pages_send)
-		__free_pages(ctx->pages_send, ctx->order_npages);
+	if (tx_page)
+		__free_pages(tx_page, ctx->order_npages);
 
 	skb_queue_purge(&ctx->tx_queue);
 	tls_sk_destruct(sk, tls_ctx);
@@ -561,10 +544,6 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 	}
 	memcpy(ctx->iv, iv, iv_size);
 
-	sw_ctx->pages_send = NULL;
-	sw_ctx->unsent = 0;
-	sw_ctx->wmem_len = 0;
-
 	/* Preallocation for sending
 	 *   scatterlist: AAD | data | TAG (for crypto API)
 	 *   vec: HEADER | data | TAG
@@ -600,8 +579,9 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		}
 	}
 
-	sk->sk_write_space = tls_write_space;
 	sk->sk_destruct = tls_sw_sk_destruct;
+	sw_ctx->sk_write_space = ctx->sk_write_space;
+	ctx->sk_write_space =  tls_release_tx_frag;
 
 	skb_queue_head_init(&sw_ctx->tx_queue);
 	sw_ctx->sk = sk;
