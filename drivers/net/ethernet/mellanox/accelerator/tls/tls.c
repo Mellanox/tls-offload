@@ -45,6 +45,8 @@ static DEFINE_MUTEX(mlx_tls_mutex);
 /* End of context identifiers range (exclusive) */
 #define SWID_END	BIT(24)
 
+static int insert_pet(struct sk_buff *skb);
+
 static netdev_features_t mlx_tls_feature_chk(struct sk_buff *skb,
 					     struct net_device *netdev,
 					     netdev_features_t features,
@@ -273,7 +275,7 @@ out:
 	return ret;
 }
 
-static struct sk_buff *complete_sync_skb(
+static void send_sync_skb(
 		struct sk_buff *skb,
 		struct sk_buff *nskb,
 		u32 tcp_seq,
@@ -308,8 +310,6 @@ static struct sk_buff *complete_sync_skb(
 	}
 	skb_shinfo(nskb)->gso_type = skb_shinfo(skb)->gso_type;
 
-	nskb->queue_mapping = skb->queue_mapping;
-
 	pet = (struct pet *)(nskb->data + sizeof(struct ethhdr));
 	pet->syndrome = syndrome;
 	memcpy(pet->content.raw, &tcp_seq_low, sizeof(tcp_seq_low));
@@ -319,23 +319,10 @@ static struct sk_buff *complete_sync_skb(
 	inet_csk(skb->sk)->icsk_af_ops->send_check(skb->sk, nskb);
 	__skb_push(nskb, skb_transport_offset(skb));
 
-	nskb->next = skb;
 	nskb->xmit_more = 1;
-	return nskb;
-}
-
-static void strip_pet(struct sk_buff *skb)
-{
-	struct ethhdr *old_eth;
-	struct ethhdr *new_eth;
-
-	old_eth = (struct ethhdr *)((skb->data)  - sizeof(struct ethhdr));
-	new_eth = (struct ethhdr *)((skb_pull_inline(skb, sizeof(struct pet)))
-			- sizeof(struct ethhdr));
-	skb->mac_header += sizeof(struct pet);
-
-	memmove(new_eth, old_eth, 2 * ETH_ALEN);
-	/* Ethertype is already in its new place */
+	nskb->queue_mapping = skb->queue_mapping;
+	pr_debug("Sending sync packet");
+	skb->dev->netdev_ops->ndo_start_xmit(nskb, skb->dev);
 }
 
 static struct sk_buff *handle_ooo(struct mlx_tls_offload_context *context,
@@ -348,12 +335,8 @@ static struct sk_buff *handle_ooo(struct mlx_tls_offload_context *context,
 	int headln;
 	unsigned char syndrome = SYNDROME_SYNC;
 
-	if (get_sync_data(context, tcp_seq, &info)) {
-		dev_kfree_skb_any(skb);
-		return NULL;
-	}
-
-	headln = skb_transport_offset(skb) + tcp_hdrlen(skb);
+	if (get_sync_data(context, tcp_seq, &info))
+		goto err_out;
 
 	if (unlikely(info.sync_len < 0)) {
 		if (-info.sync_len > MAX_BYPASS_SIZE) {
@@ -362,22 +345,23 @@ static struct sk_buff *handle_ooo(struct mlx_tls_offload_context *context,
 				/* can fragment into two large SKBs in SW */
 				return NULL;
 			}
-			skb_push(skb, sizeof(struct ethhdr));
-			strip_pet(skb);
-			skb_pull(skb, sizeof(struct ethhdr));
+			pr_debug("Can't bypass, sending orig skb\n");
 			return skb;
 		}
 
 		linear_len = MIN_BYPASS_RECORD_SIZE;
 	}
 
+	if (unlikely(insert_pet(skb)))
+		goto err_out;
+
+	headln = skb_transport_offset(skb) + tcp_hdrlen(skb);
 	linear_len += headln;
 	nskb = alloc_skb(linear_len, GFP_ATOMIC);
-	if (unlikely(!nskb)) {
-		dev_kfree_skb_any(skb);
-		return NULL;
-	}
+	if (unlikely(!nskb))
+		goto err_out;
 
+	context->context.expectedSN = tcp_seq + skb->len - headln;
 	skb_put(nskb, linear_len);
 	syndrome = SYNDROME_SYNC;
 	if (likely(info.sync_len >= 0)) {
@@ -395,7 +379,12 @@ static struct sk_buff *handle_ooo(struct mlx_tls_offload_context *context,
 		syndrome = SYNDROME_BYPASS;
 	}
 
-	return complete_sync_skb(skb, nskb, tcp_seq, headln, syndrome);
+	send_sync_skb(skb, nskb, tcp_seq, headln, syndrome);
+	return skb;
+
+err_out:
+	dev_kfree_skb_any(skb);
+	return NULL;
 }
 
 static int insert_pet(struct sk_buff *skb)
@@ -431,6 +420,7 @@ static struct sk_buff *mlx_tls_tx_handler(struct sk_buff *skb,
 	struct mlx_tls_offload_context *context;
 	int datalen;
 	u32 skb_seq;
+	u32 expectedSN;
 
 	pr_debug("mlx_tls_tx_handler started\n");
 
@@ -444,24 +434,23 @@ static struct sk_buff *mlx_tls_tx_handler(struct sk_buff *skb,
 	skb_seq =  ntohl(tcp_hdr(skb)->seq);
 
 	context = get_tls_context(skb->sk);
+	expectedSN = context->context.expectedSN;
+
 	pr_debug("mlx_tls_tx_handler: mapping: %u cpu %u size %u with swid %u expectedSN: %u actualSN: %u\n",
 		 skb->queue_mapping, smp_processor_id(), skb->len,
-		 ntohl(context->swid), context->context.expectedSN, skb_seq);
+		 ntohl(context->swid), expectedSN, skb_seq);
 
-	insert_pet(skb);
-
-	if (unlikely(context->context.expectedSN != skb_seq)) {
+	if (unlikely(expectedSN != skb_seq)) {
 		skb = handle_ooo(context, skb);
-		if (!skb)
-			goto out;
+		goto out;
+	}
 
-		pr_info("Sending sync packet\n");
-
-		if (!skb->next)
-			goto out;
+	if (unlikely(insert_pet(skb))) {
+		dev_kfree_skb_any(skb);
+		skb = NULL;
+		goto out;
 	}
 	context->context.expectedSN = skb_seq + datalen;
-
 out:
 	return skb;
 }
