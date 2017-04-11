@@ -183,8 +183,8 @@ static int tls_kernel_sendpage(struct sock *sk, int flags)
 }
 
 static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
-			int pages, int bytes,
-			unsigned char record_type, int flags)
+			     int pages, int bytes,
+			     unsigned char record_type, int flags)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
@@ -283,17 +283,16 @@ out:
 }
 
 static int zerocopy_from_iter(struct iov_iter *from,
-			      struct scatterlist *sg, int *bytes)
+			      struct scatterlist *sg, int *bytes,
+			      int page_count)
 {
-	//int len = iov_iter_count(from);
 	int n = 0;
 
 	if (bytes)
 		*bytes = 0;
 
-	//TODO pass in number of pages
-	while (iov_iter_count(from) && n < MAX_SKB_FRAGS - 1) {
-		struct page *pages[MAX_SKB_FRAGS];
+	while (iov_iter_count(from) && n < page_count) {
+		struct page *pages[page_count];
 		size_t start;
 		ssize_t copied;
 		int j = 0;
@@ -302,7 +301,7 @@ static int zerocopy_from_iter(struct iov_iter *from,
 			break;
 
 		copied = iov_iter_get_pages(from, pages, TLS_MAX_PAYLOAD_SIZE,
-					    MAX_SKB_FRAGS - n, &start);
+					    page_count - n, &start);
 		if (bytes)
 			*bytes += copied;
 		if (copied < 0)
@@ -364,7 +363,7 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 		if (!skb && !skb_frag_page(&ctx->tx_frag) && eor) {
 			int pages;
 			int err;
-			// TODO can send partial pages?
+
 			int page_count = iov_iter_npages(&msg->msg_iter,
 							 ALG_MAX_PAGES);
 			struct scatterlist sgin[ALG_MAX_PAGES + 1];
@@ -375,9 +374,8 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 			if (page_count >= ALG_MAX_PAGES)
 				goto reg_send;
 
-			// TODO check pages?
 			err = zerocopy_from_iter(&msg->msg_iter, &sgin[0],
-						 &bytes);
+						&bytes, page_count);
 			pages = err;
 			ctx->unsent += bytes;
 			if (err < 0)
@@ -408,8 +406,7 @@ reg_send:
 		if (!sk_page_frag_refill(sk, pfrag))
 			goto wait_for_memory;
 
-		if (!skb_can_coalesce(skb, i, pfrag->page,
-				      pfrag->offset)) {
+		if (!skb_can_coalesce(skb, i, pfrag->page, pfrag->offset)) {
 			if (i == ALG_MAX_PAGES) {
 				struct sk_buff *tskb;
 
@@ -587,7 +584,6 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		if (IS_ERR(sw_ctx->aead_send)) {
 			rc = PTR_ERR(sw_ctx->aead_send);
 			sw_ctx->aead_send = NULL;
-			pr_err("bind fail\n"); // TODO
 			goto out;
 		}
 	}
