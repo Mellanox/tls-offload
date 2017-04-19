@@ -176,9 +176,8 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->iv, record_type);
 
 	sg_chain(ctx->sgaad_send, 2, sgin);
-	//sg_unmark_end(&sgin[pages - 1]);
+	sg_unmark_end(&sgin[pages - 1]);
 	sg_chain(sgin, pages + 1, ctx->sgtag_send);
-	ret = sg_nents_for_len(ctx->sgaad_send, bytes + 13 + 16);
 
 	ret = tls_pre_encrypt(sk, bytes);
 	if (ret < 0)
@@ -220,8 +219,8 @@ static int tls_push(struct sock *sk, unsigned char record_type, int flags)
 
 	bytes = min_t(int, bytes, head->len);
 
-	sg_init_table(ctx->sg_tx_data2, ARRAY_SIZE(ctx->sg_tx_data2));
-	nsg = skb_to_sgvec(head, &ctx->sg_tx_data2[0], 0, bytes);
+	sg_init_table(ctx->sg_tx_preenc, ARRAY_SIZE(ctx->sg_tx_preenc));
+	nsg = skb_to_sgvec(head, &ctx->sg_tx_preenc[0], 0, bytes);
 
 	/* The length of sg into decryption must not be over
 	 * ALG_MAX_PAGES. The aad takes the first sg, so the payload
@@ -234,8 +233,9 @@ static int tls_push(struct sock *sk, unsigned char record_type, int flags)
 
 	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->iv, record_type);
 
-	sg_chain(ctx->sgaad_send, 2, ctx->sg_tx_data2);
-	sg_chain(ctx->sg_tx_data2,
+	sg_chain(ctx->sgaad_send, 2, ctx->sg_tx_preenc);
+	sg_unmark_end(&ctx->sg_tx_preenc[nsg - 1]);
+	sg_chain(ctx->sg_tx_preenc,
 		 nsg + 1,
 		 ctx->sgtag_send);
 

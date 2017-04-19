@@ -88,7 +88,7 @@ struct tls_sw_context {
 
 	/* Sending context */
 	struct scatterlist sg_tx_data[TLS_SG_DATA_SIZE];
-	struct scatterlist sg_tx_data2[ALG_MAX_PAGES + 1];
+	struct scatterlist sg_tx_preenc[ALG_MAX_PAGES + 1];
 	char aad_send[TLS_AAD_SPACE_SIZE];
 	char tag_send[TLS_TAG_SIZE];
 	skb_frag_t tx_frag;
