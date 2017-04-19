@@ -540,6 +540,7 @@ void tls_sw_sk_destruct(struct sock *sk)
 
 	tls_release_tx_frag(sk);
 	skb_queue_purge(&ctx->tx_queue);
+	kfree(ctx);
 	tls_sk_destruct(sk, tls_ctx);
 }
 
