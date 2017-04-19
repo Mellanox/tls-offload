@@ -450,10 +450,6 @@ reg_send:
 		continue;
 
 wait_for_memory:
-		ret = tls_push(sk, record_type);
-		if (ret)
-			goto send_end;
-//push_wait:
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
 		ret = sk_stream_wait_memory(sk, &timeo);
 		if (ret)
