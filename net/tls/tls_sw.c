@@ -211,14 +211,9 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 				ctx->sg_tx_data,
 				bytes, NULL, flags);
 
-	if (ret < 0)
-		goto out;
-
 out:
-	if (ret < 0) {
-		sk->sk_err = EPIPE;
+	if (ret < 0)
 		return ret;
-	}
 
 	return 0;
 }
@@ -274,10 +269,8 @@ static int tls_push(struct sock *sk, unsigned char record_type, int flags)
 				bytes, head, flags);
 
 out:
-	if (ret < 0) {
-		sk->sk_err = EPIPE;
+	if (ret < 0)
 		return ret;
-	}
 
 	return 0;
 }
@@ -346,6 +339,7 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 			return -EFAULT;
 			goto send_end;
 		}
+		copied += ret;
 	}
 
 	while (msg_data_left(msg)) {
@@ -362,7 +356,6 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 		// Try for zerocopy
 		if (!skb && !skb_frag_page(&ctx->tx_frag) && eor) {
 			int pages;
-			int err;
 
 			int page_count = iov_iter_npages(&msg->msg_iter,
 							 ALG_MAX_PAGES);
@@ -481,7 +474,7 @@ send_end:
 		sk->sk_write_space(sk);
 
 	release_sock(sk);
-	return ret < 0 ? ret : size;
+	return ret < 0 ? ret : copied;
 }
 
 void tls_sw_sk_destruct(struct sock *sk)
