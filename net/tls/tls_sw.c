@@ -170,6 +170,7 @@ static void tls_release_tx_frag(struct sock *sk)
 		sk_mem_uncharge(sk, ctx->unsent + TLS_OVERHEAD);
 		ctx->sending = 0;
 		ctx->unsent = 0;
+		sk->sk_wmem_queued -= ctx->wmem_len;
 
 		kfree_skb(ctx->tx_buff);
 		ctx->tx_buff = NULL;
@@ -492,7 +493,6 @@ reg_send:
 		}
 
 		copied += copy;
-		sk->sk_wmem_queued -= copy;
 		ctx->unsent += copy;
 
 		if (ctx->unsent >= TLS_MAX_PAYLOAD_SIZE) {
@@ -753,6 +753,7 @@ coalesced:
 		skb->len += send_size;
 		skb->data_len += send_size;
 		skb->truesize += send_size;
+		sk->sk_wmem_queued += send_size;
 		ctx->wmem_len += send_size;
 		sk_mem_charge(sk, send_size);
 		ctx->unsent += send_size;
@@ -776,4 +777,12 @@ sendpage_end:
 	release_sock(sk);
 
 	return ret < 0 ? ret : queued;
+}
+
+void tls_sw_close(struct sock *sk, long timeout)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+
+	tls_push(sk, TLS_RECORD_TYPE_DATA, 0);
+	tls_ctx->sk_close(sk, timeout);
 }

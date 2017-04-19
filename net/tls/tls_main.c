@@ -295,6 +295,7 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 
 	ctx->sk_write_space = sk->sk_write_space;
 	ctx->sk_destruct = sk->sk_destruct;
+	ctx->sk_close = sk->sk_prot->close;
 	sk->sk_write_space = tls_write_space;
 	ctx->sk_stream_memory_free = sk->sk_prot->stream_memory_free;
 
@@ -342,6 +343,7 @@ static int __init tls_init(void)
 	tls_sw_prot.sendmsg		= tls_sw_sendmsg;
 	tls_sw_prot.sendpage            = tls_sw_sendpage;
 	tls_sw_prot.stream_memory_free  = tls_sw_stream_memory_free;
+	tls_sw_prot.close               = tls_sw_close;
 
 	return 0;
 }
