@@ -18,10 +18,6 @@
  */
 
 #include <linux/module.h>
-#include <net/tcp.h>
-#include <net/inet_common.h>
-#include <linux/highmem.h>
-#include <linux/netdevice.h>
 #include <crypto/aead.h>
 
 #include <net/tls.h>
