@@ -410,26 +410,24 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 
 			ret = zerocopy_from_iter(&msg->msg_iter, &sgin[0],
 						 &bytes, page_count);
-			// TODO fix release pages
-			if (!alloc_encrypted_pages(sk, bytes))
-				goto wait_for_memory;
+
+			if (!alloc_encrypted_pages(sk, bytes)) {
+				ret = -ENOMEM;
+				goto put_pages_zerocopy;
+			}
 
 			pages = ret;
 			ctx->unsent += bytes;
 			copied += bytes;
-			if (ret < 0)
-				goto send_end;
 
 			ret = tls_push_zerocopy(sk, sgin, pages, bytes,
 						record_type, msg->msg_flags);
-			if (ret)
-				goto reg_send;
 
+put_pages_zerocopy:
 			for (; pages > 0; pages--)
 				put_page(sg_page(&sgin[pages - 1]));
-			if (ret < 0)
+			if (ret)
 				goto send_end;
-			continue;
 		}
 
 reg_send:
