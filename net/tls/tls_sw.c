@@ -67,9 +67,7 @@ static int tls_do_encryption(struct sock *sk, struct scatterlist *sgin,
 		crypto_aead_reqsize(ctx->aead_send);
 	struct aead_request *aead_req;
 
-	pr_debug("tls_do_encryption %p\n", sk);
-
-	aead_req = kmalloc(req_size, GFP_ATOMIC);
+	aead_req = kmalloc(req_size, GFP_KERNEL);
 
 	if (!aead_req)
 		return -ENOMEM;
