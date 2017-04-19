@@ -98,6 +98,8 @@ struct tls_sw_context {
 	struct scatterlist sgtag_send[2];
 	struct sk_buff_head tx_queue;
 	int unsent;
+	bool tcp_sendpage;
+	bool sending;
 };
 
 struct tls_context {
@@ -120,6 +122,7 @@ struct tls_context {
 
 	void (*sk_write_space)(struct sock *sk);
 	void (*sk_destruct)(struct sock *sk);
+	bool (*sk_stream_memory_free)(const struct sock *sk);
 };
 
 
@@ -139,6 +142,7 @@ void tls_clear_sw_offload(struct sock *sk);
 int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 int tls_sw_sendpage(struct sock *sk, struct page *page,
 		    int offset, size_t size, int flags);
+bool tls_sw_stream_memory_free(const struct sock *sk);
 
 struct tls_record_info *tls_get_record(struct tls_offload_context *context,
 				       u32 seq);

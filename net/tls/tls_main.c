@@ -296,6 +296,7 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 	ctx->sk_write_space = sk->sk_write_space;
 	ctx->sk_destruct = sk->sk_destruct;
 	sk->sk_write_space = tls_write_space;
+	ctx->sk_stream_memory_free = sk->sk_prot->stream_memory_free;
 
 	if (TLS_IS_STATE_HW(crypto_info)) {
 		rc = tls_set_device_offload(sk, ctx);
@@ -340,6 +341,7 @@ static int __init tls_init(void)
 	tls_sw_prot			= tcp_prot;
 	tls_sw_prot.sendmsg		= tls_sw_sendmsg;
 	tls_sw_prot.sendpage            = tls_sw_sendpage;
+	tls_sw_prot.stream_memory_free  = tls_sw_stream_memory_free;
 
 	return 0;
 }
