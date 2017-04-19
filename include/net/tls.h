@@ -69,9 +69,8 @@ struct tls_offload_context {
 	spinlock_t lock;	/* protects records list */
 };
 
-#define TLS_DATA_PAGES			(TLS_MAX_PAYLOAD_SIZE / PAGE_SIZE)
 /* +1 for aad, +1 for tag, +1 for chaining */
-#define TLS_SG_DATA_SIZE		(TLS_DATA_PAGES + 3)
+#define TLS_SG_DATA_SIZE                (MAX_SKB_FRAGS + 3)
 #define ALG_MAX_PAGES 16 /* for skb_to_sgvec */
 #define TLS_AAD_SPACE_SIZE		21
 #define TLS_AAD_SIZE			13
@@ -91,15 +90,14 @@ struct tls_sw_context {
 	struct scatterlist sg_tx_preenc[ALG_MAX_PAGES + 1];
 	char aad_send[TLS_AAD_SPACE_SIZE];
 	char tag_send[TLS_TAG_SIZE];
-	skb_frag_t tx_frag;
 	int wmem_len;
-	int order_npages;
 	struct scatterlist sgaad_send[2];
 	struct scatterlist sgtag_send[2];
 	struct sk_buff_head tx_queue;
 	int unsent;
 	bool tcp_sendpage;
 	bool sending;
+	struct sk_buff *tx_buff;
 };
 
 struct tls_context {
