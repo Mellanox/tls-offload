@@ -259,7 +259,7 @@ static inline int tls_push_record(struct sock *sk,
 
 }
 
-static inline int tls_get_new_record(
+static inline int tls_create_new_record(
 		struct tls_offload_context *offload_ctx,
 		struct page_frag *pfrag,
 		size_t prepand_size)
@@ -297,18 +297,26 @@ static inline int tls_do_allocation(
 		struct page_frag *pfrag,
 		size_t prepand_size)
 {
-	struct tls_record_info *record;
+	int ret;
+
+	if (!offload_ctx->open_record) {
+		if (unlikely(!skb_page_frag_refill(prepand_size, pfrag,
+						   sk->sk_allocation))) {
+			sk_enter_memory_pressure(sk);
+			sk_stream_moderate_sndbuf(sk);
+			return -ENOMEM;
+		}
+
+		ret = tls_create_new_record(offload_ctx, pfrag, prepand_size);
+		if (ret)
+			return ret;
+
+		if (pfrag->size > pfrag->offset)
+			return 0;
+	}
 
 	if (!sk_page_frag_refill(sk, pfrag))
 		return -ENOMEM;
-
-	record = offload_ctx->open_record;
-	if (!record) {
-		tls_get_new_record(offload_ctx, pfrag, prepand_size);
-		record = offload_ctx->open_record;
-		if (!record)
-			return -ENOMEM;
-	}
 
 	return 0;
 }
