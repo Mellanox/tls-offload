@@ -215,9 +215,9 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 
 	switch (crypto_info->cipher_type) {
 	case TLS_CIPHER_AES_GCM_128: {
-		struct tls_crypto_info_aes_gcm_128 *crypto_info_aes_gcm_128 =
+		struct tls12_crypto_info_aes_gcm_128 *crypto_info_aes_gcm_128 =
 				container_of(crypto_info,
-					     struct tls_crypto_info_aes_gcm_128,
+					     struct tls12_crypto_info_aes_gcm_128,
 					     info);
 
 		if (len != sizeof(*crypto_info_aes_gcm_128)) {
@@ -309,13 +309,13 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 
 	switch (crypto_info->cipher_type) {
 	case TLS_CIPHER_AES_GCM_128: {
-		if (optlen != sizeof(struct tls_crypto_info_aes_gcm_128)) {
+		if (optlen != sizeof(struct tls12_crypto_info_aes_gcm_128)) {
 			rc = -EINVAL;
 			goto err_crypto_info;
 		}
 		rc = copy_from_user(crypto_info,
 				    optval,
-				    sizeof(struct tls_crypto_info_aes_gcm_128));
+				    sizeof(struct tls12_crypto_info_aes_gcm_128));
 		break;
 	}
 	default:

@@ -55,6 +55,7 @@
 
 struct tls_record_info {
 	struct list_head list;
+	unsigned char rec_seq[TLS_RECORD_SEQ_SIZE];
 	u32 end_seq;
 	int len;
 	int num_frags;
@@ -103,7 +104,7 @@ struct tls_sw_context {
 struct tls_context {
 	union {
 		struct tls_crypto_info crypto_send;
-		struct tls_crypto_info_aes_gcm_128 crypto_send_aes_gcm_128;
+		struct tls12_crypto_info_aes_gcm_128 crypto_send_aes_gcm_128;
 	};
 
 	void *priv_ctx;
@@ -112,6 +113,7 @@ struct tls_context {
 	u16 tag_size;
 	u16 iv_size;
 	char *iv;
+	unsigned char rec_seq[TLS_RECORD_SEQ_SIZE];
 
 	/* TODO: change sw code to use below fields and push_frags function */
 	skb_frag_t *pending_frags;
