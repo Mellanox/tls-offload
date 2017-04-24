@@ -564,7 +564,7 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	ctx->iv_size = iv_size;
 	ctx->iv = kmalloc(iv_size, GFP_KERNEL);
 	if (!ctx->iv) {
-		rc = ENOMEM;
+		rc = -ENOMEM;
 		goto detach_sock;
 	}
 	memcpy(ctx->iv, iv, iv_size);
