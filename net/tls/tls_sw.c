@@ -40,10 +40,10 @@ static inline void tls_make_aad(struct sock *sk,
 				int recv,
 				char *buf,
 				size_t size,
-				char *nonce_explicit,
+				char *record_sequence,
 				unsigned char record_type)
 {
-	memcpy(buf, nonce_explicit, TLS_NONCE_SIZE);
+	memcpy(buf, record_sequence, TLS_RECORD_SEQ_SIZE);
 
 	buf[8] = record_type;
 	buf[9] = TLS_1_2_VERSION_MAJOR;
@@ -202,6 +202,7 @@ static int tls_kernel_sendpage(struct sock *sk, int flags)
 		/* Successfully sent the whole packet, account for it*/
 		tls_release_tx_frag(sk);
 		tls_increment_seqno(tls_ctx->iv, sk);
+		tls_increment_seqno(tls_ctx->rec_seq, sk);
 	} else if (ret != -EAGAIN)
 		tls_err_abort(sk);
 
@@ -217,7 +218,8 @@ static int tls_push_zerocopy(struct sock *sk, struct scatterlist *sgin,
 	skb_frag_t *frag;
 	int ret;
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->iv, record_type);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->rec_seq,
+		     record_type);
 
 	sg_chain(ctx->sgaad_send, 2, sgin);
 	sg_unmark_end(&sgin[pages - 1]);
@@ -276,7 +278,8 @@ static int tls_push(struct sock *sk, unsigned char record_type, int flags)
 		goto out;
 	}
 
-	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->iv, record_type);
+	tls_make_aad(sk, 0, ctx->aad_send, bytes, tls_ctx->rec_seq,
+		     record_type);
 
 	sg_chain(ctx->sgaad_send, 2, ctx->sg_tx_preenc);
 	sg_unmark_end(&ctx->sg_tx_preenc[nsg - 1]);
@@ -533,10 +536,10 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 	char keyval[TLS_CIPHER_AES_GCM_128_KEY_SIZE +
 		TLS_CIPHER_AES_GCM_128_SALT_SIZE];
 	struct tls_crypto_info *crypto_info;
-	struct tls_crypto_info_aes_gcm_128 *gcm_128_info;
+	struct tls12_crypto_info_aes_gcm_128 *gcm_128_info;
 	struct tls_sw_context *sw_ctx;
 	u16 nonece_size, tag_size, iv_size;
-	char *iv;
+	char *iv, *seq;
 	int rc = 0;
 
 	if (!ctx) {
@@ -563,9 +566,10 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		nonece_size = TLS_CIPHER_AES_GCM_128_IV_SIZE;
 		tag_size = TLS_CIPHER_AES_GCM_128_TAG_SIZE;
 		iv_size = TLS_CIPHER_AES_GCM_128_IV_SIZE;
-		iv = ((struct tls_crypto_info_aes_gcm_128 *)crypto_info)->iv;
+		iv = ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->iv;
+		seq = ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->seq;
 		gcm_128_info =
-			(struct tls_crypto_info_aes_gcm_128 *)crypto_info;
+			(struct tls12_crypto_info_aes_gcm_128 *)crypto_info;
 		break;
 	}
 	default:
@@ -582,6 +586,8 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		goto out;
 	}
 	memcpy(ctx->iv, iv, iv_size);
+
+	memcpy(ctx->rec_seq, seq, TLS_RECORD_SEQ_SIZE);
 
 	/* Preallocation for sending
 	 *   scatterlist: AAD | data | TAG (for crypto API)
