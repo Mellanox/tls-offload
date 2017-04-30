@@ -428,15 +428,6 @@ last_record:
 	return rc;
 }
 
-static inline bool record_is_open(struct sock *sk)
-{
-	struct tls_context *tls_ctx = tls_get_ctx(sk);
-	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
-	struct tls_record_info *record = ctx->open_record;
-
-	return record;
-}
-
 int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 {
 	unsigned char record_type = TLS_RECORD_TYPE_DATA;
@@ -444,19 +435,10 @@ int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 
 	lock_sock(sk);
 
-	if (unlikely(msg->msg_flags & MSG_OOB)) {
-		if ((msg->msg_flags & MSG_MORE) || record_is_open(sk)) {
-			rc = -EINVAL;
+	if (unlikely(msg->msg_controllen)) {
+		rc = tls_proccess_cmsg(sk, msg, &record_type);
+		if (rc)
 			goto out;
-		}
-
-		if (copy_from_iter(&record_type, 1, &msg->msg_iter) != 1) {
-			rc = -EFAULT;
-			goto out;
-		}
-
-		--size;
-		msg->msg_flags &= ~MSG_OOB;
 	}
 
 	rc = tls_push_data(sk, &msg->msg_iter, size,

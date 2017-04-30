@@ -228,5 +228,7 @@ static inline struct tls_offload_context *tls_offload_ctx(
 	return (struct tls_offload_context *)tls_ctx->priv_ctx;
 }
 
+int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
+		      unsigned char *record_type);
 
 #endif /* _TLS_OFFLOAD_H */

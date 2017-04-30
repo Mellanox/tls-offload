@@ -58,10 +58,7 @@
 #define TLS_CIPHER_AES_GCM_128_SALT_SIZE	((size_t)4)
 #define TLS_CIPHER_AES_GCM_128_TAG_SIZE		((size_t)16)
 
-struct tls_ctrlmsg {
-	unsigned char type;
-	unsigned char data[0];
-} __attribute__((packed));
+#define TLS_SET_RECORD_TYPE	1
 
 enum tls_state {
 	TLS_STATE_SW = 0x0,

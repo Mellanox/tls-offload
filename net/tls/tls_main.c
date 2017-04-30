@@ -101,6 +101,65 @@ retry:
 	return 0;
 }
 
+static inline bool pending_open_record(struct tls_context *tls_ctx)
+{
+	struct tls_sw_context *sw_ctx;
+
+	if (TLS_IS_STATE_HW(&tls_ctx->crypto_send)) {
+		struct tls_offload_context *hw_ctx = tls_offload_ctx(tls_ctx);
+
+		return hw_ctx->open_record;
+	}
+
+	sw_ctx = tls_sw_ctx(tls_ctx);
+
+	return sw_ctx->unsent;
+}
+
+static int tls_handle_open_record(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+
+	if (pending_open_record(tls_ctx))
+		return -EINVAL;
+
+	return 0;
+}
+
+int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
+		      unsigned char *record_type)
+{
+	struct cmsghdr *cmsg;
+	int rc = -EINVAL;
+
+	/* TODO: sendmsg with timestamp */
+	for_each_cmsghdr(cmsg, msg) {
+		if (!CMSG_OK(msg, cmsg))
+			return -EINVAL;
+		if (cmsg->cmsg_level != SOL_TLS)
+			continue;
+		switch (cmsg->cmsg_type) {
+		case TLS_SET_RECORD_TYPE:
+			if (cmsg->cmsg_len < CMSG_LEN(sizeof(*record_type)))
+				return -EINVAL;
+
+			if (msg->msg_flags & MSG_MORE)
+				return -EINVAL;
+
+			if (tls_handle_open_record(sk))
+				return -EINVAL;
+
+			*record_type = *(unsigned char *)CMSG_DATA(cmsg);
+			rc = 0;
+			break;
+		default:
+			return -EINVAL;
+		}
+	}
+
+	return rc;
+}
+
 int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
 			     int flags) {
 	skb_frag_t *frag = ctx->pending_frags;
