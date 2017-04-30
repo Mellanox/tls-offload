@@ -362,18 +362,10 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 
 	lock_sock(sk);
 
-	if (msg->msg_flags & MSG_OOB) {
-		if (!eor || ctx->unsent) {
-			ret = -EINVAL;
+	if (unlikely(msg->msg_controllen)) {
+		ret = tls_proccess_cmsg(sk, msg, &record_type);
+		if (ret)
 			goto send_end;
-		}
-
-		ret = copy_from_iter(&record_type, 1, &msg->msg_iter);
-		if (ret != 1) {
-			return -EFAULT;
-			goto send_end;
-		}
-		copied += ret;
 	}
 
 	while (msg_data_left(msg)) {
@@ -414,7 +406,6 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 			pages = ret;
 			ctx->unsent += bytes;
 			copied += bytes;
-
 			ret = tls_push_zerocopy(sk, sgin, pages, bytes,
 						record_type, msg->msg_flags);
 
@@ -424,7 +415,6 @@ put_pages_zerocopy:
 			if (ret)
 				goto send_end;
 		}
-
 reg_send:
 		while (!skb) {
 			skb = alloc_skb(0, sk->sk_allocation);
