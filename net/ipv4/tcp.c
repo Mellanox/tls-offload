@@ -2423,6 +2423,24 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		release_sock(sk);
 		return err;
 	}
+	case TCP_ULP: {
+		char name[TCP_ULP_NAME_MAX];
+
+		if (optlen < 1)
+			return -EINVAL;
+
+		val = strncpy_from_user(name, optval,
+					min_t(long, TCP_ULP_NAME_MAX-1,
+					      optlen));
+		if (val < 0)
+			return -EFAULT;
+		name[val] = 0;
+
+		lock_sock(sk);
+		err = tcp_set_ulp(sk, name);
+		release_sock(sk);
+		return err;
+	}
 	default:
 		/* fallthru */
 		break;
@@ -2677,21 +2695,6 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 		tp->notsent_lowat = val;
 		sk->sk_write_space(sk);
 		break;
-	case TCP_TLS_TX:
-	case TCP_TLS_RX: {
-		int (*fn)(struct sock *sk, int optname,
-			  char __user *optval, unsigned int optlen);
-
-		fn = symbol_get(tls_sk_attach);
-		if (!fn) {
-			err = -EINVAL;
-			break;
-		}
-
-		err = fn(sk, optname, optval, optlen);
-		symbol_put(tls_sk_attach);
-		break;
-	}
 	default:
 		err = -ENOPROTOOPT;
 		break;
@@ -2981,6 +2984,17 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 			return -EFAULT;
 		return 0;
 
+	case TCP_ULP:
+		if (get_user(len, optlen))
+			return -EFAULT;
+		len = min_t(unsigned int, len, TCP_ULP_NAME_MAX);
+		if (put_user(len, optlen))
+			return -EFAULT;
+		if (copy_to_user(optval, icsk->icsk_ulp_ops->name, len))
+			return -EFAULT;
+		return 0;
+
+
 	case TCP_THIN_LINEAR_TIMEOUTS:
 		val = tp->thin_lto;
 		break;
@@ -3079,22 +3093,6 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 				return -EFAULT;
 		}
 		return 0;
-	}
-	case TCP_TLS_TX:
-	case TCP_TLS_RX: {
-		int err;
-		int (*fn)(struct sock *sk, int optname,
-			  char __user *optval, int __user *optlen);
-
-		fn = symbol_get(tls_sk_query);
-		if (!fn) {
-			err = -EINVAL;
-			break;
-		}
-
-		err = fn(sk, optname, optval, optlen);
-		symbol_put(tls_sk_query);
-		return err;
 	}
 	default:
 		return -ENOPROTOOPT;
