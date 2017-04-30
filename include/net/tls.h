@@ -132,6 +132,12 @@ struct tls_context {
 	void (*sk_write_space)(struct sock *sk);
 	void (*sk_destruct)(struct sock *sk);
 	void (*sk_close)(struct sock *sk, long timeout);
+	int  (*setsockopt)(struct sock *sk, int level,
+			   int optname, char __user *optval,
+			   unsigned int optlen);
+	int  (*getsockopt)(struct sock *sk, int level,
+			   int optname, char __user *optval,
+			   int __user *optlen);
 };
 
 
@@ -140,7 +146,6 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 		  unsigned int optlen);
 
-void tls_clear_device_offload(struct sock *sk, struct tls_context *ctx);
 int tls_set_device_offload(struct sock *sk, struct tls_context *ctx);
 int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 int tls_device_sendpage(struct sock *sk, struct page *page,
@@ -222,7 +227,9 @@ static inline void tls_fill_prepend(struct tls_context *ctx,
 
 static inline struct tls_context *tls_get_ctx(const struct sock *sk)
 {
-	return sk->sk_user_data;
+	struct inet_connection_sock *icsk = inet_csk(sk);
+
+	return icsk->icsk_ulp_data;
 }
 
 static inline struct tls_sw_context *tls_sw_ctx(

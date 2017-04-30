@@ -39,6 +39,10 @@
 #include <asm/byteorder.h>
 #include <linux/socket.h>
 #include <linux/tcp.h>
+#include <net/tcp.h>
+
+/* TLS socket options */
+#define TLS_TX			1	/* Set transmit parameters */
 
 /* Supported versions */
 #define TLS_VERSION_MINOR(ver)	((ver) & 0xFF)

@@ -45,6 +45,7 @@ MODULE_AUTHOR("Mellanox Technologies");
 MODULE_DESCRIPTION("Transport Layer Security Support");
 MODULE_LICENSE("Dual BSD/GPL");
 
+static struct proto tls_base_prot;
 static struct proto tls_device_prot;
 static struct proto tls_sw_prot;
 
@@ -189,8 +190,8 @@ static void tls_write_space(struct sock *sk)
 	ctx->sk_write_space(sk);
 }
 
-int tls_sk_query(struct sock *sk, int optname, char __user *optval,
-		 int __user *optlen)
+static int do_tls_getsockopt_tx(struct sock *sk, char __user *optval,
+				int __user *optlen)
 {
 	int rc = 0;
 	struct tls_context *ctx = tls_get_ctx(sk);
@@ -211,18 +212,7 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 	}
 
 	/* get user crypto info */
-	switch (optname) {
-	case TCP_TLS_TX: {
-		crypto_info = &ctx->crypto_send;
-		break;
-	}
-	case TCP_TLS_RX:
-		/* fallthru since for now we don't support */
-	default: {
-		rc = -ENOPROTOOPT;
-		goto out;
-	}
-	}
+	crypto_info = &ctx->crypto_send;
 
 	if (!TLS_CRYPTO_INFO_READY(crypto_info)) {
 		rc = -EBUSY;
@@ -261,93 +251,87 @@ int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 out:
 	return rc;
 }
-EXPORT_SYMBOL(tls_sk_query);
 
-void tls_sk_destruct(struct sock *sk, struct tls_context *ctx)
-{
-	ctx->sk_destruct(sk);
-	kfree(ctx->rec_seq);
-	kfree(ctx->iv);
-	kfree(ctx);
-	module_put(THIS_MODULE);
-}
-
-int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
-		  unsigned int optlen)
+static int do_tls_getsockopt(struct sock *sk, int optname,
+			     char __user *optval, int __user *optlen)
 {
 	int rc = 0;
+
+	switch (optname) {
+	case TLS_TX:
+		rc = do_tls_getsockopt_tx(sk, optval, optlen);
+		break;
+	default:
+		rc = -ENOPROTOOPT;
+		break;
+	};
+	return rc;
+}
+
+static int tls_getsockopt(struct sock *sk, int level, int optname,
+		   char __user *optval, int __user *optlen)
+{
 	struct tls_context *ctx = tls_get_ctx(sk);
-	struct tls_crypto_info *crypto_info;
-	bool allocated_tls_ctx = false;
+
+	if (level != SOL_TLS)
+		return ctx->getsockopt(sk, level, optname, optval, optlen);
+
+	return do_tls_getsockopt(sk, optname, optval, optlen);
+}
+
+static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
+				unsigned int optlen)
+{
+	struct tls_crypto_info *crypto_info, tmp_crypto_info;
+	struct tls_context *ctx = tls_get_ctx(sk);
 	struct proto *prot = NULL;
+	int rc = 0;
 
 	if (!optval || (optlen < sizeof(*crypto_info))) {
 		rc = -EINVAL;
 		goto out;
 	}
 
-	/* allocate tls context */
-	if (!ctx) {
-		ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
-		if (!ctx) {
-			rc = -ENOMEM;
-			goto out;
-		}
-		sk->sk_user_data = ctx;
-		allocated_tls_ctx = true;
+	rc = copy_from_user(&tmp_crypto_info, optval, sizeof(*crypto_info));
+	if (rc) {
+		rc = -EFAULT;
+		goto out;
+	}
+
+	/* check version */
+	if (tmp_crypto_info.version != TLS_1_2_VERSION) {
+		rc = -ENOTSUPP;
+		goto out;
 	}
 
 	/* get user crypto info */
-	switch (optname) {
-	case TCP_TLS_TX: {
-		crypto_info = &ctx->crypto_send;
-		break;
-	}
-	case TCP_TLS_RX:
-		/* fallthru since for now we don't support */
-	default: {
-		rc = -ENOPROTOOPT;
-		goto err_sk_user_data;
-	}
-	}
+	crypto_info = &ctx->crypto_send;
 
 	/* Currently we don't support set crypto info more than one time */
 	if (TLS_CRYPTO_INFO_READY(crypto_info)) {
 		rc = -EEXIST;
-		goto err_sk_user_data;
+		goto out;
 	}
 
-	rc = copy_from_user(crypto_info, optval, sizeof(*crypto_info));
-	if (rc) {
-		rc = -EFAULT;
-		goto err_sk_user_data;
-	}
-
-	/* check version */
-	if (crypto_info->version != TLS_1_2_VERSION) {
-		rc = -ENOTSUPP;
-		goto err_crypto_info;
-	}
-
-	switch (crypto_info->cipher_type) {
+	switch (tmp_crypto_info.cipher_type) {
 	case TLS_CIPHER_AES_GCM_128: {
 		if (optlen != sizeof(struct tls12_crypto_info_aes_gcm_128)) {
 			rc = -EINVAL;
-			goto err_crypto_info;
+			goto out;
 		}
 		rc = copy_from_user(crypto_info,
 				    optval,
 				    sizeof(struct tls12_crypto_info_aes_gcm_128));
+
+		if (rc) {
+			rc = -EFAULT;
+			goto err_crypto_info;
+		}
 		break;
 	}
 	default:
 		rc = -EINVAL;
-		goto err_crypto_info;
-	}
-
-	if (rc) {
-		rc = -EFAULT;
-		goto err_crypto_info;
+		goto out;
 	}
 
 	ctx->sk_write_space = sk->sk_write_space;
@@ -367,45 +351,100 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 			goto err_crypto_info;
 	}
 
-	if (!try_module_get(THIS_MODULE)) {
-		rc = -EINVAL;
-		goto err_set_device_offload;
-	}
-
-	rc = 0;
-
 	sk->sk_prot = prot;
 	goto out;
 
-err_set_device_offload:
-	tls_clear_device_offload(sk, ctx);
 err_crypto_info:
 	memset(crypto_info, 0, sizeof(*crypto_info));
-err_sk_user_data:
-	if (allocated_tls_ctx)
-		kfree(ctx);
 out:
 	return rc;
 }
-EXPORT_SYMBOL(tls_sk_attach);
 
-static int __init tls_init(void)
+static int do_tls_setsockopt(struct sock *sk, int optname,
+			     char __user *optval, unsigned int optlen)
 {
-	tls_device_prot			= tcp_prot;
+	int rc = 0;
+
+	switch (optname) {
+	case TLS_TX:
+		lock_sock(sk);
+		rc = do_tls_setsockopt_tx(sk, optval, optlen);
+		release_sock(sk);
+		break;
+	default:
+		rc = -ENOPROTOOPT;
+		break;
+	};
+	return rc;
+}
+
+static int tls_setsockopt(struct sock *sk, int level, int optname,
+		   char __user *optval, unsigned int optlen)
+{
+	struct tls_context *ctx = tls_get_ctx(sk);
+
+	if (level != SOL_TLS)
+		return ctx->setsockopt(sk, level, optname, optval, optlen);
+
+	return do_tls_setsockopt(sk, optname, optval, optlen);
+}
+
+void tls_sk_destruct(struct sock *sk, struct tls_context *ctx)
+{
+	ctx->sk_destruct(sk);
+	kfree(ctx->iv);
+	kfree(ctx);
+}
+
+static int tls_init(struct sock *sk)
+{
+	struct inet_connection_sock *icsk = inet_csk(sk);
+	struct tls_context *ctx;
+	int rc = 0;
+
+	/* allocate tls context */
+	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
+	if (!ctx) {
+		rc = -ENOMEM;
+		goto out;
+	}
+	icsk->icsk_ulp_data = ctx;
+	ctx->setsockopt = sk->sk_prot->setsockopt;
+	ctx->getsockopt = sk->sk_prot->getsockopt;
+	sk->sk_prot = &tls_base_prot;
+out:
+	return rc;
+}
+
+static struct tcp_ulp_ops tcp_tls_ulp_ops __read_mostly = {
+	.name			= "tls",
+	.owner			= THIS_MODULE,
+	.init			= tls_init,
+};
+
+static int __init tls_register(void)
+{
+	tls_base_prot			= tcp_prot;
+	tls_base_prot.setsockopt	= tls_setsockopt;
+	tls_base_prot.getsockopt	= tls_getsockopt;
+
+	tls_device_prot			= tls_base_prot;
 	tls_device_prot.sendmsg		= tls_device_sendmsg;
 	tls_device_prot.sendpage	= tls_device_sendpage;
 
-	tls_sw_prot			= tcp_prot;
+	tls_sw_prot			= tls_base_prot;
 	tls_sw_prot.sendmsg		= tls_sw_sendmsg;
 	tls_sw_prot.sendpage            = tls_sw_sendpage;
 	tls_sw_prot.close               = tls_sw_close;
 
+	tcp_register_ulp(&tcp_tls_ulp_ops);
 	return 0;
 }
 
-static void __exit tls_exit(void)
+static void __exit tls_unregister(void)
 {
+	tcp_unregister_ulp(&tcp_tls_ulp_ops);
 }
 
-module_init(tls_init);
-module_exit(tls_exit);
+module_init(tls_register);
+module_exit(tls_unregister);
