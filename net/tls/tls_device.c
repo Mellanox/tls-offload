@@ -322,12 +322,12 @@ static inline int tls_do_allocation(
 }
 
 static int tls_push_data(struct sock *sk,
+			 struct tls_context *tls_ctx,
+			 struct tls_offload_context *ctx,
 			 struct iov_iter *msg_iter,
 			 size_t size, int flags,
 			 unsigned char record_type)
 {
-	struct tls_context *tls_ctx = tls_get_ctx(sk);
-	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
 	struct tls_record_info *record = ctx->open_record;
 	struct page_frag *pfrag;
 	int copy, rc = 0;
@@ -430,20 +430,22 @@ last_record:
 
 int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 {
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
 	unsigned char record_type = TLS_RECORD_TYPE_DATA;
 	int rc = 0;
 
 	lock_sock(sk);
 
 	if (unlikely(msg->msg_controllen)) {
-		rc = tls_proccess_cmsg(sk, msg, &record_type);
+		rc = tls_proccess_cmsg(sk, msg, &record_type, ctx->open_record);
 		if (rc)
 			goto out;
 	}
 
-	rc = tls_push_data(sk, &msg->msg_iter, size,
-			   msg->msg_flags,
-			   record_type);
+	rc = tls_push_data(sk, tls_ctx, ctx,
+			   &msg->msg_iter, size,
+			   msg->msg_flags, record_type);
 
 out:
 	release_sock(sk);
@@ -453,6 +455,8 @@ out:
 int tls_device_sendpage(struct sock *sk, struct page *page,
 			int offset, size_t size, int flags)
 {
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
 	struct iov_iter	msg_iter;
 	struct kvec iov;
 	char *kaddr = kmap(page);
@@ -471,9 +475,9 @@ int tls_device_sendpage(struct sock *sk, struct page *page,
 	iov.iov_base = kaddr + offset;
 	iov.iov_len = size;
 	iov_iter_kvec(&msg_iter, WRITE | ITER_KVEC, &iov, 1, size);
-	rc = tls_push_data(sk, &msg_iter, size,
-			   flags,
-			   TLS_RECORD_TYPE_DATA);
+	rc = tls_push_data(sk, tls_ctx, ctx,
+			   &msg_iter, size,
+			   flags, TLS_RECORD_TYPE_DATA);
 	kunmap(page);
 
 out:

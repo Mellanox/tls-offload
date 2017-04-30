@@ -101,33 +101,8 @@ retry:
 	return 0;
 }
 
-static inline bool pending_open_record(struct tls_context *tls_ctx)
-{
-	struct tls_sw_context *sw_ctx;
-
-	if (TLS_IS_STATE_HW(&tls_ctx->crypto_send)) {
-		struct tls_offload_context *hw_ctx = tls_offload_ctx(tls_ctx);
-
-		return hw_ctx->open_record;
-	}
-
-	sw_ctx = tls_sw_ctx(tls_ctx);
-
-	return sw_ctx->unsent;
-}
-
-static int tls_handle_open_record(struct sock *sk)
-{
-	struct tls_context *tls_ctx = tls_get_ctx(sk);
-
-	if (pending_open_record(tls_ctx))
-		return -EINVAL;
-
-	return 0;
-}
-
 int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
-		      unsigned char *record_type)
+		      unsigned char *record_type, bool is_open_record)
 {
 	struct cmsghdr *cmsg;
 	int rc = -EINVAL;
@@ -138,6 +113,7 @@ int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
 			return -EINVAL;
 		if (cmsg->cmsg_level != SOL_TLS)
 			continue;
+
 		switch (cmsg->cmsg_type) {
 		case TLS_SET_RECORD_TYPE:
 			if (cmsg->cmsg_len < CMSG_LEN(sizeof(*record_type)))
@@ -146,7 +122,7 @@ int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
 			if (msg->msg_flags & MSG_MORE)
 				return -EINVAL;
 
-			if (tls_handle_open_record(sk))
+			if (is_open_record)
 				return -EINVAL;
 
 			*record_type = *(unsigned char *)CMSG_DATA(cmsg);

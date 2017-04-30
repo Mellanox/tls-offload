@@ -229,6 +229,6 @@ static inline struct tls_offload_context *tls_offload_ctx(
 }
 
 int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
-		      unsigned char *record_type);
+		      unsigned char *record_type, bool is_open_record);
 
 #endif /* _TLS_OFFLOAD_H */
