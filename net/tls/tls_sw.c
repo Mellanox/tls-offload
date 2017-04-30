@@ -363,7 +363,7 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	lock_sock(sk);
 
 	if (unlikely(msg->msg_controllen)) {
-		ret = tls_proccess_cmsg(sk, msg, &record_type);
+		ret = tls_proccess_cmsg(sk, msg, &record_type, ctx->unsent);
 		if (ret)
 			goto send_end;
 	}
