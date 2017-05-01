@@ -92,7 +92,6 @@ static bool alloc_encrypted_pages(struct sock *sk, int len)
 		if (!sk_page_frag_refill(sk, pfrag))
 			return 0;
 		use = min_t(int, len, pfrag->size - pfrag->offset);
-		use = min_t(int, PAGE_SIZE, use);
 
 		if (!sk_wmem_schedule(sk, use))
 			return 0;
