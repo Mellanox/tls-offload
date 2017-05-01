@@ -182,7 +182,7 @@ static int tls_kernel_sendpage(struct sock *sk, int flags)
 
 	if (ret >= 0)
 		/* Successfully sent the whole packet, account for it*/
-		tls_release_tx_frag(sk);
+		tls_release_tx_buf(sk);
 	else if (ret != -EAGAIN)
 		tls_err_abort(sk);
 
@@ -349,6 +349,12 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	unsigned char record_type = TLS_RECORD_TYPE_DATA;
 
 	lock_sock(sk);
+
+	if (tls_is_pending_open_record(tls_ctx)) {
+		ret = tls_push_paritial_record(sk, tls_ctx, msg->msg_flags);
+		if (ret < 0)
+			goto send_end;
+	}
 
 	if (unlikely(msg->msg_controllen)) {
 		ret = tls_proccess_cmsg(sk, msg, &record_type);
@@ -670,6 +676,12 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 		goto sendpage_end;
 	}
 	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
+
+	if (tls_is_pending_open_record(tls_ctx)) {
+		ret = tls_push_paritial_record(sk, tls_ctx, flags);
+		if (ret < 0)
+			goto sendpage_end;
+	}
 
 	/* Call the sk_stream functions to manage the sndbuf mem. */
 	while (size > 0) {
