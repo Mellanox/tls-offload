@@ -41,7 +41,7 @@ static DEFINE_SPINLOCK(tls_del_lock);
 static DECLARE_WORK(tls_del_work, mlx_tls_del_work);
 static LIST_HEAD(tls_del_list);
 
-static int build_ctx(struct tls_crypto_info_aes_gcm_128 *crypto_info,
+static int build_ctx(struct tls12_crypto_info_aes_gcm_128 *crypto_info,
 		     u32 expectedSN,
 		     unsigned short skc_family,
 		     struct inet_sock *inet,
@@ -74,8 +74,10 @@ static int build_ctx(struct tls_crypto_info_aes_gcm_128 *crypto_info,
 
 	memcpy(&tls->rcd.rcd_implicit_iv, crypto_info->salt,
 	       TLS_CIPHER_AES_GCM_128_SALT_SIZE);
-	memcpy(tls->rcd.rcd_sn, crypto_info->iv,
+	memcpy(tls->rcd.iv, crypto_info->iv,
 	       TLS_CIPHER_AES_GCM_128_IV_SIZE);
+	memcpy(tls->rcd.rcd_sn, crypto_info->info.seq,
+	       TLS_RECORD_SEQ_SIZE);
 	memcpy(tls->crypto.enc_key, crypto_info->key,
 	       TLS_CIPHER_AES_GCM_128_KEY_SIZE);
 	memcpy(tls->crypto.enc_key + TLS_CIPHER_AES_GCM_128_KEY_SIZE,
@@ -283,7 +285,7 @@ static void write_context(struct mlx5_core_dev *dev, void *ctx,
 }
 
 int mlx_tls_hw_start_cmd(struct mlx_tls_dev *dev, struct sock *sk,
-			 struct tls_crypto_info_aes_gcm_128 *crypto_info,
+			 struct tls12_crypto_info_aes_gcm_128 *crypto_info,
 			 struct mlx_tls_offload_context *context)
 {
 	struct tls_cntx tls;
@@ -339,7 +341,7 @@ static void mlx_accel_core_kfree_complete(struct mlx_accel_core_conn *conn,
 
 int mlx_tls_hw_start_cmd(struct mlx_tls_dev *dev,
 			 struct sock *sk,
-			 struct tls_crypto_info_aes_gcm_128 *crypto_info,
+			 struct tls12_crypto_info_aes_gcm_128 *crypto_info,
 			 struct mlx_tls_offload_context *context)
 {
 	struct mlx_accel_core_dma_buf *buf;

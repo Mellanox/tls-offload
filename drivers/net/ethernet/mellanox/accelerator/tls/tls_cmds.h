@@ -66,6 +66,7 @@ struct tls_cntx_crypto {
 } __packed;
 
 struct tls_cntx_record {
+	u8 iv[8];
 	u8 rcd_sn[8];
 	u16 pad;
 	u8 flags;

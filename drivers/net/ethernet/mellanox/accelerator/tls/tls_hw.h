@@ -39,7 +39,7 @@ int mlx_tls_hw_init(void);
 void mlx_tls_hw_deinit(void);
 
 int mlx_tls_hw_start_cmd(struct mlx_tls_dev *dev, struct sock *sk,
-			 struct tls_crypto_info_aes_gcm_128 *crypto_info,
+			 struct tls12_crypto_info_aes_gcm_128 *crypto_info,
 			 struct mlx_tls_offload_context *context);
 void mlx_tls_hw_stop_cmd(struct net_device *netdev,
 			 struct mlx_tls_offload_context *context);
