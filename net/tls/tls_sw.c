@@ -477,6 +477,7 @@ reg_send:
 
 		copied += copy;
 		ctx->unsent += copy;
+		tls_ctx->open_record_frags = i;
 
 		if (ctx->unsent >= TLS_MAX_PAYLOAD_SIZE) {
 			ret = tls_push(sk, record_type, msg->msg_flags);
@@ -764,6 +765,8 @@ coalesced:
 		queued += send_size;
 		offset += queued;
 		size -= send_size;
+
+		tls_ctx->open_record_frags = i + 1;
 
 		if (eor || ctx->unsent >= TLS_MAX_PAYLOAD_SIZE) {
 			ret = tls_push(sk, record_type, flags);
