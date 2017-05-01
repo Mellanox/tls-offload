@@ -106,6 +106,8 @@ struct tls_context {
 
 	void *priv_ctx;
 
+
+
 	u16 prepand_size;
 	u16 tag_size;
 	u16 iv_size;
@@ -113,9 +115,19 @@ struct tls_context {
 	u16 rec_seq_size;
 	char *rec_seq;
 
+	int flags;
+
 	skb_frag_t *pending_frags;
-	u16 num_pending_frags;
 	u16 pending_offset;
+
+	/* This is the number of unpushed frags in the open record.
+	 * tls_is_pending_open_record() should be used to determine whether
+	 * we already started pushing the record and it remains open
+	 * due to backpressure from the TCP layer or whether
+	 * it is open due to the use of MSG_MORE OR MSG_SENDPAGE_NOTLAST.
+	 */
+	u16 open_record_frags;
+
 
 	void (*sk_write_space)(struct sock *sk);
 	void (*sk_destruct)(struct sock *sk);
@@ -158,7 +170,7 @@ int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
 
 static inline bool tls_is_pending_open_record(struct tls_context *ctx)
 {
-	return !!ctx->num_pending_frags;
+	return ctx->pending_frags != NULL;
 }
 
 static inline bool tls_is_sk_tx_device_offloaded(struct sock *sk)

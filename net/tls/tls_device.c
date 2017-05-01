@@ -337,7 +337,7 @@ static int tls_push_data(struct sock *sk,
 	long timeo;
 	int more = flags & (MSG_SENDPAGE_NOTLAST | MSG_MORE);
 	int tls_push_record_flags = flags | MSG_SENDPAGE_NOTLAST;
-	bool last = false;
+	bool done = false;
 
 	if (sk->sk_err)
 		return sk->sk_err;
@@ -402,10 +402,15 @@ handle_error:
 		if (!size) {
 last_record:
 			tls_push_record_flags = flags;
-			last = true;
+			if (more) {
+				tls_ctx->open_record_frags = record->num_frags;
+				break;
+			}
+
+			done = true;
 		}
 
-		if ((last && !more) ||
+		if ((done) ||
 		    (record->len >= max_open_record_len) ||
 		    (record->num_frags >= MAX_SKB_FRAGS - 1)) {
 			rc = tls_push_record(sk,
@@ -418,7 +423,7 @@ last_record:
 			if (rc < 0)
 				break;
 		}
-	} while (!last);
+	} while (!done);
 
 	if (orig_size - size > 0) {
 		rc = orig_size - size;

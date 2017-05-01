@@ -63,6 +63,8 @@ int tls_push_frags(struct sock *sk,
 	size = skb_frag_size(frag) - offset;
 	offset += frag->page_offset;
 
+	ctx->open_record_frags = 0;
+
 	while (1) {
 		if (!--num_frags)
 			sendpage_flags = flags;
@@ -86,7 +88,7 @@ retry:
 			offset -= frag->page_offset;
 			ctx->pending_offset = offset;
 			ctx->pending_frags = frag;
-			ctx->num_pending_frags = num_frags + 1;
+			ctx->open_record_frags = num_frags + 1;
 			return ret;
 		}
 
@@ -103,17 +105,8 @@ retry:
 
 static inline bool pending_open_record(struct tls_context *tls_ctx)
 {
-	struct tls_sw_context *sw_ctx;
-
-	if (TLS_IS_STATE_HW(&tls_ctx->crypto_send)) {
-		struct tls_offload_context *hw_ctx = tls_offload_ctx(tls_ctx);
-
-		return hw_ctx->open_record;
-	}
-
-	sw_ctx = tls_sw_ctx(tls_ctx);
-
-	return sw_ctx->unsent;
+	return tls_ctx->open_record_frags &&
+	       !tls_is_pending_open_record(tls_ctx);
 }
 
 static int tls_handle_open_record(struct sock *sk)
@@ -168,9 +161,9 @@ int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
 			     int flags) {
 	skb_frag_t *frag = ctx->pending_frags;
 	u16 offset = ctx->pending_offset;
-	u16 num_frags = ctx->num_pending_frags;
+	u16 num_frags = ctx->open_record_frags;
 
-	ctx->num_pending_frags = 0;
+	ctx->pending_frags = NULL;
 
 	return tls_push_frags(sk, ctx, frag,
 			      num_frags, offset, flags);
