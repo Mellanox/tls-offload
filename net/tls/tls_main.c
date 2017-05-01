@@ -245,6 +245,7 @@ EXPORT_SYMBOL(tls_sk_query);
 void tls_sk_destruct(struct sock *sk, struct tls_context *ctx)
 {
 	ctx->sk_destruct(sk);
+	kfree(ctx->rec_seq);
 	kfree(ctx->iv);
 	kfree(ctx);
 	module_put(THIS_MODULE);

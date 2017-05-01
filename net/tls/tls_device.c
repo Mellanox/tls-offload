@@ -246,7 +246,6 @@ static inline int tls_push_record(struct sock *sk,
 
 	tls_append_frag(record, tag_pfrag, ctx->tag_size);
 	record->end_seq = tp->write_seq + record->len;
-	memcpy(record->rec_seq, ctx->rec_seq, TLS_RECORD_SEQ_SIZE);
 	spin_lock_irq(&offload_ctx->lock);
 	list_add_tail(&record->list, &offload_ctx->records_list);
 	spin_unlock_irq(&offload_ctx->lock);
@@ -517,8 +516,8 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	struct tls_crypto_info *crypto_info;
 	struct tls_offload_context *offload_ctx;
 	struct tls_record_info *dummy_record;
-	u16 nonece_size, tag_size, iv_size;
-	char *iv, *seq;
+	u16 nonece_size, tag_size, iv_size, rec_seq_size;
+	char *iv, *rec_seq;
 	int rc;
 
 	if (!ctx) {
@@ -538,7 +537,8 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 		tag_size = TLS_CIPHER_AES_GCM_128_TAG_SIZE;
 		iv_size = TLS_CIPHER_AES_GCM_128_IV_SIZE;
 		iv = ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->iv;
-		seq = ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->seq;
+		rec_seq_size = TLS_CIPHER_AES_GCM_128_REC_SEQ_SIZE;
+		rec_seq = ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->rec_seq;
 		break;
 	}
 	default:
@@ -565,7 +565,13 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 		goto detach_sock;
 	}
 	memcpy(ctx->iv, iv, iv_size);
-	memcpy(ctx->rec_seq, seq, TLS_RECORD_SEQ_SIZE);
+	ctx->rec_seq_size = rec_seq_size;
+	ctx->rec_seq = kmalloc(rec_seq_size, GFP_KERNEL);
+	if (!ctx->rec_seq) {
+		rc = -ENOMEM;
+		goto err_iv;
+	}
+	memcpy(ctx->rec_seq, rec_seq, rec_seq_size);
 
 	offload_ctx = ctx->priv_ctx;
 	dummy_record->end_seq = offload_ctx->expectedSN;
@@ -583,6 +589,8 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 			  &tls_device_sk_destruct);
 	goto out;
 
+err_iv:
+	kfree(ctx->iv);
 detach_sock:
 	detach_sock_from_netdev(sk, ctx);
 err_dummy_record:
