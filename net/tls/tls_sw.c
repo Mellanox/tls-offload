@@ -22,18 +22,6 @@
 
 #include <net/tls.h>
 
-bool tls_sw_stream_memory_free(const struct sock *sk)
-{
-	struct tls_context *tls_ctx = tls_get_ctx(sk);
-	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
-
-	if (!ctx->tcp_sendpage &&
-	    ((ctx->unsent >= TLS_MAX_PAYLOAD_SIZE) || ctx->sending)) {
-		return 0;
-	}
-	return tls_ctx->sk_stream_memory_free(sk);
-}
-
 static int tls_kernel_sendpage(struct sock *sk, int flags);
 
 static inline void tls_make_aad(int recv,
@@ -168,7 +156,6 @@ static void tls_release_tx_frag(struct sock *sk)
 
 	if (ctx->tx_buff) {
 		sk_mem_uncharge(sk, ctx->unsent + TLS_OVERHEAD);
-		ctx->sending = 0;
 		ctx->unsent = 0;
 		sk->sk_wmem_queued -= ctx->wmem_len;
 
@@ -188,15 +175,10 @@ static void tls_release_tx_frag(struct sock *sk)
 static int tls_kernel_sendpage(struct sock *sk, int flags)
 {
 	int ret;
-
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
-
-	ctx->tcp_sendpage = 1;
-	ctx->sending = 1;
 	ret = tls_push_frags(sk, tls_ctx, skb_shinfo(ctx->tx_buff)->frags,
 			     skb_shinfo(ctx->tx_buff)->nr_frags, 0, flags);
-	ctx->tcp_sendpage = 0;
 
 	if (ret >= 0 && !tls_is_pending_open_record(tls_ctx)) {
 		/* Successfully sent the whole packet, account for it*/
