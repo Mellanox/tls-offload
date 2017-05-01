@@ -113,7 +113,6 @@ struct tls_context {
 	u16 rec_seq_size;
 	char *rec_seq;
 
-	/* TODO: change sw code to use below fields and push_frags function */
 	skb_frag_t *pending_frags;
 	u16 num_pending_frags;
 	u16 pending_offset;
