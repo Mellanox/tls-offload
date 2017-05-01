@@ -148,7 +148,7 @@ static int tls_pre_encrypt(struct sock *sk, size_t data_len)
 	return ret;
 }
 
-static void tls_release_tx_frag(struct sock *sk)
+static void tls_release_tx_buf(struct sock *sk)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
@@ -180,13 +180,14 @@ static int tls_kernel_sendpage(struct sock *sk, int flags)
 	ret = tls_push_frags(sk, tls_ctx, skb_shinfo(ctx->tx_buff)->frags,
 			     skb_shinfo(ctx->tx_buff)->nr_frags, 0, flags);
 
-	if (ret >= 0 && !tls_is_pending_open_record(tls_ctx)) {
+	if (ret >= 0)
 		/* Successfully sent the whole packet, account for it*/
 		tls_release_tx_frag(sk);
-		tls_increment_seqno(tls_ctx->iv, sk);
-		tls_increment_seqno(tls_ctx->rec_seq, sk);
-	} else if (ret != -EAGAIN)
+	else if (ret != -EAGAIN)
 		tls_err_abort(sk);
+
+	tls_increment_seqno(tls_ctx->iv, sk);
+	tls_increment_seqno(tls_ctx->rec_seq, sk);
 
 	return ret;
 }
@@ -509,7 +510,7 @@ void tls_sw_sk_destruct(struct sock *sk)
 
 	crypto_free_aead(ctx->aead_send);
 
-	tls_release_tx_frag(sk);
+	tls_release_tx_buf(sk);
 	skb_queue_purge(&ctx->tx_queue);
 	kfree(ctx);
 	tls_sk_destruct(sk, tls_ctx);
@@ -615,7 +616,7 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 
 	sk->sk_destruct = tls_sw_sk_destruct;
 	sw_ctx->sk_write_space = ctx->sk_write_space;
-	ctx->sk_write_space =  tls_release_tx_frag;
+	ctx->sk_write_space =  tls_release_tx_buf;
 
 	skb_queue_head_init(&sw_ctx->tx_queue);
 	sw_ctx->sk = sk;
