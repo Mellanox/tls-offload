@@ -99,7 +99,7 @@ static int mlx_tls_add(struct net_device *netdev,
 		       struct tls_crypto_info *crypto_info,
 		       struct tls_offload_context **ctx)
 {
-	struct tls_crypto_info_aes_gcm_128 *crypto_info_aes_gcm_128;
+	struct tls12_crypto_info_aes_gcm_128 *crypto_info_aes_gcm_128;
 	struct mlx_tls_offload_context *context;
 	struct mlx_tls_dev *dev;
 	int swid;
@@ -120,7 +120,7 @@ static int mlx_tls_add(struct net_device *netdev,
 		goto out;
 	}
 	crypto_info_aes_gcm_128 =
-			(struct tls_crypto_info_aes_gcm_128 *)crypto_info;
+			(struct tls12_crypto_info_aes_gcm_128 *)crypto_info;
 
 	dev = mlx_tls_find_dev_by_netdev(netdev);
 	if (!dev) {
