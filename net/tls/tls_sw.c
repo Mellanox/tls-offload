@@ -651,7 +651,7 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 free_aead:
 	crypto_free_aead(sw_ctx->aead_send);
 free_iv:
-	kfree(iv);
+	kfree(ctx->iv);
 out:
 	return rc;
 }
