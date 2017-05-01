@@ -76,8 +76,8 @@ static int build_ctx(struct tls12_crypto_info_aes_gcm_128 *crypto_info,
 	       TLS_CIPHER_AES_GCM_128_SALT_SIZE);
 	memcpy(tls->rcd.iv, crypto_info->iv,
 	       TLS_CIPHER_AES_GCM_128_IV_SIZE);
-	memcpy(tls->rcd.rcd_sn, crypto_info->info.seq,
-	       TLS_RECORD_SEQ_SIZE);
+	memcpy(tls->rcd.rcd_sn, crypto_info->rec_seq,
+	       TLS_CIPHER_AES_GCM_128_REC_SEQ_SIZE);
 	memcpy(tls->crypto.enc_key, crypto_info->key,
 	       TLS_CIPHER_AES_GCM_128_KEY_SIZE);
 	memcpy(tls->crypto.enc_key + TLS_CIPHER_AES_GCM_128_KEY_SIZE,
