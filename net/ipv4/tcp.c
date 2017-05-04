@@ -2429,7 +2429,7 @@ static int do_tcp_setsockopt(struct sock *sk, int level,
 			return -EINVAL;
 
 		val = strncpy_from_user(name, optval,
-					min_t(long, TCP_ULP_NAME_MAX-1,
+					min_t(long, TCP_ULP_NAME_MAX - 1,
 					      optlen));
 		if (val < 0)
 			return -EFAULT;
@@ -2992,7 +2992,6 @@ static int do_tcp_getsockopt(struct sock *sk, int level,
 		if (copy_to_user(optval, icsk->icsk_ulp_ops->name, len))
 			return -EFAULT;
 		return 0;
-
 
 	case TCP_THIN_LINEAR_TIMEOUTS:
 		val = tp->thin_lto;
