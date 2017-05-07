@@ -339,17 +339,11 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 	ctx->sk_close = sk->sk_prot->close;
 	sk->sk_write_space = tls_write_space;
 
-	if (TLS_IS_STATE_HW(crypto_info)) {
-		rc = tls_set_device_offload(sk, ctx);
-		prot = &tls_device_prot;
-		if (rc)
-			goto err_crypto_info;
-	} else if (TLS_IS_STATE_SW(crypto_info)) {
-		rc = tls_set_sw_offload(sk, ctx);
-		prot = &tls_sw_prot;
-		if (rc)
-			goto err_crypto_info;
-	}
+	/* currently SW is default, we will have ethtool in future */
+	rc = tls_set_sw_offload(sk, ctx);
+	prot = &tls_sw_prot;
+	if (rc)
+		goto err_crypto_info;
 
 	sk->sk_prot = prot;
 	goto out;

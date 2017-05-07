@@ -47,8 +47,6 @@
 #define TLS_NONCE_OFFSET		TLS_HEADER_SIZE
 
 #define TLS_CRYPTO_INFO_READY(info)	((info)->cipher_type)
-#define TLS_IS_STATE_HW(info)		((info)->state == TLS_STATE_HW)
-#define TLS_IS_STATE_SW(info)		((info)->state == TLS_STATE_SW)
 
 #define TLS_RECORD_TYPE_DATA		0x17
 
