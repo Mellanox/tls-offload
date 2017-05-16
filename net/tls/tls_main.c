@@ -49,32 +49,33 @@ MODULE_LICENSE("Dual BSD/GPL");
 static struct proto tls_base_prot;
 static struct proto tls_sw_prot;
 
-int tls_push_frags(struct sock *sk,
-		   struct tls_context *ctx,
-		   skb_frag_t *frag,
-		   u16 num_frags,
-		   u16 first_offset,
-		   int flags)
+int tls_push_sg(struct sock *sk,
+		struct tls_context *ctx,
+		struct scatterlist *sg,
+		u16 first_offset,
+		int flags)
 {
 	int sendpage_flags = flags | MSG_SENDPAGE_NOTLAST;
 	int ret = 0;
+	struct page *p;
 	size_t size;
 	int offset = first_offset;
 
-	size = skb_frag_size(frag) - offset;
-	offset += frag->page_offset;
+	size = sg->length - offset;
+	offset += sg->offset;
 
-	ctx->open_record_frags = 0;
+	ctx->pending_open_record_frags = 0;
 
 	while (1) {
-		if (!--num_frags)
+		if (sg_is_last(sg))
 			sendpage_flags = flags;
 
-		 /* is sending application-limited? */
+		/* is sending application-limited? */
 		tcp_rate_check_app_limited(sk);
+		p = sg_page(sg);
 retry:
 		ret = do_tcp_sendpages(sk,
-				       skb_frag_page(frag),
+				       p,
 				       offset,
 				       size,
 				       sendpage_flags);
@@ -86,38 +87,31 @@ retry:
 				goto retry;
 			}
 
-			offset -= frag->page_offset;
-			ctx->pending_offset = offset;
-			ctx->pending_frags = frag;
-			ctx->open_record_frags = num_frags + 1;
+			offset -= sg->offset;
+			ctx->partially_sent_offset = offset;
+			ctx->partially_sent_record = (void *)sg;
 			return ret;
 		}
 
-		if (!num_frags)
+		put_page(p);
+		sk_mem_uncharge(sk, sg->length);
+		sg = sg_next(sg);
+		if (!sg)
 			break;
 
-		frag++;
-		offset = frag->page_offset;
-		size = skb_frag_size(frag);
+		offset = sg->offset;
+		size = sg->length;
 	}
 
 	return 0;
 }
 
-static inline bool pending_open_record(struct tls_context *tls_ctx)
+static int tls_handle_open_record(struct sock *sk, int flags)
 {
-	return tls_ctx->open_record_frags &&
-	       !tls_is_pending_open_record(tls_ctx);
-}
+	struct tls_context *ctx = tls_get_ctx(sk);
 
-static int tls_handle_open_record(struct sock *sk)
-{
-	struct tls_context *tls_ctx = tls_get_ctx(sk);
-
-	if (pending_open_record(tls_ctx)) {
-		/* TODO push open record */
-		return -EINVAL;
-	}
+	if (tls_is_pending_open_record(ctx))
+		return ctx->tls_push_pending_open_record(sk, flags);
 
 	return 0;
 }
@@ -143,7 +137,7 @@ int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
 			if (msg->msg_flags & MSG_MORE)
 				return -EINVAL;
 
-			rc = tls_handle_open_record(sk);
+			rc = tls_handle_open_record(sk, msg->msg_flags);
 			if (rc)
 				return rc;
 
@@ -158,29 +152,27 @@ int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
 	return rc;
 }
 
-int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
-			     int flags) {
-	skb_frag_t *frag = ctx->pending_frags;
-	u16 offset = ctx->pending_offset;
-	u16 num_frags = ctx->open_record_frags;
+int tls_push_paritial_sent_record(struct sock *sk, struct tls_context *ctx,
+				  int flags)
+{
+	struct scatterlist *sg = ctx->partially_sent_record;
+	u16 offset = ctx->partially_sent_offset;
 
-	ctx->pending_frags = NULL;
-
-	return tls_push_frags(sk, ctx, frag,
-			      num_frags, offset, flags);
+	ctx->partially_sent_record = NULL;
+	return tls_push_sg(sk, ctx, sg, offset, flags);
 }
 
 static void tls_write_space(struct sock *sk)
 {
 	struct tls_context *ctx = tls_get_ctx(sk);
 
-	if (tls_is_pending_open_record(ctx)) {
+	if (tls_is_partially_sent_record(ctx)) {
 		gfp_t sk_allocation = sk->sk_allocation;
 		int rc;
 
 		sk->sk_allocation = GFP_ATOMIC;
-		rc = tls_push_paritial_record(sk, ctx,
-					      MSG_DONTWAIT | MSG_NOSIGNAL);
+		rc = tls_push_paritial_sent_record(sk, ctx,
+						   MSG_DONTWAIT | MSG_NOSIGNAL);
 		sk->sk_allocation = sk_allocation;
 
 		if (rc < 0)
@@ -188,6 +180,16 @@ static void tls_write_space(struct sock *sk)
 	}
 
 	ctx->sk_write_space(sk);
+}
+
+static void tls_sk_proto_close(struct sock *sk, long timeout)
+{
+	struct tls_context *ctx = tls_get_ctx(sk);
+
+	lock_sock(sk);
+	tls_handle_open_record(sk, 0);
+	release_sock(sk);
+	ctx->sk_proto_close(sk, timeout);
 }
 
 static int do_tls_getsockopt_tx(struct sock *sk, char __user *optval,
@@ -334,9 +336,11 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 	}
 
 	ctx->sk_write_space = sk->sk_write_space;
-	ctx->sk_destruct = sk->sk_destruct;
-	ctx->sk_close = sk->sk_prot->close;
 	sk->sk_write_space = tls_write_space;
+
+	ctx->sk_destruct = sk->sk_destruct;
+
+	ctx->sk_proto_close = sk->sk_prot->close;
 
 	/* currently SW is default, we will have ethtool in future */
 	rc = tls_set_sw_offload(sk, ctx);
@@ -424,7 +428,7 @@ static int __init tls_register(void)
 	tls_sw_prot			= tls_base_prot;
 	tls_sw_prot.sendmsg		= tls_sw_sendmsg;
 	tls_sw_prot.sendpage            = tls_sw_sendpage;
-	tls_sw_prot.close               = tls_sw_close;
+	tls_sw_prot.close               = tls_sk_proto_close;
 
 	tcp_register_ulp(&tcp_tls_ulp_ops);
 

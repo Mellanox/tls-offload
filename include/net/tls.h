@@ -50,33 +50,27 @@
 
 #define TLS_RECORD_TYPE_DATA		0x17
 
-/* +1 for aad, +1 for tag, +1 for chaining */
-#define TLS_SG_DATA_SIZE                (MAX_SKB_FRAGS + 3)
-#define ALG_MAX_PAGES 16 /* for skb_to_sgvec */
 #define TLS_AAD_SPACE_SIZE		21
-#define TLS_AAD_SIZE			13
-#define TLS_TAG_SIZE			16
-
-#define TLS_NONCE_SIZE			8
-#define TLS_PREPEND_SIZE		(TLS_HEADER_SIZE + TLS_NONCE_SIZE)
-#define TLS_OVERHEAD		(TLS_PREPEND_SIZE + TLS_TAG_SIZE)
+//#define TLS_AAD_SIZE			13
 
 struct tls_sw_context {
-	struct sock *sk;
-	void (*sk_write_space)(struct sock *sk);
 	struct crypto_aead *aead_send;
 
 	/* Sending context */
-	struct scatterlist sg_tx_data[TLS_SG_DATA_SIZE];
-	struct scatterlist sg_tx_preenc[ALG_MAX_PAGES + 1];
-	char aad_send[TLS_AAD_SPACE_SIZE];
-	char tag_send[TLS_TAG_SIZE];
-	int wmem_len;
-	struct scatterlist sgaad_send[2];
-	struct scatterlist sgtag_send[2];
-	struct sk_buff_head tx_queue;
-	int unsent;
-	struct sk_buff *tx_buff;
+	char aad_space[TLS_AAD_SPACE_SIZE];
+
+	unsigned int sg_plaintext_size;
+	int sg_plaintext_num_elem;
+	struct scatterlist sg_plaintext_data[MAX_SKB_FRAGS];
+
+	unsigned int sg_encrypted_size;
+	int sg_encrypted_num_elem;
+	struct scatterlist sg_encrypted_data[MAX_SKB_FRAGS];
+
+	/* AAD | sg_plaintext_data | sg_tag */
+	struct scatterlist sg_aead_in[2];
+	/* AAD | sg_encrypted_data (data contain overhead for hdr&iv&tag) */
+	struct scatterlist sg_aead_out[2];
 };
 
 struct tls_context {
@@ -89,25 +83,28 @@ struct tls_context {
 
 	u16 prepand_size;
 	u16 tag_size;
+	u16 overhead_size;
 	u16 iv_size;
 	char *iv;
 	u16 rec_seq_size;
 	char *rec_seq;
 
-	skb_frag_t *pending_frags;
-	u16 pending_offset;
+	struct scatterlist *partially_sent_record;
+	u16 partially_sent_offset;
 
 	/* This is the number of unpushed frags in the open record.
-	 * tls_is_pending_open_record() should be used to determine whether
+	 * tls_is_partially_sent_record() should be used to determine whether
 	 * we already started pushing the record and it remains open
 	 * due to backpressure from the TCP layer or whether
 	 * it is open due to the use of MSG_MORE OR MSG_SENDPAGE_NOTLAST.
 	 */
-	u16 open_record_frags;
+	u16 pending_open_record_frags;
+	int (*tls_push_pending_open_record)(struct sock *sk, int flags);
 
 	void (*sk_write_space)(struct sock *sk);
 	void (*sk_destruct)(struct sock *sk);
-	void (*sk_close)(struct sock *sk, long timeout);
+
+	void (*sk_proto_close)(struct sock *sk, long timeout);
 
 	int  (*setsockopt)(struct sock *sk, int level,
 			   int optname, char __user *optval,
@@ -124,7 +121,6 @@ int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 
 
 int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx);
-void tls_clear_sw_offload(struct sock *sk);
 int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 int tls_sw_sendpage(struct sock *sk, struct page *page,
 		    int offset, size_t size, int flags);
@@ -133,15 +129,21 @@ void tls_sw_close(struct sock *sk, long timeout);
 void tls_sk_destruct(struct sock *sk, struct tls_context *ctx);
 void tls_icsk_clean_acked(struct sock *sk);
 
-int tls_push_frags(struct sock *sk, struct tls_context *ctx,
-		   skb_frag_t *frag, u16 num_frags, u16 first_offset,
-		   int flags);
-int tls_push_paritial_record(struct sock *sk, struct tls_context *ctx,
-			     int flags);
+int tls_push_sg(struct sock *sk, struct tls_context *ctx,
+		struct scatterlist *sg, u16 first_offset,
+		int flags);
+int tls_push_paritial_sent_record(struct sock *sk, struct tls_context *ctx,
+				  int flags);
 
-static inline bool tls_is_pending_open_record(struct tls_context *ctx)
+static inline bool tls_is_partially_sent_record(struct tls_context *ctx)
 {
-	return ctx->pending_frags != NULL;
+	return !!ctx->partially_sent_record;
+}
+
+static inline bool tls_is_pending_open_record(struct tls_context *tls_ctx)
+{
+	return tls_ctx->pending_open_record_frags &&
+	       !tls_is_partially_sent_record(tls_ctx);
 }
 
 static inline void tls_err_abort(struct sock *sk)
@@ -150,18 +152,25 @@ static inline void tls_err_abort(struct sock *sk)
 	sk->sk_error_report(sk);
 }
 
-static inline void tls_increment_seqno(unsigned char *seq, struct sock *sk)
+static inline bool tls_bigint_increment(unsigned char *seq, int len)
 {
 	int i;
 
-	for (i = 7; i >= 0; i--) {
+	for (i = len - 1; i >= 0; i--) {
 		++seq[i];
 		if (seq[i] != 0)
 			break;
 	}
 
-	if (i == -1)
+	return (i == -1);
+}
+
+static inline void tls_advance_record_sn(struct sock *sk,
+					 struct tls_context *ctx)
+{
+	if (tls_bigint_increment(ctx->rec_seq, ctx->rec_seq_size))
 		tls_err_abort(sk);
+	tls_bigint_increment(ctx->iv, ctx->iv_size);
 }
 
 static inline void tls_fill_prepend(struct tls_context *ctx,
