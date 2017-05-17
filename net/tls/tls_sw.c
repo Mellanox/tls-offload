@@ -38,7 +38,8 @@ static inline void tls_make_aad(int recv,
 }
 
 static int alloc_sg(struct sock *sk, int len, struct scatterlist *sg,
-		    int *sg_num_elem, unsigned int *sg_size)
+		    int *sg_num_elem, unsigned int *sg_size,
+		    int first_coalesce)
 {
 	struct page_frag *pfrag;
 	unsigned int size = *sg_size;
@@ -67,7 +68,7 @@ static int alloc_sg(struct sock *sk, int len, struct scatterlist *sg,
 		pfrag->offset += use;
 
 		sge = sg + num_elem - 1;
-		if (num_elem > 0 && sg_page(sg) == pfrag->page &&
+		if (num_elem > first_coalesce && sg_page(sg) == pfrag->page &&
 		    sg->offset + sg->length == orig_offset) {
 			sg->length += use;
 		} else {
@@ -99,7 +100,7 @@ static int alloc_encrypted_sg(struct sock *sk, int len)
 	int rc = 0;
 
 	rc = alloc_sg(sk, len, ctx->sg_encrypted_data,
-		      &ctx->sg_encrypted_num_elem, &ctx->sg_encrypted_size);
+		      &ctx->sg_encrypted_num_elem, &ctx->sg_encrypted_size, 0);
 
 	return rc;
 }
@@ -111,7 +112,8 @@ static int alloc_plaintext_sg(struct sock *sk, int len)
 	int rc = 0;
 
 	rc = alloc_sg(sk, len, ctx->sg_plaintext_data,
-		      &ctx->sg_plaintext_num_elem, &ctx->sg_plaintext_size);
+		      &ctx->sg_plaintext_num_elem, &ctx->sg_plaintext_size,
+		      tls_ctx->pending_open_record_frags);
 
 	return rc;
 }
