@@ -346,7 +346,7 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 				tls_ctx->overhead_size;
 
 		if (!sk_stream_memory_free(sk))
-			goto wait_for_memory;
+			goto wait_for_sndbuf;
 alloc_encrypted:
 		ret = alloc_encrypted_sg(sk, required_size);
 		if (ret) {
@@ -417,8 +417,9 @@ alloc_plaintext:
 
 		continue;
 
-wait_for_memory:
+wait_for_sndbuf:
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+wait_for_memory:
 		ret = sk_stream_wait_memory(sk, &timeo);
 		if (ret)
 			goto send_end;
@@ -488,16 +489,13 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 		required_size = ctx->sg_plaintext_size + copy +
 			      tls_ctx->overhead_size;
 
-		if (!sk_stream_memory_free(sk)) {
-			set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
-			goto wait_for_mem;
-		}
-
+		if (!sk_stream_memory_free(sk))
+			goto wait_for_sndbuf;
 alloc_payload:
 		ret = alloc_encrypted_sg(sk, required_size);
 		if (ret) {
 			if (ret != -ENOSPC)
-				goto wait_for_mem;
+				goto wait_for_memory;
 
 			/* Adjust copy according to the amount that was
 			 * actually allocated. The difference is due
@@ -526,8 +524,9 @@ alloc_payload:
 				goto sendpage_end;
 		}
 		continue;
-
-wait_for_mem:
+wait_for_sndbuf:
+		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
+wait_for_memory:
 		ret = sk_stream_wait_memory(sk, &timeo);
 		if (ret)
 			goto sendpage_end;
