@@ -45,7 +45,6 @@ MODULE_AUTHOR("Mellanox Technologies");
 MODULE_DESCRIPTION("Transport Layer Security Support");
 MODULE_LICENSE("Dual BSD/GPL");
 
-
 static struct proto tls_base_prot;
 static struct proto tls_sw_prot;
 
@@ -228,10 +227,11 @@ static int do_tls_getsockopt_tx(struct sock *sk, char __user *optval,
 
 	switch (crypto_info->cipher_type) {
 	case TLS_CIPHER_AES_GCM_128: {
-		struct tls12_crypto_info_aes_gcm_128 *crypto_info_aes_gcm_128 =
-				container_of(crypto_info,
-					     struct tls12_crypto_info_aes_gcm_128,
-					     info);
+		struct tls12_crypto_info_aes_gcm_128 *
+		  crypto_info_aes_gcm_128 =
+		  container_of(crypto_info,
+			       struct tls12_crypto_info_aes_gcm_128,
+			       info);
 
 		if (len != sizeof(*crypto_info_aes_gcm_128)) {
 			rc = -EINVAL;
@@ -271,7 +271,7 @@ static int do_tls_getsockopt(struct sock *sk, int optname,
 }
 
 static int tls_getsockopt(struct sock *sk, int level, int optname,
-		   char __user *optval, int __user *optlen)
+			  char __user *optval, int __user *optlen)
 {
 	struct tls_context *ctx = tls_get_ctx(sk);
 
@@ -310,9 +310,8 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 	crypto_info = &ctx->crypto_send;
 
 	/* Currently we don't support set crypto info more than one time */
-	if (TLS_CRYPTO_INFO_READY(crypto_info)) {
+	if (TLS_CRYPTO_INFO_READY(crypto_info))
 		goto out;
-	}
 
 	switch (tmp_crypto_info.cipher_type) {
 	case TLS_CIPHER_AES_GCM_128: {
@@ -320,9 +319,10 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 			rc = -EINVAL;
 			goto out;
 		}
-		rc = copy_from_user(crypto_info,
-				    optval,
-				    sizeof(struct tls12_crypto_info_aes_gcm_128));
+		rc = copy_from_user(
+		  crypto_info,
+		  optval,
+		  sizeof(struct tls12_crypto_info_aes_gcm_128));
 
 		if (rc) {
 			rc = -EFAULT;
@@ -376,7 +376,7 @@ static int do_tls_setsockopt(struct sock *sk, int optname,
 }
 
 static int tls_setsockopt(struct sock *sk, int level, int optname,
-		   char __user *optval, unsigned int optlen)
+			  char __user *optval, unsigned int optlen)
 {
 	struct tls_context *ctx = tls_get_ctx(sk);
 

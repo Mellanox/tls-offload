@@ -545,6 +545,7 @@ void tls_sw_sk_destruct(struct sock *sk)
 	kfree(ctx);
 	tls_sk_destruct(sk, tls_ctx);
 }
+
 int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 {
 	char keyval[TLS_CIPHER_AES_GCM_128_KEY_SIZE +
@@ -582,7 +583,8 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		iv_size = TLS_CIPHER_AES_GCM_128_IV_SIZE;
 		iv = ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->iv;
 		rec_seq_size = TLS_CIPHER_AES_GCM_128_REC_SEQ_SIZE;
-		rec_seq = ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->rec_seq;
+		rec_seq =
+		 ((struct tls12_crypto_info_aes_gcm_128 *)crypto_info)->rec_seq;
 		gcm_128_info =
 			(struct tls12_crypto_info_aes_gcm_128 *)crypto_info;
 		break;
