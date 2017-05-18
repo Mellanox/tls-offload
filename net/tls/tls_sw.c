@@ -151,8 +151,8 @@ static int tls_do_encryption(struct tls_context *tls_ctx,
 	if (!aead_req)
 		return -ENOMEM;
 
-	ctx->sg_encrypted_data[0].offset += tls_ctx->prepand_size;
-	ctx->sg_encrypted_data[0].length -= tls_ctx->prepand_size;
+	ctx->sg_encrypted_data[0].offset += tls_ctx->prepend_size;
+	ctx->sg_encrypted_data[0].length -= tls_ctx->prepend_size;
 
 	aead_request_set_tfm(aead_req, ctx->aead_send);
 	aead_request_set_ad(aead_req, TLS_AAD_SPACE_SIZE);
@@ -160,8 +160,8 @@ static int tls_do_encryption(struct tls_context *tls_ctx,
 			       data_len, tls_ctx->iv);
 	rc = crypto_aead_encrypt(aead_req);
 
-	ctx->sg_encrypted_data[0].offset -= tls_ctx->prepand_size;
-	ctx->sg_encrypted_data[0].length += tls_ctx->prepand_size;
+	ctx->sg_encrypted_data[0].offset -= tls_ctx->prepend_size;
+	ctx->sg_encrypted_data[0].length += tls_ctx->prepend_size;
 
 	kfree(aead_req);
 	return rc;
@@ -594,9 +594,9 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		goto out;
 	}
 
-	ctx->prepand_size = TLS_HEADER_SIZE + nonece_size;
+	ctx->prepend_size = TLS_HEADER_SIZE + nonece_size;
 	ctx->tag_size = tag_size;
-	ctx->overhead_size = ctx->prepand_size + ctx->tag_size;
+	ctx->overhead_size = ctx->prepend_size + ctx->tag_size;
 	ctx->iv_size = iv_size;
 	ctx->iv = kmalloc(iv_size, GFP_KERNEL);
 	if (!ctx->iv) {

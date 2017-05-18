@@ -81,7 +81,7 @@ struct tls_context {
 
 	void *priv_ctx;
 
-	u16 prepand_size;
+	u16 prepend_size;
 	u16 tag_size;
 	u16 overhead_size;
 	u16 iv_size;
