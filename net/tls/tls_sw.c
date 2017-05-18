@@ -76,8 +76,10 @@ static int alloc_sg(struct sock *sk, int len, struct scatterlist *sg,
 			sg_set_page(sge, pfrag->page, use, orig_offset);
 			get_page(pfrag->page);
 			++num_elem;
-			if (num_elem == MAX_SKB_FRAGS)
+			if (num_elem == MAX_SKB_FRAGS) {
+				rc = -ENOSPC;
 				break;
+			}
 		}
 
 		len -= use;
@@ -294,13 +296,6 @@ out:
 	return rc;
 }
 
-static inline int tls_is_push_needed(struct tls_sw_context *ctx)
-{
-	return ctx->sg_encrypted_num_elem == MAX_SKB_FRAGS ||
-	       ctx->sg_plaintext_num_elem == MAX_SKB_FRAGS ||
-	       ctx->sg_plaintext_size == TLS_MAX_PAYLOAD_SIZE;
-}
-
 int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
@@ -311,6 +306,8 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	bool eor = !(msg->msg_flags & MSG_MORE);
 	size_t try_to_copy, copied = 0;
 	unsigned char record_type = TLS_RECORD_TYPE_DATA;
+	int record_room;
+	bool full_record;
 
 	lock_sock(sk);
 
@@ -337,9 +334,14 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 			goto send_end;
 		}
 
-		try_to_copy =
-			min_t(int, msg_data_left(msg),
-			      TLS_MAX_PAYLOAD_SIZE - ctx->sg_plaintext_size);
+		full_record = false;
+		try_to_copy = msg_data_left(msg);
+		record_room = TLS_MAX_PAYLOAD_SIZE - ctx->sg_plaintext_size;
+		if (try_to_copy >= record_room) {
+			try_to_copy = record_room;
+			full_record = true;
+		}
+
 		required_size = ctx->sg_plaintext_size + try_to_copy +
 				tls_ctx->overhead_size;
 
@@ -347,14 +349,20 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 			goto wait_for_memory;
 alloc_encrypted:
 		ret = alloc_encrypted_sg(sk, required_size);
-		if (ret)
-			goto wait_for_memory;
+		if (ret) {
+			if (ret != -ENOSPC)
+				goto wait_for_memory;
 
-		/* Adjust try_to_copy according to the amount that was actually
-		 * allocated. The difference is due to max sg elements limit
-		 */
-		try_to_copy -= required_size - ctx->sg_encrypted_size;
-		if (eor || (try_to_copy < msg_data_left(msg))) {
+			/* Adjust try_to_copy according to the amount that was
+			 * actually allocated. The difference is due
+			 * to max sg elements limit
+			 */
+			try_to_copy -= required_size - ctx->sg_encrypted_size;
+			full_record = true;
+		}
+
+
+		if (full_record || eor) {
 			int orig_num_elem = ctx->sg_plaintext_num_elem;
 			int orig_sg_size = ctx->sg_plaintext_size;
 			size_t orig_iter_count = iov_iter_count(&msg->msg_iter);
@@ -383,19 +391,25 @@ fallback_to_reg_send:
 
 		required_size = ctx->sg_plaintext_size + try_to_copy;
 alloc_plaintext:
-		if (alloc_plaintext_sg(sk, required_size))
-			goto wait_for_memory;
+		ret = alloc_plaintext_sg(sk, required_size);
+		if (ret) {
+			if (ret != -ENOSPC)
+				goto wait_for_memory;
 
-		/* Adjust try_to_copy according to the amount that was actually
-		 * allocated. The difference is due to max sg elements limit
-		 */
-		try_to_copy -= required_size - ctx->sg_plaintext_size;
+			/* Adjust try_to_copy according to the amount that was
+			 * actually allocated. The difference is due
+			 * to max sg elements limit
+			 */
+			try_to_copy -= required_size - ctx->sg_plaintext_size;
+			full_record = true;
+		}
+
 		ret = memcopy_from_iter(sk, &msg->msg_iter, try_to_copy);
 		if (ret)
 			goto send_end;
 
 		copied += try_to_copy;
-		if (tls_is_push_needed(ctx) || eor) {
+		if (full_record || eor) {
 			ret = tls_push_record(sk, msg->msg_flags, record_type);
 			if (ret)
 				goto send_end;
@@ -433,6 +447,8 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 	size_t orig_size = size;
 	unsigned char record_type = TLS_RECORD_TYPE_DATA;
 	struct scatterlist *sg;
+	bool full_record;
+	int record_room;
 
 	/* No MSG_EOR from splice, only look at MSG_MORE */
 	eor = !(flags & (MSG_MORE | MSG_SENDPAGE_NOTLAST));
@@ -463,7 +479,12 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 			goto sendpage_end;
 		}
 
-		copy = min(size, TLS_MAX_PAYLOAD_SIZE - ctx->sg_plaintext_size);
+		full_record = false;
+		record_room = TLS_MAX_PAYLOAD_SIZE - ctx->sg_plaintext_size;
+		if (size >= record_room) {
+			size = record_room;
+			full_record = true;
+		}
 		required_size = ctx->sg_plaintext_size + copy +
 			      tls_ctx->overhead_size;
 
@@ -473,15 +494,19 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 		}
 
 alloc_payload:
-		if (alloc_encrypted_sg(sk, required_size)) {
-			ret = -ENOMEM;
-			goto wait_for_mem;
+		ret = alloc_encrypted_sg(sk, required_size);
+		if (ret) {
+			if (ret != -ENOSPC)
+				goto wait_for_mem;
+
+			/* Adjust copy according to the amount that was
+			 * actually allocated. The difference is due
+			 * to max sg elements limit
+			 */
+			copy -= required_size - ctx->sg_plaintext_size;
+			full_record = true;
 		}
 
-		/* Adjust copy according to the amount that was actually
-		 * allocated. The difference is due to max sg elements limit
-		 */
-		copy -= required_size - ctx->sg_encrypted_size;
 		get_page(page);
 		sg = ctx->sg_plaintext_data + ctx->sg_plaintext_num_elem;
 		sg_set_page(sg, page, copy, offset);
@@ -493,7 +518,9 @@ alloc_payload:
 		ctx->sg_plaintext_size += copy;
 		tls_ctx->pending_open_record_frags = ctx->sg_plaintext_num_elem;
 
-		if (tls_is_push_needed(ctx) || eor) {
+		if (full_record || eor ||
+		    ctx->sg_plaintext_num_elem ==
+		    ARRAY_SIZE(ctx->sg_plaintext_data)) {
 			ret = tls_push_record(sk, flags, record_type);
 			if (ret)
 				goto sendpage_end;
