@@ -827,6 +827,7 @@ static inline int rtnl_vfinfo_size(const struct net_device *dev,
 			 nla_total_size(MAX_VLAN_LIST_LEN *
 					sizeof(struct ifla_vf_vlan_info)) +
 			 nla_total_size(sizeof(struct ifla_vf_spoofchk)) +
+			 nla_total_size(sizeof(struct ifla_vf_vlan_trunk)) +
 			 nla_total_size(sizeof(struct ifla_vf_tx_rate)) +
 			 nla_total_size(sizeof(struct ifla_vf_rate)) +
 			 nla_total_size(sizeof(struct ifla_vf_link_state)) +
@@ -1098,31 +1099,43 @@ static noinline_for_stack int rtnl_fill_vfinfo(struct sk_buff *skb,
 	struct ifla_vf_link_state vf_linkstate;
 	struct ifla_vf_vlan_info vf_vlan_info;
 	struct ifla_vf_spoofchk vf_spoofchk;
+	struct ifla_vf_vlan_trunk *vf_trunk;
 	struct ifla_vf_tx_rate vf_tx_rate;
 	struct ifla_vf_stats vf_stats;
 	struct ifla_vf_trust vf_trust;
 	struct ifla_vf_vlan vf_vlan;
 	struct ifla_vf_rate vf_rate;
 	struct ifla_vf_mac vf_mac;
-	struct ifla_vf_info ivi;
+	struct ifla_vf_info *ivi;
 
-	memset(&ivi, 0, sizeof(ivi));
+	ivi = kzalloc(sizeof(*ivi), GFP_KERNEL);
+	if (!ivi)
+		return -ENOMEM;
+
+	vf_trunk = kzalloc(sizeof(*vf_trunk), GFP_KERNEL);
+	if (!vf_trunk) {
+		kfree(ivi);
+		return -ENOMEM;
+	}
 
 	/* Not all SR-IOV capable drivers support the
 	 * spoofcheck and "RSS query enable" query.  Preset to
 	 * -1 so the user space tool can detect that the driver
 	 * didn't report anything.
 	 */
-	ivi.spoofchk = -1;
-	ivi.rss_query_en = -1;
-	ivi.trusted = -1;
+	ivi->spoofchk = -1;
+	ivi->rss_query_en = -1;
+	ivi->trusted = -1;
+	memset(ivi->mac, 0, sizeof(ivi->mac));
+	memset(ivi->trunk_8021q, 0, sizeof(ivi->trunk_8021q));
+	memset(ivi->trunk_8021ad, 0, sizeof(ivi->trunk_8021ad));
 	/* The default value for VF link state is "auto"
 	 * IFLA_VF_LINK_STATE_AUTO which equals zero
 	 */
-	ivi.linkstate = 0;
+	ivi->linkstate = 0;
 	/* VLAN Protocol by default is 802.1Q */
-	ivi.vlan_proto = htons(ETH_P_8021Q);
-	if (dev->netdev_ops->ndo_get_vf_config(dev, vfs_num, &ivi))
+	ivi->vlan_proto = htons(ETH_P_8021Q);
+	if (dev->netdev_ops->ndo_get_vf_config(dev, vfs_num, ivi))
 		return 0;
 
 	memset(&vf_vlan_info, 0, sizeof(vf_vlan_info));
@@ -1135,21 +1148,24 @@ static noinline_for_stack int rtnl_fill_vfinfo(struct sk_buff *skb,
 		vf_spoofchk.vf =
 		vf_linkstate.vf =
 		vf_rss_query_en.vf =
-		vf_trust.vf = ivi.vf;
+		vf_trunk->vf =
+		vf_trust.vf = ivi->vf;
 
-	memcpy(vf_mac.mac, ivi.mac, sizeof(ivi.mac));
-	vf_vlan.vlan = ivi.vlan;
-	vf_vlan.qos = ivi.qos;
-	vf_vlan_info.vlan = ivi.vlan;
-	vf_vlan_info.qos = ivi.qos;
-	vf_vlan_info.vlan_proto = ivi.vlan_proto;
-	vf_tx_rate.rate = ivi.max_tx_rate;
-	vf_rate.min_tx_rate = ivi.min_tx_rate;
-	vf_rate.max_tx_rate = ivi.max_tx_rate;
-	vf_spoofchk.setting = ivi.spoofchk;
-	vf_linkstate.link_state = ivi.linkstate;
-	vf_rss_query_en.setting = ivi.rss_query_en;
-	vf_trust.setting = ivi.trusted;
+	memcpy(vf_mac.mac, ivi->mac, sizeof(ivi->mac));
+	memcpy(vf_trunk->allowed_vlans_8021q_bm, ivi->trunk_8021q, sizeof(ivi->trunk_8021q));
+	memcpy(vf_trunk->allowed_vlans_8021ad_bm, ivi->trunk_8021ad, sizeof(ivi->trunk_8021ad));
+	vf_vlan.vlan = ivi->vlan;
+	vf_vlan.qos = ivi->qos;
+	vf_vlan_info.vlan = ivi->vlan;
+	vf_vlan_info.qos = ivi->qos;
+	vf_vlan_info.vlan_proto = ivi->vlan_proto;
+	vf_tx_rate.rate = ivi->max_tx_rate;
+	vf_rate.min_tx_rate = ivi->min_tx_rate;
+	vf_rate.max_tx_rate = ivi->max_tx_rate;
+	vf_spoofchk.setting = ivi->spoofchk;
+	vf_linkstate.link_state = ivi->linkstate;
+	vf_rss_query_en.setting = ivi->rss_query_en;
+	vf_trust.setting = ivi->trusted;
 	vf = nla_nest_start(skb, IFLA_VF_INFO);
 	if (!vf)
 		goto nla_put_vfinfo_failure;
@@ -1167,7 +1183,9 @@ static noinline_for_stack int rtnl_fill_vfinfo(struct sk_buff *skb,
 		    sizeof(vf_rss_query_en),
 		    &vf_rss_query_en) ||
 	    nla_put(skb, IFLA_VF_TRUST,
-		    sizeof(vf_trust), &vf_trust))
+		    sizeof(vf_trust), &vf_trust) ||
+	    nla_put(skb, IFLA_VF_VLAN_TRUNK,
+		    sizeof(*vf_trunk), vf_trunk))
 		goto nla_put_vf_failure;
 	vfvlanlist = nla_nest_start(skb, IFLA_VF_VLAN_LIST);
 	if (!vfvlanlist)
@@ -1202,12 +1220,16 @@ static noinline_for_stack int rtnl_fill_vfinfo(struct sk_buff *skb,
 	}
 	nla_nest_end(skb, vfstats);
 	nla_nest_end(skb, vf);
+	kfree(vf_trunk);
+	kfree(ivi);
 	return 0;
 
 nla_put_vf_failure:
 	nla_nest_cancel(skb, vf);
 nla_put_vfinfo_failure:
 	nla_nest_cancel(skb, vfinfo);
+	kfree(vf_trunk);
+	kfree(ivi);
 	return -EMSGSIZE;
 }
 
@@ -1784,6 +1806,26 @@ static int do_setvfinfo(struct net_device *dev, struct nlattr **tb)
 			return err;
 	}
 
+	if (tb[IFLA_VF_VLAN_RANGE]) {
+		struct ifla_vf_vlan_range *ivvr =
+					nla_data(tb[IFLA_VF_VLAN_RANGE]);
+		bool add = !!ivvr->setting;
+
+		err = -EOPNOTSUPP;
+		if (add && ops->ndo_add_vf_vlan_trunk_range)
+			err = ops->ndo_add_vf_vlan_trunk_range(dev, ivvr->vf,
+							       ivvr->start_vid,
+							       ivvr->end_vid,
+							       ivvr->vlan_proto);
+		else if (!add && ops->ndo_del_vf_vlan_trunk_range)
+			err = ops->ndo_del_vf_vlan_trunk_range(dev, ivvr->vf,
+							       ivvr->start_vid,
+							       ivvr->end_vid,
+							       ivvr->vlan_proto);
+		if (err < 0)
+			return err;
+	}
+
 	if (tb[IFLA_VF_VLAN_LIST]) {
 		struct ifla_vf_vlan_info *ivvl[MAX_VLAN_LIST_LEN];
 		struct nlattr *attr;
@@ -1815,21 +1857,30 @@ static int do_setvfinfo(struct net_device *dev, struct nlattr **tb)
 
 	if (tb[IFLA_VF_TX_RATE]) {
 		struct ifla_vf_tx_rate *ivt = nla_data(tb[IFLA_VF_TX_RATE]);
-		struct ifla_vf_info ivf;
+		struct ifla_vf_info *ivf;
+
+		ivf = kzalloc(sizeof(*ivf), GFP_KERNEL);
+		if (!ivf)
+			return -ENOMEM;
 
 		err = -EOPNOTSUPP;
 		if (ops->ndo_get_vf_config)
-			err = ops->ndo_get_vf_config(dev, ivt->vf, &ivf);
-		if (err < 0)
+			err = ops->ndo_get_vf_config(dev, ivt->vf, ivf);
+		if (err < 0) {
+			kfree(ivf);
 			return err;
+		}
 
 		err = -EOPNOTSUPP;
 		if (ops->ndo_set_vf_rate)
 			err = ops->ndo_set_vf_rate(dev, ivt->vf,
-						   ivf.min_tx_rate,
+						   ivf->min_tx_rate,
 						   ivt->rate);
-		if (err < 0)
+		if (err < 0) {
+			kfree(ivf);
 			return err;
+		}
+		kfree(ivf);
 	}
 
 	if (tb[IFLA_VF_RATE]) {
