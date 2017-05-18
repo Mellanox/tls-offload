@@ -35,6 +35,8 @@
 
 #include <linux/if_ether.h>
 #include <linux/if_link.h>
+#include <linux/if_vlan.h>
+#include <linux/bitmap.h>
 #include <net/devlink.h>
 #include <linux/mlx5/device.h>
 #include "lib/mpfs.h"
@@ -53,6 +55,9 @@ enum {
 #define MLX5_MAX_MC_PER_VPORT(dev) \
 	(1 << MLX5_CAP_GEN(dev, log_max_current_mc_list))
 
+#define MLX5_MAX_VLAN_PER_VPORT(dev) \
+	(1 << MLX5_CAP_GEN(dev, log_max_vlan_list))
+
 #define FDB_UPLINK_VPORT 0xffff
 
 #define MLX5_MIN_BW_SHARE 1
@@ -63,19 +68,22 @@ enum {
 struct vport_ingress {
 	struct mlx5_flow_table *acl;
 	struct mlx5_flow_group *allow_untagged_spoofchk_grp;
-	struct mlx5_flow_group *allow_spoofchk_only_grp;
-	struct mlx5_flow_group *allow_untagged_only_grp;
+	struct mlx5_flow_group *allow_tagged_spoofchk_grp;
 	struct mlx5_flow_group *drop_grp;
-	struct mlx5_flow_handle  *allow_rule;
+	struct mlx5_flow_handle  *allow_untagged_rule;
+	struct list_head         allowed_vlans_rules;
 	struct mlx5_flow_handle  *drop_rule;
 };
 
 struct vport_egress {
 	struct mlx5_flow_table *acl;
+	struct mlx5_flow_group *allow_untagged_grp;
 	struct mlx5_flow_group *allowed_vlans_grp;
 	struct mlx5_flow_group *drop_grp;
-	struct mlx5_flow_handle  *allowed_vlan;
+	struct mlx5_flow_handle  *allowed_vst_vlan;
 	struct mlx5_flow_handle  *drop_rule;
+	struct mlx5_flow_handle  *allow_untagged_rule;
+	struct list_head        allowed_vlans_rules;
 };
 
 struct mlx5_vport_info {
@@ -88,6 +96,8 @@ struct mlx5_vport_info {
 	u32                     max_rate;
 	bool                    spoofchk;
 	bool                    trusted;
+	/* the admin approved vlan list */
+	DECLARE_BITMAP(vlan_trunk_8021q_bitmap, VLAN_N_VID);
 };
 
 struct mlx5_vport {
@@ -95,6 +105,10 @@ struct mlx5_vport {
 	int                     vport;
 	struct hlist_head       uc_list[MLX5_L2_ADDR_HASH_SIZE];
 	struct hlist_head       mc_list[MLX5_L2_ADDR_HASH_SIZE];
+	/* The requested vlan list from the vport side */
+	DECLARE_BITMAP(req_vlan_bitmap, VLAN_N_VID);
+	/* Actual accepted vlans on the acl tables */
+	DECLARE_BITMAP(acl_vlan_8021q_bitmap, VLAN_N_VID);
 	struct mlx5_flow_handle *promisc_rule;
 	struct mlx5_flow_handle *allmulti_rule;
 	struct work_struct      vport_change_handler;
@@ -131,6 +145,11 @@ struct mlx5_eswitch_fdb {
 			int vlan_push_pop_refcount;
 		} offloads;
 	};
+};
+
+struct mlx5_acl_vlan {
+	struct mlx5_flow_handle	*acl_vlan_rule;
+	struct list_head	list;
 };
 
 struct mlx5_esw_sq {
@@ -218,6 +237,10 @@ int mlx5_eswitch_set_vport_rate(struct mlx5_eswitch *esw, int vport,
 				u32 max_rate, u32 min_rate);
 int mlx5_eswitch_get_vport_config(struct mlx5_eswitch *esw,
 				  int vport, struct ifla_vf_info *ivi);
+int mlx5_eswitch_add_vport_trunk_range(struct mlx5_eswitch *esw,
+				       int vport, u16 start_vlan, u16 end_vlan);
+int mlx5_eswitch_del_vport_trunk_range(struct mlx5_eswitch *esw,
+				       int vport, u16 start_vlan, u16 end_vlan);
 int mlx5_eswitch_get_vport_stats(struct mlx5_eswitch *esw,
 				 int vport,
 				 struct ifla_vf_stats *vf_stats);
