@@ -63,6 +63,12 @@ int tls_push_sg(struct sock *sk,
 	size = sg->length - offset;
 	offset += sg->offset;
 
+	/* Must be cleared before we call do_tcp_sendpages,
+	 * because otherwise we might go to sleep and
+	 * re-enter this function through write_space.
+	 */
+	clear_bit(TLS_PENDING_CLOSED_RECORD, &ctx->flags);
+
 	ctx->pending_open_record_frags = 0;
 
 	while (1) {
@@ -89,6 +95,7 @@ retry:
 			offset -= sg->offset;
 			ctx->partially_sent_offset = offset;
 			ctx->partially_sent_record = (void *)sg;
+			set_bit(TLS_PENDING_CLOSED_RECORD, &ctx->flags);
 			return ret;
 		}
 
@@ -110,7 +117,7 @@ static int tls_handle_open_record(struct sock *sk, int flags)
 	struct tls_context *ctx = tls_get_ctx(sk);
 
 	if (tls_is_pending_open_record(ctx))
-		return ctx->tls_push_pending_open_record(sk, flags);
+		return ctx->push_pending_record(sk, flags);
 
 	return 0;
 }
@@ -151,11 +158,14 @@ int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
 	return rc;
 }
 
-int tls_push_paritial_sent_record(struct sock *sk, struct tls_context *ctx,
-				  int flags)
+int tls_push_pending_closed_record(struct sock *sk, struct tls_context *ctx,
+				   int flags)
 {
 	struct scatterlist *sg = ctx->partially_sent_record;
 	u16 offset = ctx->partially_sent_offset;
+
+	if (tls_is_partially_sent_record(ctx))
+		return ctx->push_pending_record(sk, flags);
 
 	ctx->partially_sent_record = NULL;
 	return tls_push_sg(sk, ctx, sg, offset, flags);
@@ -165,13 +175,14 @@ static void tls_write_space(struct sock *sk)
 {
 	struct tls_context *ctx = tls_get_ctx(sk);
 
-	if (tls_is_partially_sent_record(ctx)) {
+	if (tls_is_pending_closed_record(ctx)) {
 		gfp_t sk_allocation = sk->sk_allocation;
 		int rc;
 
 		sk->sk_allocation = GFP_ATOMIC;
-		rc = tls_push_paritial_sent_record(sk, ctx,
-						   MSG_DONTWAIT | MSG_NOSIGNAL);
+		rc = tls_push_pending_closed_record(sk, ctx,
+						    MSG_DONTWAIT |
+						    MSG_NOSIGNAL);
 		sk->sk_allocation = sk_allocation;
 
 		if (rc < 0)

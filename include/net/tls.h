@@ -73,6 +73,10 @@ struct tls_sw_context {
 	struct scatterlist sg_aead_out[2];
 };
 
+enum {
+	TLS_PENDING_CLOSED_RECORD
+};
+
 struct tls_context {
 	union {
 		struct tls_crypto_info crypto_send;
@@ -91,15 +95,10 @@ struct tls_context {
 
 	struct scatterlist *partially_sent_record;
 	u16 partially_sent_offset;
+	unsigned long flags;
 
-	/* This is the number of unpushed frags in the open record.
-	 * tls_is_partially_sent_record() should be used to determine whether
-	 * we already started pushing the record and it remains open
-	 * due to backpressure from the TCP layer or whether
-	 * it is open due to the use of MSG_MORE OR MSG_SENDPAGE_NOTLAST.
-	 */
 	u16 pending_open_record_frags;
-	int (*tls_push_pending_open_record)(struct sock *sk, int flags);
+	int (*push_pending_record)(struct sock *sk, int flags);
 
 	void (*sk_write_space)(struct sock *sk);
 	void (*sk_destruct)(struct sock *sk);
@@ -132,8 +131,13 @@ void tls_icsk_clean_acked(struct sock *sk);
 int tls_push_sg(struct sock *sk, struct tls_context *ctx,
 		struct scatterlist *sg, u16 first_offset,
 		int flags);
-int tls_push_paritial_sent_record(struct sock *sk, struct tls_context *ctx,
-				  int flags);
+int tls_push_pending_closed_record(struct sock *sk, struct tls_context *ctx,
+				   int flags);
+
+static inline bool tls_is_pending_closed_record(struct tls_context *ctx)
+{
+	return test_bit(TLS_PENDING_CLOSED_RECORD, &ctx->flags);
+}
 
 static inline bool tls_is_partially_sent_record(struct tls_context *ctx)
 {
@@ -143,7 +147,7 @@ static inline bool tls_is_partially_sent_record(struct tls_context *ctx)
 static inline bool tls_is_pending_open_record(struct tls_context *tls_ctx)
 {
 	return tls_ctx->pending_open_record_frags &&
-	       !tls_is_partially_sent_record(tls_ctx);
+	       !tls_is_pending_closed_record(tls_ctx);
 }
 
 static inline void tls_err_abort(struct sock *sk)
