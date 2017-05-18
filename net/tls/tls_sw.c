@@ -359,6 +359,9 @@ alloc_encrypted:
 			int orig_sg_size = ctx->sg_plaintext_size;
 			size_t orig_iter_count = iov_iter_count(&msg->msg_iter);
 
+			if (orig_iter_count > MAX_SKB_FRAGS)
+				goto fallback_to_reg_send;
+
 			ret = zerocopy_from_iter(sk, &msg->msg_iter,
 						 try_to_copy);
 			if (ret)
