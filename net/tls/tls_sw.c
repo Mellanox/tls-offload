@@ -277,8 +277,7 @@ static int tls_push_record(struct sock *sk, int flags,
 	ctx->sg_encrypted_size = 0;
 
 	/* Only pass through MSG_DONTWAIT and MSG_NOSIGNAL flags */
-	rc = tls_push_sg(sk, tls_ctx, ctx->sg_encrypted_data, 0,
-			 flags & (MSG_DONTWAIT | MSG_NOSIGNAL));
+	rc = tls_push_sg(sk, tls_ctx, ctx->sg_encrypted_data, 0, flags);
 	if (rc < 0 && rc != -EAGAIN)
 		tls_err_abort(sk);
 
@@ -389,6 +388,9 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 	int record_room;
 	bool full_record;
 	int orig_size;
+
+	if (msg->msg_flags & ~(MSG_MORE | MSG_DONTWAIT | MSG_NOSIGNAL))
+		return -ENOTSUPP;
 
 	lock_sock(sk);
 
@@ -542,15 +544,15 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 	bool full_record;
 	int record_room;
 
+	if (flags & ~(MSG_MORE | MSG_DONTWAIT | MSG_NOSIGNAL |
+		      MSG_SENDPAGE_NOTLAST))
+		return -ENOTSUPP;
+
 	/* No MSG_EOR from splice, only look at MSG_MORE */
 	eor = !(flags & (MSG_MORE | MSG_SENDPAGE_NOTLAST));
 
 	lock_sock(sk);
 
-	if (flags & MSG_OOB) {
-		ret = -ENOTSUPP;
-		goto sendpage_end;
-	}
 
 	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
 
