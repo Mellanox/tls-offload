@@ -256,15 +256,17 @@ static int tls_push_record(struct sock *sk, int flags,
 			 ctx->sg_encrypted_data[0].offset,
 			 ctx->sg_plaintext_size, record_type);
 
+	tls_ctx->pending_open_record_frags = 0;
+	set_bit(TLS_PENDING_CLOSED_RECORD, &tls_ctx->flags);
+
 	rc = tls_do_encryption(tls_ctx, ctx, ctx->sg_plaintext_size,
 			       sk->sk_allocation);
 	if (rc < 0) {
-		/* If we are called from write_space we and
-		 * we fail we need to set this SOCK_NOSPACE
+		/* If we are called from write_space and
+		 * we fail, we need to set this SOCK_NOSPACE
 		 * to trigger another write_space in the future.
 		 */
 		set_bit(SOCK_NOSPACE, &sk->sk_socket->flags);
-		set_bit(TLS_PENDING_CLOSED_RECORD, &tls_ctx->flags);
 		return rc;
 	}
 
@@ -273,6 +275,7 @@ static int tls_push_record(struct sock *sk, int flags,
 
 	ctx->sg_encrypted_num_elem = 0;
 	ctx->sg_encrypted_size = 0;
+
 	/* Only pass through MSG_DONTWAIT and MSG_NOSIGNAL flags */
 	rc = tls_push_sg(sk, tls_ctx, ctx->sg_encrypted_data, 0,
 			 flags & (MSG_DONTWAIT | MSG_NOSIGNAL));
@@ -285,9 +288,6 @@ static int tls_push_record(struct sock *sk, int flags,
 
 static int tls_sw_push_pending_record(struct sock *sk, int flags)
 {
-	if (sk->sk_write_pending)
-		return -EBUSY;
-
 	return tls_push_record(sk, flags, TLS_RECORD_TYPE_DATA);
 }
 
@@ -392,13 +392,10 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 
 	lock_sock(sk);
 
-	/* Only one writer at a time is allowed */
-	if (sk->sk_write_pending)
-		return -EBUSY;
-
 	if (tls_is_pending_closed_record(tls_ctx)) {
 		ret = tls_push_pending_closed_record(sk, tls_ctx,
-						     msg->msg_flags);
+						     msg->msg_flags,
+						     &timeo);
 		if (ret < 0)
 			goto send_end;
 	}
@@ -449,11 +446,14 @@ alloc_encrypted:
 			if (ret)
 				goto fallback_to_reg_send;
 
+			copied += try_to_copy;
 			ret = tls_push_record(sk, msg->msg_flags, record_type);
-			if (!ret) {
-				copied += try_to_copy;
+			if (!ret)
 				continue;
-			}
+			if (ret == -EAGAIN)
+				goto send_end;
+
+			copied -= try_to_copy;
 fallback_to_reg_send:
 			iov_iter_revert(&msg->msg_iter,
 					ctx->sg_plaintext_size - orig_size);
@@ -512,11 +512,11 @@ trim_sgl:
 			goto send_end;
 		}
 
-		if (ctx->sg_encrypted_size < required_size)
-			goto alloc_encrypted;
-
 		if (tls_is_pending_closed_record(tls_ctx))
 			goto push_record;
+
+		if (ctx->sg_encrypted_size < required_size)
+			goto alloc_encrypted;
 
 		goto alloc_plaintext;
 	}
@@ -551,13 +551,12 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 		ret = -ENOTSUPP;
 		goto sendpage_end;
 	}
-	/* Only one writer at a time is allowed */
-	if (sk->sk_write_pending)
-		return -EBUSY;
+
 	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
 
 	if (tls_is_pending_closed_record(tls_ctx)) {
-		ret = tls_push_pending_closed_record(sk, tls_ctx, flags);
+		ret = tls_push_pending_closed_record(sk, tls_ctx, flags,
+						     &timeo);
 		if (ret < 0)
 			goto sendpage_end;
 	}
@@ -613,8 +612,12 @@ alloc_payload:
 		    ARRAY_SIZE(ctx->sg_plaintext_data)) {
 push_record:
 			ret = tls_push_record(sk, flags, record_type);
-			if (ret)
+			if (ret) {
+				if (ret == -ENOMEM)
+					goto wait_for_memory;
+
 				goto sendpage_end;
+			}
 		}
 		continue;
 wait_for_sndbuf:

@@ -130,7 +130,7 @@ int tls_push_sg(struct sock *sk, struct tls_context *ctx,
 		struct scatterlist *sg, u16 first_offset,
 		int flags);
 int tls_push_pending_closed_record(struct sock *sk, struct tls_context *ctx,
-				   int flags);
+				   int flags, long *timeo);
 
 static inline bool tls_is_pending_closed_record(struct tls_context *ctx)
 {
@@ -144,8 +144,7 @@ static inline bool tls_is_partially_sent_record(struct tls_context *ctx)
 
 static inline bool tls_is_pending_open_record(struct tls_context *tls_ctx)
 {
-	return tls_ctx->pending_open_record_frags &&
-	       !tls_is_pending_closed_record(tls_ctx);
+	return tls_ctx->pending_open_record_frags;
 }
 
 static inline void tls_err_abort(struct sock *sk)
