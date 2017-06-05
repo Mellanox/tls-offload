@@ -61,8 +61,10 @@ static void trim_sg(struct sock *sk, struct scatterlist *sg,
 	int i = *sg_num_elem - 1;
 	int trim = *sg_size - target_size;
 
-	if (!trim)
+	if (trim <= 0) {
+		WARN_ON(trim < 0);
 		return;
+	}
 
 	*sg_size = target_size;
 	while (trim >= sg[i].length) {
