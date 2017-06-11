@@ -726,7 +726,8 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 	ctx->tag_size = tag_size;
 	ctx->overhead_size = ctx->prepend_size + ctx->tag_size;
 	ctx->iv_size = iv_size;
-	ctx->iv = kmalloc(iv_size, GFP_KERNEL);
+	ctx->iv = kmalloc(iv_size + TLS_CIPHER_AES_GCM_128_SALT_SIZE,
+			  GFP_KERNEL);
 	if (!ctx->iv) {
 		rc = -ENOMEM;
 		goto out;
