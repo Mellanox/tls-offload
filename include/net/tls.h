@@ -111,6 +111,7 @@ struct tls_context {
 			   int __user *optlen);
 };
 
+int wait_on_pending_writer(struct sock *sk, long *timeo);
 int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 		int __user *optlen);
 int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
@@ -135,6 +136,21 @@ int tls_push_pending_closed_record(struct sock *sk, struct tls_context *ctx,
 static inline bool tls_is_pending_closed_record(struct tls_context *ctx)
 {
 	return test_bit(TLS_PENDING_CLOSED_RECORD, &ctx->flags);
+}
+
+static inline int tls_complete_pending_work(struct sock *sk,
+					    struct tls_context *ctx,
+					    int flags, long *timeo)
+{
+	int rc = 0;
+
+	if (unlikely(sk->sk_write_pending))
+		rc = wait_on_pending_writer(sk, timeo);
+
+	if (!rc && tls_is_pending_closed_record(ctx))
+		rc = tls_push_pending_closed_record(sk, ctx, flags, timeo);
+
+	return rc;
 }
 
 static inline bool tls_is_partially_sent_record(struct tls_context *ctx)

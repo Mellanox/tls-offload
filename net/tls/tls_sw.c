@@ -396,13 +396,8 @@ int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size)
 
 	lock_sock(sk);
 
-	if (tls_is_pending_closed_record(tls_ctx)) {
-		ret = tls_push_pending_closed_record(sk, tls_ctx,
-						     msg->msg_flags,
-						     &timeo);
-		if (ret < 0)
-			goto send_end;
-	}
+	if (tls_complete_pending_work(sk, tls_ctx, msg->msg_flags, &timeo))
+		goto send_end;
 
 	if (unlikely(msg->msg_controllen)) {
 		ret = tls_proccess_cmsg(sk, msg, &record_type);
@@ -558,12 +553,8 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 
 	sk_clear_bit(SOCKWQ_ASYNC_NOSPACE, sk);
 
-	if (tls_is_pending_closed_record(tls_ctx)) {
-		ret = tls_push_pending_closed_record(sk, tls_ctx, flags,
-						     &timeo);
-		if (ret < 0)
-			goto sendpage_end;
-	}
+	if (tls_complete_pending_work(sk, tls_ctx, flags, &timeo))
+		goto sendpage_end;
 
 	/* Call the sk_stream functions to manage the sndbuf mem. */
 	while (size > 0) {

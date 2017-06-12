@@ -47,7 +47,7 @@ MODULE_LICENSE("Dual BSD/GPL");
 static struct proto tls_base_prot;
 static struct proto tls_sw_prot;
 
-static int wait_on_pending_writer(struct sock *sk, long *timeo)
+int wait_on_pending_writer(struct sock *sk, long *timeo)
 {
 	int rc = 0;
 	DEFINE_WAIT_FUNC(wait, woken_wake_function);
@@ -175,13 +175,6 @@ int tls_push_pending_closed_record(struct sock *sk, struct tls_context *ctx,
 {
 	struct scatterlist *sg;
 	u16 offset;
-	int rc;
-
-	if (unlikely(sk->sk_write_pending)) {
-		rc = wait_on_pending_writer(sk, timeo);
-		if (rc)
-			return rc;
-	}
 
 	if (!tls_is_partially_sent_record(ctx))
 		return ctx->push_pending_record(sk, flags);
@@ -219,14 +212,13 @@ static void tls_write_space(struct sock *sk)
 static void tls_sk_proto_close(struct sock *sk, long timeout)
 {
 	struct tls_context *ctx = tls_get_ctx(sk);
+	long timeo = sock_sndtimeo(sk, 0);
 
 	lock_sock(sk);
-	if (tls_is_pending_closed_record(ctx)) {
-		long timeo = sock_sndtimeo(sk, 0);
 
-		tls_push_pending_closed_record(sk, ctx, 0, &timeo);
-	}
-	tls_handle_open_record(sk, 0);
+	if (!tls_complete_pending_work(sk, ctx, 0, &timeo))
+		tls_handle_open_record(sk, 0);
+
 	release_sock(sk);
 	ctx->sk_proto_close(sk, timeout);
 }
