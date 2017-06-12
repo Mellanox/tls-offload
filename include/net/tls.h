@@ -97,10 +97,9 @@ struct tls_context {
 
 	u16 pending_open_record_frags;
 	int (*push_pending_record)(struct sock *sk, int flags);
+	void (*free_resources)(struct sock *sk);
 
 	void (*sk_write_space)(struct sock *sk);
-	void (*sk_destruct)(struct sock *sk);
-
 	void (*sk_proto_close)(struct sock *sk, long timeout);
 
 	int  (*setsockopt)(struct sock *sk, int level,

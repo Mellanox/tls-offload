@@ -640,7 +640,7 @@ sendpage_end:
 	return ret;
 }
 
-void tls_sw_sk_destruct(struct sock *sk)
+void tls_sw_free_resources(struct sock *sk)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_sw_context *ctx = tls_sw_ctx(tls_ctx);
@@ -649,21 +649,8 @@ void tls_sw_sk_destruct(struct sock *sk)
 		crypto_free_aead(ctx->aead_send);
 
 	tls_free_both_sg(sk);
-	if (tls_ctx->partially_sent_record) {
-		struct scatterlist *sg = tls_ctx->partially_sent_record;
-
-		while (1) {
-			put_page(sg_page(sg));
-			sk_mem_uncharge(sk, sg->length);
-
-			if (sg_is_last(sg))
-				break;
-			sg++;
-		}
-	}
 
 	kfree(ctx);
-	tls_sk_destruct(sk, tls_ctx);
 }
 
 int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
@@ -693,6 +680,7 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 	}
 
 	ctx->priv_ctx = (struct tls_offload_context *)sw_ctx;
+	ctx->free_resources = tls_sw_free_resources;
 
 	crypto_info = &ctx->crypto_send;
 	switch (crypto_info->cipher_type) {
@@ -758,7 +746,6 @@ int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
 		}
 	}
 
-	sk->sk_destruct = tls_sw_sk_destruct;
 	ctx->push_pending_record = tls_sw_push_pending_record;
 
 	memcpy(keyval, gcm_128_info->key, TLS_CIPHER_AES_GCM_128_KEY_SIZE);

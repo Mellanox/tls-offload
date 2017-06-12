@@ -213,14 +213,34 @@ static void tls_sk_proto_close(struct sock *sk, long timeout)
 {
 	struct tls_context *ctx = tls_get_ctx(sk);
 	long timeo = sock_sndtimeo(sk, 0);
+	void (*sk_proto_close)(struct sock *sk, long timeout);
 
 	lock_sock(sk);
 
 	if (!tls_complete_pending_work(sk, ctx, 0, &timeo))
 		tls_handle_open_record(sk, 0);
 
+	if (ctx->partially_sent_record) {
+		struct scatterlist *sg = ctx->partially_sent_record;
+
+		while (1) {
+			put_page(sg_page(sg));
+			sk_mem_uncharge(sk, sg->length);
+
+			if (sg_is_last(sg))
+				break;
+			sg++;
+		}
+	}
+	ctx->free_resources(sk);
+	kfree(ctx->rec_seq);
+	kfree(ctx->iv);
+
+	sk_proto_close = ctx->sk_proto_close;
+	kfree(ctx);
+
 	release_sock(sk);
-	ctx->sk_proto_close(sk, timeout);
+	sk_proto_close(sk, timeout);
 }
 
 static int do_tls_getsockopt_tx(struct sock *sk, char __user *optval,
@@ -370,8 +390,6 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 	ctx->sk_write_space = sk->sk_write_space;
 	sk->sk_write_space = tls_write_space;
 
-	ctx->sk_destruct = sk->sk_destruct;
-
 	ctx->sk_proto_close = sk->sk_prot->close;
 
 	/* currently SW is default, we will have ethtool in future */
@@ -416,14 +434,6 @@ static int tls_setsockopt(struct sock *sk, int level, int optname,
 		return ctx->setsockopt(sk, level, optname, optval, optlen);
 
 	return do_tls_setsockopt(sk, optname, optval, optlen);
-}
-
-void tls_sk_destruct(struct sock *sk, struct tls_context *ctx)
-{
-	ctx->sk_destruct(sk);
-	kfree(ctx->rec_seq);
-	kfree(ctx->iv);
-	kfree(ctx);
 }
 
 static int tls_init(struct sock *sk)
