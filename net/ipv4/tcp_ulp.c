@@ -70,7 +70,7 @@ int tcp_register_ulp(struct tcp_ulp_ops *ulp)
 
 	return ret;
 }
-EXPORT_SYMBOL(tcp_register_ulp);
+EXPORT_SYMBOL_GPL(tcp_register_ulp);
 
 void tcp_unregister_ulp(struct tcp_ulp_ops *ulp)
 {
@@ -80,7 +80,7 @@ void tcp_unregister_ulp(struct tcp_ulp_ops *ulp)
 
 	synchronize_rcu();
 }
-EXPORT_SYMBOL(tcp_unregister_ulp);
+EXPORT_SYMBOL_GPL(tcp_unregister_ulp);
 
 /* Build string with list of available upper layer protocl values */
 void tcp_get_available_ulp(char *buf, size_t maxlen)
