@@ -442,6 +442,11 @@ static int tls_init(struct sock *sk)
 	struct tls_context *ctx;
 	int rc = 0;
 
+	if (sk->sk_prot != &tcp_prot) {
+		rc = -EINVAL;
+		goto out;
+	}
+
 	/* allocate tls context */
 	ctx = kzalloc(sizeof(*ctx), GFP_KERNEL);
 	if (!ctx) {
