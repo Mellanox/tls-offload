@@ -37,6 +37,7 @@
 #include <linux/mlx5/fs.h>
 #include "mlx5_core.h"
 #include "eswitch.h"
+#include "fs_core.h"
 
 #define UPLINK_VPORT 0xFFFF
 
@@ -1007,8 +1008,14 @@ static void esw_vport_cleanup_egress_rules(struct mlx5_eswitch *esw,
 		kfree(trunk_vlan_rule);
 	}
 
-	if (!IS_ERR_OR_NULL(vport->egress.drop_rule))
+	if (!IS_ERR_OR_NULL(vport->egress.drop_rule)) {
+		struct mlx5_fc *drop_counter =
+			mlx5_flow_rule_counter(vport->egress.drop_rule);
+
 		mlx5_del_flow_rules(vport->egress.drop_rule);
+		if (drop_counter)
+			mlx5_fc_destroy(vport->dev, drop_counter);
+	}
 
 	if (!IS_ERR_OR_NULL(vport->egress.allow_untagged_rule))
 		mlx5_del_flow_rules(vport->egress.allow_untagged_rule);
@@ -1174,8 +1181,14 @@ static void esw_vport_cleanup_ingress_rules(struct mlx5_eswitch *esw,
 {
 	struct mlx5_acl_vlan *trunk_vlan_rule, *tmp;
 
-	if (!IS_ERR_OR_NULL(vport->ingress.drop_rule))
+	if (!IS_ERR_OR_NULL(vport->ingress.drop_rule)) {
+		struct mlx5_fc *drop_counter =
+			mlx5_flow_rule_counter(vport->ingress.drop_rule);
+
 		mlx5_del_flow_rules(vport->ingress.drop_rule);
+		if (drop_counter)
+			mlx5_fc_destroy(vport->dev, drop_counter);
+	}
 
 	list_for_each_entry_safe(trunk_vlan_rule, tmp,
 				 &vport->ingress.allowed_vlans_rules, list) {
@@ -1222,6 +1235,8 @@ static int esw_vport_ingress_config(struct mlx5_eswitch *esw,
 	bool need_vlan_filter = !!bitmap_weight(vport->info.vlan_trunk_8021q_bitmap,
 						VLAN_N_VID);
 	struct mlx5_acl_vlan *trunk_vlan_rule;
+	struct mlx5_flow_destination dest;
+	struct mlx5_fc *counter = NULL;
 	struct mlx5_flow_act flow_act = {0};
 	struct mlx5_flow_spec *spec;
 	bool need_acl_table = true;
@@ -1333,18 +1348,33 @@ static int esw_vport_ingress_config(struct mlx5_eswitch *esw,
 	}
 
 drop_rule:
+	/* Alloc ingress drop flow counter */
+	counter = mlx5_fc_create(esw->dev, false);
+	if (IS_ERR(counter)) {
+		esw_warn(esw->dev,
+			 "vport[%d] configure ingress drop rule counter failed\n",
+			 vport->vport);
+		counter = NULL;
+	} else {
+		dest.type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
+		dest.counter = counter;
+	}
+
+	/* Drop others rule (star rule) */
 	memset(spec, 0, sizeof(*spec));
 	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_DROP;
+	if (counter)
+		flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_COUNT;
 	vport->ingress.drop_rule =
-		mlx5_add_flow_rules(vport->ingress.acl, spec,
-				    &flow_act, NULL, 0);
+		mlx5_add_flow_rules(vport->ingress.acl, spec, &flow_act, &dest, 1);
 	if (IS_ERR(vport->ingress.drop_rule)) {
 		err = PTR_ERR(vport->ingress.drop_rule);
 		esw_warn(esw->dev,
 			 "vport[%d] configure ingress drop rule, err(%d)\n",
 			 vport->vport, err);
 		vport->ingress.drop_rule = NULL;
-		goto out;
+		if (counter)
+			mlx5_fc_destroy(vport->dev, counter);
 	}
 
 out:
@@ -1362,6 +1392,8 @@ static int esw_vport_egress_config(struct mlx5_eswitch *esw,
 	bool need_acl_table = vport->info.vlan || vport->info.qos ||
 			      need_vlan_filter;
 	struct mlx5_acl_vlan *trunk_vlan_rule;
+	struct mlx5_flow_destination dest;
+	struct mlx5_fc *counter = NULL;
 	struct mlx5_flow_act flow_act = {0};
 	struct mlx5_flow_spec *spec;
 	u16 vlan_id = 0;
@@ -1454,18 +1486,33 @@ static int esw_vport_egress_config(struct mlx5_eswitch *esw,
 		list_add(&trunk_vlan_rule->list, &vport->egress.allowed_vlans_rules);
 	}
 
+	/* Alloc egress drop flow counter */
+	counter = mlx5_fc_create(esw->dev, false);
+	if (IS_ERR(counter)) {
+		esw_warn(esw->dev,
+			 "vport[%d] configure egress drop rule counter failed\n",
+			 vport->vport);
+		counter = NULL;
+	} else {
+		dest.type = MLX5_FLOW_DESTINATION_TYPE_COUNTER;
+		dest.counter = counter;
+	}
+
 	/* Drop others rule (star rule) */
 	memset(spec, 0, sizeof(*spec));
 	flow_act.action = MLX5_FLOW_CONTEXT_ACTION_DROP;
+	if (counter)
+		flow_act.action |= MLX5_FLOW_CONTEXT_ACTION_COUNT;
 	vport->egress.drop_rule =
-		mlx5_add_flow_rules(vport->egress.acl, spec,
-				    &flow_act, NULL, 0);
+		mlx5_add_flow_rules(vport->egress.acl, spec, &flow_act, &dest, 1);
 	if (IS_ERR(vport->egress.drop_rule)) {
 		err = PTR_ERR(vport->egress.drop_rule);
 		esw_warn(esw->dev,
 			 "vport[%d] configure egress drop rule failed, err(%d)\n",
 			 vport->vport, err);
 		vport->egress.drop_rule = NULL;
+		if (counter)
+			mlx5_fc_destroy(vport->dev, counter);
 	}
 out:
 	if (err)
@@ -2316,6 +2363,38 @@ int mlx5_eswitch_del_vport_trunk_range(struct mlx5_eswitch *esw,
 	return err;
 }
 
+static int mlx5_eswitch_query_vport_drop_stats(struct mlx5_core_dev *dev,
+					       int vport_idx,
+					       u64 *rx_dropped,
+					       u64 *tx_dropped)
+{
+	struct mlx5_eswitch *esw = dev->priv.eswitch;
+	struct mlx5_vport *vport = &esw->vports[vport_idx];
+	struct mlx5_fc *drop_counter;
+	u16 idx = 0;
+	u64 dummy;
+
+	if (!vport->enabled)
+		return 0;
+
+	if (vport->egress.drop_rule) {
+		drop_counter = mlx5_flow_rule_counter(vport->egress.drop_rule);
+		if (drop_counter) {
+			idx = drop_counter->id;
+			mlx5_fc_query(dev, idx, rx_dropped, &dummy);
+		}
+	}
+
+	if (vport->ingress.drop_rule) {
+		drop_counter = mlx5_flow_rule_counter(vport->ingress.drop_rule);
+		if (drop_counter) {
+			idx = drop_counter->id;
+			mlx5_fc_query(dev, idx, tx_dropped, &dummy);
+		}
+	}
+	return 0;
+}
+
 int mlx5_eswitch_get_vport_stats(struct mlx5_eswitch *esw,
 				 int vport,
 				 struct ifla_vf_stats *vf_stats)
@@ -2375,6 +2454,10 @@ int mlx5_eswitch_get_vport_stats(struct mlx5_eswitch *esw,
 
 	vf_stats->broadcast =
 		MLX5_GET_CTR(out, received_eth_broadcast.packets);
+
+	mlx5_eswitch_query_vport_drop_stats(esw->dev, vport,
+					    &vf_stats->rx_dropped,
+					    &vf_stats->tx_dropped);
 
 free_out:
 	kvfree(out);
