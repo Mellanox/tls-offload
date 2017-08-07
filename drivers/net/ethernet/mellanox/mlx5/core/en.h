@@ -188,11 +188,13 @@ extern const char mlx5e_self_tests[][ETH_GSTRING_LEN];
 static const char mlx5e_priv_flags[][ETH_GSTRING_LEN] = {
 	"rx_cqe_moder",
 	"rx_cqe_compress",
+	"sniffer",
 };
 
 enum mlx5e_priv_flag {
 	MLX5E_PFLAG_RX_CQE_BASED_MODER = (1 << 0),
 	MLX5E_PFLAG_RX_CQE_COMPRESS = (1 << 1),
+	MLX5E_PFLAG_SNIFFER = (1 << 2),
 };
 
 #define MLX5E_SET_PFLAG(params, pflag, enable)			\
@@ -731,6 +733,16 @@ struct mlx5e_ethtool_steering {
 	int                             tot_num_rules;
 };
 
+enum mlx5e_sniffer_types {
+	MLX5E_SNIFFER_TX,
+	MLX5E_SNIFFER_NUM_TYPE,
+};
+
+struct mlx5e_flow_sniffer {
+	struct mlx5_flow_table *tx_ft;
+	struct mlx5_flow_handle *tx_fh;
+};
+
 struct mlx5e_flow_steering {
 	struct mlx5_flow_namespace      *ns;
 	struct mlx5e_ethtool_steering   ethtool;
@@ -740,6 +752,7 @@ struct mlx5e_flow_steering {
 	struct mlx5e_ttc_table          ttc;
 	struct mlx5e_ttc_table          inner_ttc;
 	struct mlx5e_arfs_tables        arfs;
+	struct mlx5e_flow_sniffer	sniffer;
 };
 
 struct mlx5e_rqt {
@@ -774,6 +787,7 @@ struct mlx5e_priv {
 	struct mlx5e_tir           indir_tir[MLX5E_NUM_INDIR_TIRS];
 	struct mlx5e_tir           inner_indir_tir[MLX5E_NUM_INDIR_TIRS];
 	struct mlx5e_tir           direct_tir[MLX5E_MAX_NUM_CHANNELS];
+	u32                        sniffer_tirn[MLX5E_SNIFFER_NUM_TYPE];
 	u32                        tx_rates[MLX5E_MAX_NUM_SQS];
 	int                        hard_mtu;
 
@@ -938,6 +952,8 @@ static inline bool mlx5e_tunnel_inner_ft_supported(struct mlx5_core_dev *mdev)
 	return (MLX5_CAP_ETH(mdev, tunnel_stateless_gre) &&
 		MLX5_CAP_FLOWTABLE_NIC_RX(mdev, ft_field_support.inner_ip_version));
 }
+
+int set_pflag_sniffer(struct net_device *netdev, bool enable);
 
 static inline
 struct mlx5e_tx_wqe *mlx5e_post_nop(struct mlx5_wq_cyc *wq, u32 sqn, u16 *pc)

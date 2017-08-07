@@ -36,6 +36,7 @@
 #include <linux/tcp.h>
 #include <linux/bpf_trace.h>
 #include <net/busy_poll.h>
+#include <linux/mlx5/fs.h>
 #include "en.h"
 #include "en_tc.h"
 #include "eswitch.h"
@@ -660,6 +661,7 @@ static inline void mlx5e_build_rx_skb(struct mlx5_cqe64 *cqe,
 	struct net_device *netdev = rq->netdev;
 	struct mlx5e_tstamp *tstamp = rq->tstamp;
 	int lro_num_seg;
+	__be32 temp;
 
 	lro_num_seg = be32_to_cpu(cqe->srqn) >> 24;
 	if (lro_num_seg > 1) {
@@ -688,7 +690,12 @@ static inline void mlx5e_build_rx_skb(struct mlx5_cqe64 *cqe,
 	skb->mark = be32_to_cpu(cqe->sop_drop_qpn) & MLX5E_TC_FLOW_ID_MASK;
 
 	mlx5e_handle_csum(netdev, cqe, rq, skb, !!lro_num_seg);
+
 	skb->protocol = eth_type_trans(skb, netdev);
+
+	temp = cqe->sop_drop_qpn & cpu_to_be32(MLX5_FS_FLOW_TAG_MASK);
+	if (unlikely((temp == cpu_to_be32(MLX5_FS_SNIFFER_FLOW_TAG))))
+		skb->protocol = 0xFFFF;
 }
 
 static inline void mlx5e_complete_rx_cqe(struct mlx5e_rq *rq,

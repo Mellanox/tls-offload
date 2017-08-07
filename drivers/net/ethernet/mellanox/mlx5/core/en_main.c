@@ -3974,6 +3974,7 @@ void mlx5e_build_nic_params(struct mlx5_core_dev *mdev,
 		params->rx_cqe_compress_def = cqe_compress_heuristic(link_speed, pci_bw);
 
 	MLX5E_SET_PFLAG(params, MLX5E_PFLAG_RX_CQE_COMPRESS, params->rx_cqe_compress_def);
+	MLX5E_SET_PFLAG(params, MLX5E_PFLAG_SNIFFER, 0);
 
 	/* RQ */
 	mlx5e_set_rq_params(mdev, params);

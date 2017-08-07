@@ -1804,7 +1804,12 @@ static int mlx5e_set_priv_flags(struct net_device *netdev, u32 pflags)
 	err = mlx5e_handle_pflag(netdev, pflags,
 				 MLX5E_PFLAG_RX_CQE_COMPRESS,
 				 set_pflag_rx_cqe_compress);
+	if (err)
+		goto out;
 
+	err = mlx5e_handle_pflag(netdev, pflags,
+				 MLX5E_PFLAG_SNIFFER,
+				 set_pflag_sniffer);
 out:
 	mutex_unlock(&priv->state_lock);
 	return err;
