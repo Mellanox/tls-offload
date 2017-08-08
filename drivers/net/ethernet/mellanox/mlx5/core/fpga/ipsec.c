@@ -38,8 +38,6 @@
 #include "fpga/sdk.h"
 #include "fpga/core.h"
 
-#define SBU_QP_QUEUE_SIZE 8
-
 enum mlx5_ipsec_response_syndrome {
 	MLX5_IPSEC_RESPONSE_SUCCESS = 0,
 	MLX5_IPSEC_RESPONSE_ILLEGAL_REQUEST = 1,
