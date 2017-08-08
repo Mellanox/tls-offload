@@ -42,6 +42,8 @@
  * This header defines the in-kernel API for Innova FPGA client drivers.
  */
 
+#define SBU_QP_QUEUE_SIZE 8
+
 enum mlx5_fpga_access_type {
 	MLX5_FPGA_ACCESS_TYPE_I2C = 0x0,
 	MLX5_FPGA_ACCESS_TYPE_DONTCARE = 0x0,
