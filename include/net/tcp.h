@@ -1247,6 +1247,7 @@ static const char *statename[]={
 };
 #endif
 void tcp_set_state(struct sock *sk, int state);
+void tcp_cleanup_rbuf(struct sock *sk, int copied);
 
 void tcp_done(struct sock *sk);
 

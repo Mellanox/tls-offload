@@ -1543,7 +1543,7 @@ static int tcp_peek_sndq(struct sock *sk, struct msghdr *msg, int len)
  * calculation of whether or not we must ACK for the sake of
  * a window update.
  */
-static void tcp_cleanup_rbuf(struct sock *sk, int copied)
+void tcp_cleanup_rbuf(struct sock *sk, int copied)
 {
 	struct tcp_sock *tp = tcp_sk(sk);
 	bool time_to_ack = false;
@@ -1600,6 +1600,7 @@ static void tcp_cleanup_rbuf(struct sock *sk, int copied)
 	if (time_to_ack)
 		tcp_send_ack(sk);
 }
+EXPORT_SYMBOL_GPL(tcp_cleanup_rbuf);
 
 static struct sk_buff *tcp_recv_skb(struct sock *sk, u32 seq, u32 *off)
 {

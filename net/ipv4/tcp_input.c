@@ -635,6 +635,7 @@ new_measure:
 	tp->rcvq_space.seq = tp->copied_seq;
 	tp->rcvq_space.time = tp->tcp_mstamp;
 }
+EXPORT_SYMBOL_GPL(tcp_rcv_space_adjust);
 
 /* There is something which you must keep in mind when you analyze the
  * behavior of the tp->ato delayed ack timeout interval.  When a
