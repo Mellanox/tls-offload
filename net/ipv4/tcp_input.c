@@ -4733,6 +4733,9 @@ tcp_collapse(struct sock *sk, struct sk_buff_head *list, struct rb_root *root,
 	struct sk_buff_head tmp;
 	bool end_of_skbs;
 
+	if (inet_csk(sk)->icsk_ulp_data)
+		return;
+
 	/* First, check that queue is collapsible and find
 	 * the point where collapsing can be useful.
 	 */
