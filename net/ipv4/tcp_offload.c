@@ -259,6 +259,7 @@ found:
 
 	flush |= (len - 1) >= mss;
 	flush |= (ntohl(th2->seq) + skb_gro_len(p)) ^ ntohl(th->seq);
+	flush |= p->decrypted ^ skb->decrypted;
 
 	if (flush || skb_gro_receive(head, skb)) {
 		mss = 1;
