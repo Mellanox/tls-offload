@@ -35,6 +35,7 @@
 #include "en.h"
 #include "ipoib/ipoib.h"
 #include "en_accel/ipsec_rxtx.h"
+#include "en_accel/tls_rxtx.h"
 
 #define MLX5E_SQ_NOPS_ROOM  MLX5_SEND_WQE_MAX_WQEBBS
 #define MLX5E_SQ_STOP_ROOM (MLX5_SEND_WQE_MAX_WQEBBS +\
@@ -385,6 +386,18 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 		skb = mlx5e_ipsec_handle_tx_skb(dev, wqe, skb);
 		if (unlikely(!skb))
 			return NETDEV_TX_OK;
+	}
+#endif
+
+#ifdef CONFIG_MLX5_EN_TLS
+	if (priv->tls) {
+		skb = mlx5e_tls_handle_tx_skb(dev, wqe, skb);
+		if (unlikely(!skb))
+			return NETDEV_TX_OK;
+
+		pi = sq->pc & wq->sz_m1;
+		wqe = mlx5_wq_cyc_get_wqe(wq, pi);
+		memset(wqe, 0, sizeof(*wqe));
 	}
 #endif
 

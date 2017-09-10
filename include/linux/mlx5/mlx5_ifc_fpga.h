@@ -38,6 +38,7 @@ enum {
 
 enum {
 	MLX5_FPGA_CAP_SANDBOX_PRODUCT_ID_IPSEC    = 0x2,
+	MLX5_FPGA_CAP_SANDBOX_PRODUCT_ID_TLS      = 0x3,
 };
 
 struct mlx5_ifc_fpga_shell_caps_bits {
