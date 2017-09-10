@@ -3645,6 +3645,9 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	if (!prior_packets)
 		goto no_queue;
 
+	if (icsk->icsk_clean_acked)
+		icsk->icsk_clean_acked(sk);
+
 	/* See if we can take anything off of the retransmit queue. */
 	flag |= tcp_clean_rtx_queue(sk, prior_fackets, prior_snd_una, &acked,
 				    &sack_state);
