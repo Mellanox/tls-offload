@@ -232,12 +232,11 @@ static void tls_sk_proto_close(struct sock *sk, long timeout)
 			sg++;
 		}
 	}
-	ctx->free_resources(sk);
+
 	kfree(ctx->rec_seq);
 	kfree(ctx->iv);
-
 	sk_proto_close = ctx->sk_proto_close;
-	kfree(ctx);
+	ctx->free_resources(sk);
 
 	release_sock(sk);
 	sk_proto_close(sk, timeout);

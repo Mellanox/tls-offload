@@ -650,6 +650,7 @@ void tls_sw_free_resources(struct sock *sk)
 	tls_free_both_sg(sk);
 
 	kfree(ctx);
+	kfree(tls_ctx);
 }
 
 int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx)
