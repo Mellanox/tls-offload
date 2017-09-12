@@ -842,6 +842,23 @@ struct xfrmdev_ops {
 };
 #endif
 
+#if IS_ENABLED(CONFIG_TLS_DEVICE)
+enum tls_offload_ctx_dir {
+	TLS_OFFLOAD_CTX_DIR_RX,
+	TLS_OFFLOAD_CTX_DIR_TX,
+};
+
+struct tls_crypto_info;
+
+struct tlsdev_ops {
+	int (*tls_dev_add)(struct net_device *netdev, struct sock *sk,
+			   enum tls_offload_ctx_dir direction,
+			   struct tls_crypto_info *crypto_info);
+	void (*tls_dev_del)(struct net_device *netdev, struct sock *sk,
+			    enum tls_offload_ctx_dir direction);
+};
+#endif
+
 struct dev_ifalias {
 	struct rcu_head rcuhead;
 	char ifalias[];
@@ -1725,6 +1742,10 @@ struct net_device {
 
 #ifdef CONFIG_XFRM
 	const struct xfrmdev_ops *xfrmdev_ops;
+#endif
+
+#if IS_ENABLED(CONFIG_TLS_DEVICE)
+	const struct tlsdev_ops *tlsdev_ops;
 #endif
 
 	const struct header_ops *header_ops;
