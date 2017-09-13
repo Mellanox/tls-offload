@@ -71,6 +71,24 @@ struct tls_sw_context {
 	struct scatterlist sg_aead_out[2];
 };
 
+struct tls_record_info {
+	struct list_head list;
+	u32 end_seq;
+	int len;
+	int num_frags;
+	skb_frag_t frags[MAX_SKB_FRAGS];
+};
+
+struct tls_offload_context {
+	struct list_head records_list;
+	struct scatterlist sg_tx_data[MAX_SKB_FRAGS];
+	void (*sk_destruct)(struct sock *sk);
+	struct tls_record_info *open_record;
+	struct tls_record_info *retransmit_hint;
+	u32 expected_seq;
+	spinlock_t lock;	/* protects records list */
+};
+
 enum {
 	TLS_PENDING_CLOSED_RECORD
 };
@@ -81,6 +99,9 @@ struct tls_context {
 		struct tls12_crypto_info_aes_gcm_128 crypto_send_aes_gcm_128;
 	};
 
+	struct list_head gclist;
+	struct sock *sk;
+	struct net_device *netdev;
 	void *priv_ctx;
 
 	u16 prepend_size;
@@ -123,9 +144,18 @@ int tls_sw_sendpage(struct sock *sk, struct page *page,
 		    int offset, size_t size, int flags);
 void tls_sw_close(struct sock *sk, long timeout);
 
-void tls_sk_destruct(struct sock *sk, struct tls_context *ctx);
-void tls_icsk_clean_acked(struct sock *sk);
+void tls_clear_device_offload(struct sock *sk, struct tls_context *ctx);
+int tls_set_device_offload(struct sock *sk, struct tls_context *ctx);
+int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
+int tls_device_sendpage(struct sock *sk, struct page *page,
+			int offset, size_t size, int flags);
+void tls_device_sk_destruct(struct sock *sk);
+void tls_device_cleanup(void);
 
+struct tls_record_info *tls_get_record(struct tls_offload_context *context,
+				       u32 seq);
+
+void tls_sk_destruct(struct sock *sk, struct tls_context *ctx);
 int tls_push_sg(struct sock *sk, struct tls_context *ctx,
 		struct scatterlist *sg, u16 first_offset,
 		int flags);
@@ -160,6 +190,13 @@ static inline bool tls_is_partially_sent_record(struct tls_context *ctx)
 static inline bool tls_is_pending_open_record(struct tls_context *tls_ctx)
 {
 	return tls_ctx->pending_open_record_frags;
+}
+
+static inline bool tls_is_sk_tx_device_offloaded(struct sock *sk)
+{
+	/* matches smp_store_release in tls_set_device_offload */
+	return	smp_load_acquire(&sk->sk_destruct) ==
+			&tls_device_sk_destruct;
 }
 
 static inline void tls_err_abort(struct sock *sk)

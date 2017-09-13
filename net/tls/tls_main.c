@@ -45,8 +45,16 @@ MODULE_AUTHOR("Mellanox Technologies");
 MODULE_DESCRIPTION("Transport Layer Security Support");
 MODULE_LICENSE("Dual BSD/GPL");
 
-static struct proto tls_base_prot;
-static struct proto tls_sw_prot;
+enum {
+	TLS_BASE_TX,
+	TLS_SW_TX,
+#ifdef CONFIG_TLS_DEVICE
+	TLS_HW_TX,
+#endif
+	TLS_NUM_CONFIG,
+};
+
+static struct proto tls_prots[TLS_NUM_CONFIG];
 
 int wait_on_pending_writer(struct sock *sk, long *timeo)
 {
@@ -393,11 +401,19 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 
 	ctx->sk_proto_close = sk->sk_prot->close;
 
-	/* currently SW is default, we will have ethtool in future */
-	rc = tls_set_sw_offload(sk, ctx);
-	prot = &tls_sw_prot;
-	if (rc)
-		goto err_crypto_info;
+#ifdef CONFIG_TLS_DEVICE
+	rc = tls_set_device_offload(sk, ctx);
+	prot = &tls_prots[TLS_HW_TX];
+	if (rc) {
+#else
+	{
+#endif
+		/* if HW offload fails fallback to SW */
+		rc = tls_set_sw_offload(sk, ctx);
+		prot = &tls_prots[TLS_SW_TX];
+		if (rc)
+			goto err_crypto_info;
+	}
 
 	sk->sk_prot = prot;
 	goto out;
@@ -452,7 +468,8 @@ static int tls_init(struct sock *sk)
 	icsk->icsk_ulp_data = ctx;
 	ctx->setsockopt = sk->sk_prot->setsockopt;
 	ctx->getsockopt = sk->sk_prot->getsockopt;
-	sk->sk_prot = &tls_base_prot;
+
+	sk->sk_prot = &tls_prots[TLS_BASE_TX];
 out:
 	return rc;
 }
@@ -463,16 +480,27 @@ static struct tcp_ulp_ops tcp_tls_ulp_ops __read_mostly = {
 	.init			= tls_init,
 };
 
+static void build_protos(struct proto *prot, struct proto *base)
+{
+	prot[TLS_BASE_TX] = *base;
+	prot[TLS_BASE_TX].setsockopt = tls_setsockopt;
+	prot[TLS_BASE_TX].getsockopt = tls_getsockopt;
+
+	prot[TLS_SW_TX] = prot[TLS_BASE_TX];
+	prot[TLS_SW_TX].close		= tls_sk_proto_close;
+	prot[TLS_SW_TX].sendmsg		= tls_sw_sendmsg;
+	prot[TLS_SW_TX].sendpage	= tls_sw_sendpage;
+
+#ifdef CONFIG_TLS_DEVICE
+	prot[TLS_HW_TX] = prot[TLS_SW_TX];
+	prot[TLS_HW_TX].sendmsg		= tls_device_sendmsg;
+	prot[TLS_HW_TX].sendpage	= tls_device_sendpage;
+#endif
+}
+
 static int __init tls_register(void)
 {
-	tls_base_prot			= tcp_prot;
-	tls_base_prot.setsockopt	= tls_setsockopt;
-	tls_base_prot.getsockopt	= tls_getsockopt;
-
-	tls_sw_prot			= tls_base_prot;
-	tls_sw_prot.sendmsg		= tls_sw_sendmsg;
-	tls_sw_prot.sendpage            = tls_sw_sendpage;
-	tls_sw_prot.close               = tls_sk_proto_close;
+	build_protos(tls_prots, &tcp_prot);
 
 	tcp_register_ulp(&tcp_tls_ulp_ops);
 
@@ -482,6 +510,9 @@ static int __init tls_register(void)
 static void __exit tls_unregister(void)
 {
 	tcp_unregister_ulp(&tcp_tls_ulp_ops);
+#ifdef CONFIG_TLS_DEVICE
+	tls_device_cleanup();
+#endif
 }
 
 module_init(tls_register);
