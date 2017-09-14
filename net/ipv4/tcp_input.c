@@ -4598,8 +4598,10 @@ static void tcp_data_queue(struct sock *sk, struct sk_buff *skb)
 queue_and_out:
 		if (skb_queue_len(&sk->sk_receive_queue) == 0)
 			sk_forced_mem_schedule(sk, skb->truesize);
-		else if (tcp_try_rmem_schedule(sk, skb, skb->truesize))
+		else if (tcp_try_rmem_schedule(sk, skb, skb->truesize)) {
+			pr_err("rmem drop\n");
 			goto drop;
+		}
 
 		eaten = tcp_queue_rcv(sk, skb, 0, &fragstolen);
 		tcp_rcv_nxt_update(tp, TCP_SKB_CB(skb)->end_seq);
