@@ -48,6 +48,9 @@ MODULE_LICENSE("Dual BSD/GPL");
 enum {
 	TLS_BASE_TX,
 	TLS_SW_TX,
+#ifdef CONFIG_TLS_DEVICE
+	TLS_HW_TX,
+#endif
 	TLS_NUM_CONFIG,
 };
 
@@ -401,11 +404,19 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 		goto out;
 	}
 
-	/* currently SW is default, we will have ethtool in future */
-	rc = tls_set_sw_offload(sk, ctx);
-	tx_conf = TLS_SW_TX;
-	if (rc)
-		goto err_crypto_info;
+#ifdef CONFIG_TLS_DEVICE
+	rc = tls_set_device_offload(sk, ctx);
+	tx_conf = TLS_HW_TX;
+	if (rc) {
+#else
+	{
+#endif
+		/* if HW offload fails fallback to SW */
+		rc = tls_set_sw_offload(sk, ctx);
+		tx_conf = TLS_SW_TX;
+		if (rc)
+			goto err_crypto_info;
+	}
 
 	ctx->tx_conf = tx_conf;
 	update_sk_prot(sk, ctx);
@@ -487,12 +498,21 @@ static void build_protos(struct proto *prot, struct proto *base)
 	prot[TLS_SW_TX] = prot[TLS_BASE_TX];
 	prot[TLS_SW_TX].sendmsg		= tls_sw_sendmsg;
 	prot[TLS_SW_TX].sendpage	= tls_sw_sendpage;
+
+#ifdef CONFIG_TLS_DEVICE
+	prot[TLS_HW_TX] = prot[TLS_SW_TX];
+	prot[TLS_HW_TX].sendmsg		= tls_device_sendmsg;
+	prot[TLS_HW_TX].sendpage	= tls_device_sendpage;
+#endif
 }
 
 static int __init tls_register(void)
 {
 	build_protos(tls_prots, &tcp_prot);
 
+#ifdef CONFIG_TLS_DEVICE
+	tls_device_init();
+#endif
 	tcp_register_ulp(&tcp_tls_ulp_ops);
 
 	return 0;
@@ -501,6 +521,9 @@ static int __init tls_register(void)
 static void __exit tls_unregister(void)
 {
 	tcp_unregister_ulp(&tcp_tls_ulp_ops);
+#ifdef CONFIG_TLS_DEVICE
+	tls_device_cleanup();
+#endif
 }
 
 module_init(tls_register);
