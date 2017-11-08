@@ -36,11 +36,21 @@
 #include "en.h"
 #include "ipoib/ipoib.h"
 #include "en_accel/ipsec_rxtx.h"
+#include "en_accel/tls_rxtx.h"
 #include "lib/clock.h"
 
 #define MLX5E_SQ_NOPS_ROOM  MLX5_SEND_WQE_MAX_WQEBBS
+
+#ifndef CONFIG_MLX5_EN_TLS
 #define MLX5E_SQ_STOP_ROOM (MLX5_SEND_WQE_MAX_WQEBBS +\
 			    MLX5E_SQ_NOPS_ROOM)
+#else
+/* TLS offload requires MLX5E_SQ_STOP_ROOM to have
+ * enough room for a resync SKB, a normal SKB and a NOP
+ */
+#define MLX5E_SQ_STOP_ROOM (2 * MLX5_SEND_WQE_MAX_WQEBBS +\
+			    MLX5E_SQ_NOPS_ROOM)
+#endif
 
 static inline void mlx5e_tx_dma_unmap(struct device *pdev,
 				      struct mlx5e_sq_dma *dma)
@@ -325,8 +335,9 @@ mlx5e_txwqe_complete(struct mlx5e_txqsq *sq, struct sk_buff *skb,
 	}
 }
 
-static netdev_tx_t mlx5e_sq_xmit(struct mlx5e_txqsq *sq, struct sk_buff *skb,
-				 struct mlx5e_tx_wqe *wqe, u16 pi)
+static netdev_tx_t mlx5e_sq_xmit_wqe(struct mlx5e_txqsq *sq,
+				     struct sk_buff *skb,
+				     struct mlx5e_tx_wqe *wqe, u16 pi)
 {
 	struct mlx5e_tx_wqe_info *wi   = &sq->db.wqe_info[pi];
 
@@ -396,14 +407,25 @@ dma_unmap_wqe_err:
 	return NETDEV_TX_OK;
 }
 
-netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
+static netdev_tx_t mlx5e_sq_accel_xmit(struct sk_buff *skb,
+				       struct mlx5e_txqsq *sq,
+				       struct net_device *dev)
 {
-	struct mlx5e_priv *priv = netdev_priv(dev);
-	struct mlx5e_txqsq *sq = priv->txq2sq[skb_get_queue_mapping(skb)];
-	struct mlx5_wq_cyc *wq = &sq->wq;
-	u16 pi = sq->pc & wq->sz_m1;
-	struct mlx5e_tx_wqe *wqe = mlx5_wq_cyc_get_wqe(wq, pi);
+	struct mlx5e_tx_wqe *wqe;
+	struct mlx5_wq_cyc *wq;
+	u16 pi;
 
+#ifdef CONFIG_MLX5_EN_TLS
+	if (sq->state & BIT(MLX5E_SQ_STATE_TLS)) {
+		skb = mlx5e_tls_handle_tx_skb(dev, sq, skb);
+		if (unlikely(!skb))
+			return NETDEV_TX_OK;
+	}
+#endif
+
+	wq = &sq->wq;
+	pi = sq->pc & wq->sz_m1;
+	wqe = mlx5_wq_cyc_get_wqe(wq, pi);
 	memset(wqe, 0, sizeof(*wqe));
 
 #ifdef CONFIG_MLX5_EN_IPSEC
@@ -414,7 +436,35 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 #endif
 
-	return mlx5e_sq_xmit(sq, skb, wqe, pi);
+	return mlx5e_sq_xmit_wqe(sq, skb, wqe, pi);
+}
+
+netdev_tx_t mlx5e_sq_xmit(struct sk_buff *skb, struct mlx5e_txqsq *sq)
+{
+	struct mlx5e_tx_wqe *wqe;
+	struct mlx5_wq_cyc *wq;
+	u16 pi;
+
+	wq = &sq->wq;
+	pi = sq->pc & wq->sz_m1;
+	wqe = mlx5_wq_cyc_get_wqe(wq, pi);
+	memset(wqe, 0, sizeof(*wqe));
+
+	return mlx5e_sq_xmit_wqe(sq, skb, wqe, pi);
+}
+
+netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
+{
+	struct mlx5e_priv *priv = netdev_priv(dev);
+	struct mlx5e_txqsq *sq;
+
+	sq = priv->txq2sq[skb_get_queue_mapping(skb)];
+
+#ifdef CONFIG_MLX5_ACCEL
+	return mlx5e_sq_accel_xmit(skb, sq, dev);
+#else
+	return mlx5e_sq_xmit(skb, sq);
+#endif
 }
 
 static void mlx5e_dump_error_cqe(struct mlx5e_txqsq *sq,
