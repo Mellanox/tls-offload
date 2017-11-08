@@ -61,6 +61,8 @@
 #include "accel/ipsec.h"
 #include "lib/clock.h"
 
+#include "fpga/tls.h"
+
 MODULE_AUTHOR("Eli Cohen <eli@mellanox.com>");
 MODULE_DESCRIPTION("Mellanox Connect-IB, ConnectX-4 core driver");
 MODULE_LICENSE("Dual BSD/GPL");
@@ -1125,6 +1127,11 @@ static int mlx5_load_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 		dev_err(&pdev->dev, "IPSec device start failed %d\n", err);
 		goto err_ipsec_start;
 	}
+	err = mlx5_fpga_tls_init(dev);
+	if (err) {
+		dev_err(&pdev->dev, "IPSec device start failed %d\n", err);
+		goto err_tls_start;
+	}
 
 	if (mlx5_device_registered(dev)) {
 		mlx5_attach_device(dev);
@@ -1143,6 +1150,8 @@ out:
 	return 0;
 
 err_reg_dev:
+	mlx5_fpga_tls_cleanup(dev);
+err_tls_start:
 	mlx5_accel_ipsec_cleanup(dev);
 err_ipsec_start:
 	mlx5_fpga_device_stop(dev);
@@ -1218,6 +1227,7 @@ static int mlx5_unload_one(struct mlx5_core_dev *dev, struct mlx5_priv *priv,
 		mlx5_detach_device(dev);
 
 	mlx5_accel_ipsec_cleanup(dev);
+	mlx5_fpga_tls_cleanup(dev);
 	mlx5_fpga_device_stop(dev);
 
 	mlx5_sriov_detach(dev);
