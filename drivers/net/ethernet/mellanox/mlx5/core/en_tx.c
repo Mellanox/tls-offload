@@ -36,11 +36,21 @@
 #include "en.h"
 #include "ipoib/ipoib.h"
 #include "en_accel/ipsec_rxtx.h"
+#include "en_accel/tls_rxtx.h"
 #include "lib/clock.h"
 
 #define MLX5E_SQ_NOPS_ROOM  MLX5_SEND_WQE_MAX_WQEBBS
+
+#ifndef CONFIG_MLX5_EN_TLS
 #define MLX5E_SQ_STOP_ROOM (MLX5_SEND_WQE_MAX_WQEBBS +\
 			    MLX5E_SQ_NOPS_ROOM)
+#else
+/* TLS offload REQUIRES MLX5E_SQ_STOP_ROOM to have
+ * enough room for a resync SKB, a normal SKB and a NOP
+ */
+#define MLX5E_SQ_STOP_ROOM (2 * MLX5_SEND_WQE_MAX_WQEBBS +\
+			    MLX5E_SQ_NOPS_ROOM)
+#endif
 
 static inline void mlx5e_tx_dma_unmap(struct device *pdev,
 				      struct mlx5e_sq_dma *dma)
@@ -401,9 +411,19 @@ netdev_tx_t mlx5e_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct mlx5e_priv *priv = netdev_priv(dev);
 	struct mlx5e_txqsq *sq = priv->txq2sq[skb_get_queue_mapping(skb)];
 	struct mlx5_wq_cyc *wq = &sq->wq;
-	u16 pi = sq->pc & wq->sz_m1;
-	struct mlx5e_tx_wqe *wqe = mlx5_wq_cyc_get_wqe(wq, pi);
+	u16 pi;
+	struct mlx5e_tx_wqe *wqe;
 
+#ifdef CONFIG_MLX5_EN_TLS
+	if (priv->tls) {
+		skb = mlx5e_tls_handle_tx_skb(dev, skb);
+		if (unlikely(!skb))
+			return NETDEV_TX_OK;
+	}
+#endif
+
+	pi = sq->pc & wq->sz_m1;
+	wqe = mlx5_wq_cyc_get_wqe(wq, pi);
 	memset(wqe, 0, sizeof(*wqe));
 
 #ifdef CONFIG_MLX5_EN_IPSEC
