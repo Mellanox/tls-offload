@@ -754,3 +754,29 @@ free_iv:
 out:
 	return rc;
 }
+
+int tls_sw_set_rx_offload(struct sock *sk, struct tls_context *ctx)
+{
+	struct tls_rx_offload_context *rx_ctx;
+	int rc = 0;
+
+	if (!ctx) {
+		rc = -EINVAL;
+		goto out;
+	}
+
+	if (ctx->rx_ctx) {
+		rc = -EEXIST;
+		goto out;
+	}
+
+	rx_ctx = tls_alloc_rx_ctx(&ctx->crypto_recv, 0, sk);
+	if (IS_ERR(rx_ctx)) {
+		rc = PTR_ERR(rx_ctx);
+		goto out;
+	}
+
+	ctx->rx_ctx = rx_ctx;
+out:
+	return rc;
+}

@@ -55,9 +55,12 @@ static DEFINE_SPINLOCK(tls_device_lock);
 
 static void tls_device_free_ctx(struct tls_context *ctx)
 {
-	struct tls_offload_context *offlad_ctx = tls_offload_ctx(ctx);
+	if (ctx->tx_conf == TLS_HW)
+		kfree(tls_offload_ctx(ctx));
 
-	kfree(offlad_ctx);
+	if (ctx->rx_conf == TLS_HW)
+		tls_free_rx_ctx(tls_rx_offload_ctx(ctx));
+
 	kfree(ctx);
 }
 
@@ -75,7 +78,7 @@ static void tls_device_gc_task(struct work_struct *work)
 	list_for_each_entry_safe(ctx, tmp, &gc_list, list) {
 		struct net_device *netdev = ctx->netdev;
 
-		if (netdev) {
+		if (netdev && ctx->tx_conf == TLS_HW) {
 			netdev->tlsdev_ops->tls_dev_del(netdev, ctx,
 							TLS_OFFLOAD_CTX_DIR_TX);
 			dev_put(netdev);
@@ -83,6 +86,21 @@ static void tls_device_gc_task(struct work_struct *work)
 
 		list_del(&ctx->list);
 		tls_device_free_ctx(ctx);
+	}
+}
+
+void tls_device_attach(struct tls_context *ctx, struct sock *sk,
+		       struct net_device *netdev)
+{
+	if (sk->sk_destruct != tls_device_sk_destruct) {
+		refcount_set(&ctx->refcount, 1);
+		ctx->netdev = netdev;
+		spin_lock_irq(&tls_device_lock);
+		list_add_tail(&ctx->list, &tls_device_list);
+		spin_unlock_irq(&tls_device_lock);
+
+		ctx->sk_destruct = sk->sk_destruct;
+		sk->sk_destruct = tls_device_sk_destruct;
 	}
 }
 
@@ -102,12 +120,19 @@ static void tls_device_queue_ctx_destruction(struct tls_context *ctx)
 }
 
 /* We assume that the socket is already connected */
-static struct net_device *get_netdev_for_sock(struct sock *sk)
+struct net_device *get_netdev_for_sock(struct sock *sk)
 {
 	struct inet_sock *inet = inet_sk(sk);
 	struct net_device *netdev = NULL;
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
 
-	netdev = dev_get_by_index(sock_net(sk), inet->cork.fl.flowi_oif);
+	if (tls_ctx && tls_ctx->netdev) {
+		netdev = tls_ctx->netdev;
+		dev_hold(netdev);
+	} else {
+		netdev =
+		    dev_get_by_index(sock_net(sk), inet->cork.fl.flowi_oif);
+	}
 
 	return netdev;
 }
@@ -196,17 +221,22 @@ static void tls_icsk_clean_acked(struct sock *sk, u32 acked_seq)
 void tls_device_sk_destruct(struct sock *sk)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
-	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
+	struct tls_offload_context *tx_ctx = tls_offload_ctx(tls_ctx);
 
-	if (ctx->open_record)
-		destroy_record(ctx->open_record);
+	tls_ctx->sk_destruct(sk);
 
-	delete_all_records(ctx);
-	crypto_free_aead(ctx->aead_send);
-	ctx->sk_destruct(sk);
+	if (tls_ctx->tx_conf == TLS_HW) {
+		if (tx_ctx->open_record)
+			destroy_record(tx_ctx->open_record);
+
+		delete_all_records(tx_ctx);
+		crypto_free_aead(tx_ctx->aead_send);
+	}
+
 
 	if (refcount_dec_and_test(&tls_ctx->refcount))
 		tls_device_queue_ctx_destruction(tls_ctx);
+
 }
 EXPORT_SYMBOL(tls_device_sk_destruct);
 
@@ -617,8 +647,6 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	if (rc)
 		goto free_marker_record;
 
-	ctx->netdev = netdev;
-
 	ctx->prepend_size = TLS_HEADER_SIZE + nonece_size;
 	ctx->tag_size = tag_size;
 	ctx->iv_size = iv_size;
@@ -661,7 +689,6 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 
 	inet_csk(sk)->icsk_clean_acked = &tls_icsk_clean_acked;
 	ctx->push_pending_record = tls_device_push_pending_record;
-	offload_ctx->sk_destruct = sk->sk_destruct;
 
 	/* TLS offload is greatly simplified if we don't send
 	 * SKBs where only part of the payload needs to be encrypted.
@@ -671,19 +698,10 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	if (skb)
 		TCP_SKB_CB(skb)->eor = 1;
 
-	refcount_set(&ctx->refcount, 1);
-	spin_lock_irq(&tls_device_lock);
-	list_add_tail(&ctx->list, &tls_device_list);
-	spin_unlock_irq(&tls_device_lock);
+	tls_device_attach(ctx, sk, netdev);
 
-	/* following this assignment tls_is_sk_tx_device_offloaded
-	 * will return true and the context might be accessed
-	 * by the netdev's xmit function.
-	 */
-	smp_store_release(&sk->sk_destruct,
-			  &tls_device_sk_destruct);
-	goto release_lock;
-
+	smp_store_release(&sk->sk_offload_check, tls_validate_xmit);
+	goto release_netdev;
 err_iv:
 	kfree(ctx->iv);
 detach_sock:
@@ -696,6 +714,83 @@ release_lock:
 	percpu_up_read(&device_offload_lock);
 out:
 	return rc;
+}
+
+void tls_device_rx_offload_cleanup(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct net_device *netdev;
+
+	percpu_down_read(&device_offload_lock);
+	netdev = tls_ctx->netdev;
+	if (!netdev) {
+		return;
+	}
+
+	if (!(netdev->features & NETIF_F_HW_TLS_RX)) {
+		pr_err("device is missing NETIF_F_HW_TLS cap\n");
+		return;
+	}
+
+	netdev->tlsdev_ops->tls_dev_del(netdev, tls_ctx,
+					TLS_OFFLOAD_CTX_DIR_RX);
+	percpu_up_read(&device_offload_lock);
+}
+
+static int offload_rx_context(struct sock *sk, struct tls_crypto_info *info)
+{
+	int rc = 0;
+	struct tls_context *ctx = tls_get_ctx(sk);
+	struct net_device *netdev;
+
+	/* We support starting offload on multiple sockets
+	 * concurrently, So we only need a read lock here.
+	 */
+	percpu_down_read(&device_offload_lock);
+	netdev = get_netdev_for_sock(sk);
+	if (!netdev) {
+		pr_err("attach_sock_to_netdev: netdev not found\n");
+		rc = -EINVAL;
+		goto release_lock;
+	}
+
+	if (!(netdev->features & NETIF_F_HW_TLS_RX)) {
+		pr_err("attach_sock_to_netdev: netdev %s with no TLS offload\n",
+				netdev->name);
+		rc = -ENOTSUPP;
+		goto release_netdev;
+	}
+
+	rc = netdev->tlsdev_ops->tls_dev_add(netdev, sk, TLS_OFFLOAD_CTX_DIR_RX,
+					     info);
+	if (rc) {
+		pr_err("The netdev has refused to offload this socket\n");
+		goto release_netdev;
+	}
+
+	tls_device_attach(ctx, sk, netdev);
+
+release_netdev:
+	dev_put(netdev);
+release_lock:
+	percpu_up_read(&device_offload_lock);
+	return rc;
+
+}
+
+int tls_device_set_rx_offload(struct sock *sk, struct tls_crypto_info *info)
+{
+
+	int rc;
+	struct crypto_aead *rx_aead;
+
+	rc = offload_rx_context(sk, info);
+	if (rc) {
+		crypto_free_aead(rx_aead);
+		return rc;
+	}
+
+	return 0;
 }
 
 static int tls_device_register(struct net_device *dev)
@@ -745,11 +840,14 @@ static int tls_device_down(struct net_device *netdev)
 	spin_unlock_irqrestore(&tls_device_lock, flags);
 
 	list_for_each_entry_safe(ctx, tmp, &list, list)	{
-		netdev->tlsdev_ops->tls_dev_del(netdev, ctx,
-						TLS_OFFLOAD_CTX_DIR_TX);
+		if (ctx->tx_conf == TLS_HW)
+			netdev->tlsdev_ops->tls_dev_del(netdev, ctx,
+							TLS_OFFLOAD_CTX_DIR_TX);
+		if (ctx->rx_conf == TLS_HW)
+			netdev->tlsdev_ops->tls_dev_del(netdev, ctx,
+							TLS_OFFLOAD_CTX_DIR_RX);
 		ctx->netdev = NULL;
 		dev_put(netdev);
-		list_del_init(&ctx->list);
 
 		if (refcount_dec_and_test(&ctx->refcount))
 			tls_device_free_ctx(ctx);

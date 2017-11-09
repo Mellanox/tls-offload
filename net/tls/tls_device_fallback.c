@@ -372,7 +372,7 @@ free_nskb:
 	goto free_buf;
 }
 
-static struct sk_buff *
+struct sk_buff *
 tls_validate_xmit(struct sock *sk, struct net_device *dev, struct sk_buff *skb)
 {
 	if (dev == tls_get_ctx(sk)->netdev)
@@ -380,6 +380,7 @@ tls_validate_xmit(struct sock *sk, struct net_device *dev, struct sk_buff *skb)
 
 	return tls_sw_fallback(sk, skb);
 }
+EXPORT_SYMBOL(tls_validate_xmit);
 
 int tls_sw_fallback_init(struct sock *sk,
 			 struct tls_offload_context *offload_ctx,
@@ -409,7 +410,6 @@ int tls_sw_fallback_init(struct sock *sk,
 	if (rc)
 		goto free_aead;
 
-	sk->sk_offload_check = tls_validate_xmit;
 	return 0;
 free_aead:
 	crypto_free_aead(offload_ctx->aead_send);

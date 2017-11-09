@@ -46,6 +46,10 @@
 /* Maximum data size carried in a TLS record */
 #define TLS_MAX_PAYLOAD_SIZE		((size_t)1 << 14)
 
+#define TLS_MIN_RECORD_SIZE					\
+	(TLS_HEADER_SIZE + TLS_CIPHER_AES_GCM_128_IV_SIZE +	\
+	 TLS_CIPHER_AES_GCM_128_TAG_SIZE)
+
 #define TLS_HEADER_SIZE			5
 #define TLS_NONCE_OFFSET		TLS_HEADER_SIZE
 
@@ -54,6 +58,15 @@
 #define TLS_RECORD_TYPE_DATA		0x17
 
 #define TLS_AAD_SPACE_SIZE		13
+
+enum {
+	TLS_BASE,
+	TLS_SW,
+#ifdef CONFIG_TLS_DEVICE
+	TLS_HW,
+#endif
+	TLS_NUM_CONFIG,
+};
 
 struct tls_sw_context {
 	struct crypto_aead *aead_send;
@@ -88,7 +101,6 @@ struct tls_offload_context {
 
 	struct list_head records_list;
 	struct scatterlist sg_tx_data[MAX_SKB_FRAGS];
-	void (*sk_destruct)(struct sock *sk);
 	struct tls_record_info *open_record;
 	struct tls_record_info *retransmit_hint;
 	u64 hint_record_sn;
@@ -107,14 +119,19 @@ struct tls_context {
 		struct tls_crypto_info crypto_send;
 		struct tls12_crypto_info_aes_gcm_128 crypto_send_aes_gcm_128;
 	};
+	union {
+		struct tls_crypto_info crypto_recv;
+		struct tls12_crypto_info_aes_gcm_128 crypto_recv_aes_gcm_128;
+	};
 
 	struct list_head list;
 	struct net_device *netdev;
 	refcount_t refcount;
 
 	void *priv_ctx;
-
-	u8 tx_conf:2;
+	void *rx_ctx;
+	u8 tx_conf : 2;
+	u8 rx_conf : 2;
 
 	u16 prepend_size;
 	u16 tag_size;
@@ -132,6 +149,7 @@ struct tls_context {
 	int (*push_pending_record)(struct sock *sk, int flags);
 
 	void (*sk_write_space)(struct sock *sk);
+	void (*sk_destruct)(struct sock *sk);
 	void (*sk_proto_close)(struct sock *sk, long timeout);
 
 	int  (*setsockopt)(struct sock *sk, int level,
@@ -142,12 +160,26 @@ struct tls_context {
 			   int __user *optlen);
 };
 
+struct tls_rx_offload_context {
+	u64 tls_record_sn;
+	unsigned char salt[TLS_CIPHER_AES_GCM_128_SALT_SIZE];
+	u32 recv_record_end;
+	u8 header[TLS_HEADER_SIZE];
+	struct crypto_aead *rx_aead;
+
+	__u8 record_ready:1;
+
+	int (*rx_sync_callback)(struct tls_context *context, u32 seq,
+				u64 rcd_sn);
+	atomic64_t resync_req;
+	unsigned long handle;
+};
+
 int wait_on_pending_writer(struct sock *sk, long *timeo);
 int tls_sk_query(struct sock *sk, int optname, char __user *optval,
 		int __user *optlen);
 int tls_sk_attach(struct sock *sk, int optname, char __user *optval,
 		  unsigned int optlen);
-
 
 int tls_set_sw_offload(struct sock *sk, struct tls_context *ctx);
 int tls_sw_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
@@ -162,11 +194,16 @@ int tls_device_sendmsg(struct sock *sk, struct msghdr *msg, size_t size);
 int tls_device_sendpage(struct sock *sk, struct page *page,
 			int offset, size_t size, int flags);
 void tls_device_sk_destruct(struct sock *sk);
+
 void tls_device_init(void);
+void tls_device_update_sk_destruct(struct sock *sk, struct tls_context *ctx);
+
 void tls_device_cleanup(void);
 
 struct tls_record_info *tls_get_record(struct tls_offload_context *context,
 				       u32 seq, u64 *p_record_sn);
+
+int tls_get_start_sn(struct sock *sk, u32 *start, u64 *p_count);
 
 static inline bool tls_record_is_start_marker(struct tls_record_info *rec)
 {
@@ -215,11 +252,13 @@ static inline bool tls_is_pending_open_record(struct tls_context *tls_ctx)
 	return tls_ctx->pending_open_record_frags;
 }
 
+struct sk_buff *
+tls_validate_xmit(struct sock *sk, struct net_device *dev, struct sk_buff *skb);
+
 static inline bool tls_is_sk_tx_device_offloaded(struct sock *sk)
 {
 	return sk_fullsock(sk) &&
-	       /* matches smp_store_release in tls_set_device_offload */
-	       smp_load_acquire(&sk->sk_destruct) == &tls_device_sk_destruct;
+	       smp_load_acquire(&sk->sk_offload_check) == &tls_validate_xmit;
 }
 
 static inline void tls_err_abort(struct sock *sk)
@@ -306,11 +345,45 @@ static inline struct tls_offload_context *tls_offload_ctx(
 	return (struct tls_offload_context *)tls_ctx->priv_ctx;
 }
 
+static inline struct tls_rx_offload_context *tls_rx_offload_ctx(
+		const struct tls_context *tls_ctx)
+{
+	return (struct tls_rx_offload_context *)tls_ctx->rx_ctx;
+}
+
+static inline void tls_device_rx_resync_request(struct sock *sk, u32 seq)
+{
+	struct tls_context *tls_ctx;
+	struct tls_rx_offload_context *ctx;
+
+	tls_ctx = tls_get_ctx(sk);
+	ctx = tls_rx_offload_ctx(tls_ctx);
+
+	atomic64_set(&ctx->resync_req, ((((uint64_t)seq) << 32) | 1));
+}
+
 int tls_proccess_cmsg(struct sock *sk, struct msghdr *msg,
 		      unsigned char *record_type);
+
 
 int tls_sw_fallback_init(struct sock *sk,
 			 struct tls_offload_context *offload_ctx,
 			 struct tls_crypto_info *crypto_info);
+
+int tls_recvmsg(struct sock *sk, struct msghdr *msg, size_t user_len,
+		int noblock, int flags, int *addr_len);
+
+struct net_device *get_netdev_for_sock(struct sock *sk);
+
+int tls_device_set_rx_offload(struct sock *sk, struct tls_crypto_info *info);
+
+void tls_device_rx_offload_cleanup(struct sock *sk);
+
+struct tls_rx_offload_context *tls_alloc_rx_ctx(struct tls_crypto_info *info,
+						int priv_size, struct sock *sk);
+
+void tls_free_rx_ctx(struct tls_rx_offload_context *ctx);
+
+int tls_sw_set_rx_offload(struct sock *sk, struct tls_context *ctx);
 
 #endif /* _TLS_OFFLOAD_H */

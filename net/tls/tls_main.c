@@ -38,6 +38,7 @@
 #include <linux/highmem.h>
 #include <linux/netdevice.h>
 #include <linux/sched/signal.h>
+#include <crypto/aead.h>
 
 #include <net/tls.h>
 
@@ -45,20 +46,13 @@ MODULE_AUTHOR("Mellanox Technologies");
 MODULE_DESCRIPTION("Transport Layer Security Support");
 MODULE_LICENSE("Dual BSD/GPL");
 
-enum {
-	TLS_BASE_TX,
-	TLS_SW_TX,
-#ifdef CONFIG_TLS_DEVICE
-	TLS_HW_TX,
-#endif
-	TLS_NUM_CONFIG,
-};
+#define TLS_RX_CONFIGS (2)
 
-static struct proto tls_prots[TLS_NUM_CONFIG];
+static struct proto tls_prots[TLS_NUM_CONFIG][TLS_RX_CONFIGS];
 
 static inline void update_sk_prot(struct sock *sk, struct tls_context *ctx)
 {
-	sk->sk_prot = &tls_prots[ctx->tx_conf];
+	sk->sk_prot = &tls_prots[ctx->tx_conf][ctx->rx_conf != TLS_BASE];
 }
 
 int wait_on_pending_writer(struct sock *sk, long *timeo)
@@ -231,8 +225,20 @@ static void tls_sk_proto_close(struct sock *sk, long timeout)
 	lock_sock(sk);
 	sk_proto_close = ctx->sk_proto_close;
 
-	if (ctx->tx_conf == TLS_BASE_TX) {
-		kfree(ctx);
+	switch(ctx->rx_conf) {
+	case TLS_HW:
+		tls_device_rx_offload_cleanup(sk);
+		break;
+	case TLS_SW:
+		tls_free_rx_ctx(tls_rx_offload_ctx(ctx));
+		break;
+	default:
+		break;
+	}
+
+	if (ctx->tx_conf == TLS_BASE) {
+		if (ctx->rx_conf != TLS_HW)
+			kfree(ctx);
 		goto skip_tx_cleanup;
 	}
 
@@ -255,7 +261,7 @@ static void tls_sk_proto_close(struct sock *sk, long timeout)
 	kfree(ctx->rec_seq);
 	kfree(ctx->iv);
 
-	if (ctx->tx_conf == TLS_SW_TX)
+	if (ctx->tx_conf == TLS_SW)
 		tls_sw_free_tx_resources(sk);
 
 skip_tx_cleanup:
@@ -355,6 +361,86 @@ static int tls_getsockopt(struct sock *sk, int level, int optname,
 	return do_tls_getsockopt(sk, optname, optval, optlen);
 }
 
+static int do_tls_setsockopt_rx(struct sock *sk, char __user *optval,
+				unsigned int optlen)
+{
+	struct tls_crypto_info *crypto_info, tmp_crypto_info;
+	struct tls_context *ctx = tls_get_ctx(sk);
+	int rc = 0;
+	int rx_conf;
+
+	if (!optval || (optlen < sizeof(*crypto_info))) {
+		rc = -EINVAL;
+		goto out;
+	}
+
+	rc = copy_from_user(&tmp_crypto_info, optval, sizeof(*crypto_info));
+	if (rc) {
+		rc = -EFAULT;
+		goto out;
+	}
+
+	/* check version */
+	if (tmp_crypto_info.version != TLS_1_2_VERSION) {
+		rc = -ENOTSUPP;
+		goto out;
+	}
+
+	/* get user crypto info */
+	crypto_info = &ctx->crypto_recv;
+
+	/* Currently we don't support set crypto info more than one time */
+	if (TLS_CRYPTO_INFO_READY(crypto_info))
+		goto out;
+
+	switch (tmp_crypto_info.cipher_type) {
+	case TLS_CIPHER_AES_GCM_128: {
+		if (optlen != sizeof(struct tls12_crypto_info_aes_gcm_128)) {
+			rc = -EINVAL;
+			goto out;
+		}
+		rc = copy_from_user(
+		  crypto_info,
+		  optval,
+		  sizeof(struct tls12_crypto_info_aes_gcm_128));
+
+		if (rc) {
+			rc = -EFAULT;
+			goto err_crypto_info;
+		}
+		break;
+	}
+	default:
+		rc = -EINVAL;
+		goto out;
+	}
+
+#ifdef CONFIG_TLS_DEVICE
+	rc = tls_device_set_rx_offload(sk, &ctx->crypto_recv);
+	rx_conf = TLS_HW;
+	if (rc) {
+		if (rc != -ENOTSUPP)
+			goto err_crypto_info;
+#else
+	{
+#endif
+		/* if HW offload is not supported fallback to SW */
+		rc = tls_sw_set_rx_offload(sk, ctx);
+		rx_conf = TLS_SW;
+		if (rc)
+			goto err_crypto_info;
+	}
+
+	ctx->rx_conf = rx_conf;
+	update_sk_prot(sk, ctx);
+	goto out;
+
+err_crypto_info:
+	memset(crypto_info, 0, sizeof(*crypto_info));
+out:
+	return rc;
+}
+
 static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 				unsigned int optlen)
 {
@@ -406,16 +492,17 @@ static int do_tls_setsockopt_tx(struct sock *sk, char __user *optval,
 
 #ifdef CONFIG_TLS_DEVICE
 	rc = tls_set_device_offload(sk, ctx);
-	tx_conf = TLS_HW_TX;
+	tx_conf = TLS_HW;
 	if (rc) {
 #else
 	{
 #endif
 		/* if HW offload fails fallback to SW */
 		rc = tls_set_sw_offload(sk, ctx);
-		tx_conf = TLS_SW_TX;
+		tx_conf = TLS_SW;
 		if (rc)
 			goto err_crypto_info;
+
 	}
 
 	ctx->tx_conf = tx_conf;
@@ -435,16 +522,19 @@ static int do_tls_setsockopt(struct sock *sk, int optname,
 {
 	int rc = 0;
 
+	lock_sock(sk);
 	switch (optname) {
 	case TLS_TX:
-		lock_sock(sk);
 		rc = do_tls_setsockopt_tx(sk, optval, optlen);
-		release_sock(sk);
+		break;
+	case TLS_RX:
+		rc = do_tls_setsockopt_rx(sk, optval, optlen);
 		break;
 	default:
 		rc = -ENOPROTOOPT;
 		break;
 	}
+	release_sock(sk);
 	return rc;
 }
 
@@ -458,6 +548,66 @@ static int tls_setsockopt(struct sock *sk, int level, int optname,
 
 	return do_tls_setsockopt(sk, optname, optval, optlen);
 }
+
+static struct crypto_aead *tls_alloc_gcm_aead(void *key, int keylen)
+{
+	struct crypto_aead *rx_aead;
+	int ret = 0;
+
+	rx_aead =  crypto_alloc_aead("gcm(aes)", 0, 0);
+	if (IS_ERR(rx_aead))
+		return rx_aead;
+
+	ret = crypto_aead_setkey(rx_aead, key, keylen);
+	if (ret)
+		goto free_aead;
+	ret = crypto_aead_setauthsize(rx_aead, TLS_CIPHER_AES_GCM_128_TAG_SIZE);
+	if (ret)
+		goto free_aead;
+
+	return rx_aead;
+free_aead:
+	crypto_free_aead(rx_aead);
+	return ERR_PTR(ret);
+}
+
+struct tls_rx_offload_context *tls_alloc_rx_ctx(struct tls_crypto_info *info,
+						int priv_size, struct sock *sk)
+{
+	struct crypto_aead *rx_aead;
+	struct tls_rx_offload_context *ctx;
+	struct tls12_crypto_info_aes_gcm_128 *gcm_128_info =
+	    (struct tls12_crypto_info_aes_gcm_128 *)info;
+
+	ctx = kzalloc(sizeof(*ctx) + priv_size, GFP_KERNEL);
+	if (!ctx) {
+		return ERR_PTR(-ENOMEM);
+	}
+
+	rx_aead = tls_alloc_gcm_aead(gcm_128_info->key,
+				     TLS_CIPHER_AES_GCM_128_KEY_SIZE);
+	if (IS_ERR(rx_aead)) {
+		kfree(ctx);
+		return (void*)rx_aead;
+	}
+
+	ctx->rx_aead = rx_aead;
+	ctx->recv_record_end = tcp_sk(sk)->copied_seq;
+	memcpy(ctx->salt, gcm_128_info->salt, sizeof(gcm_128_info->salt));
+	memcpy(&ctx->tls_record_sn, gcm_128_info->rec_seq,
+			sizeof(gcm_128_info->rec_seq));
+	ctx->tls_record_sn = be64_to_cpu(ctx->tls_record_sn);
+
+	return ctx;
+}
+EXPORT_SYMBOL(tls_alloc_rx_ctx);
+
+void tls_free_rx_ctx(struct tls_rx_offload_context *ctx)
+{
+	crypto_free_aead(ctx->rx_aead);
+	kfree(ctx);
+}
+EXPORT_SYMBOL(tls_free_rx_ctx);
 
 static int tls_init(struct sock *sk)
 {
@@ -476,7 +626,8 @@ static int tls_init(struct sock *sk)
 	ctx->getsockopt = sk->sk_prot->getsockopt;
 	ctx->sk_proto_close = sk->sk_prot->close;
 
-	ctx->tx_conf = TLS_BASE_TX;
+	ctx->tx_conf = TLS_BASE;
+	ctx->rx_conf = TLS_BASE;
 	update_sk_prot(sk, ctx);
 out:
 	return rc;
@@ -488,22 +639,40 @@ static struct tcp_ulp_ops tcp_tls_ulp_ops __read_mostly = {
 	.init			= tls_init,
 };
 
-static void build_protos(struct proto *prot, struct proto *base)
+static void build_rx_protos(struct proto *prot,
+			    struct proto *base,
+			    int	 (*recvmsg)(struct sock *sk, struct msghdr *msg,
+					    size_t len, int noblock, int flags,
+					    int *addr_len))
 {
-	prot[TLS_BASE_TX] = *base;
-	prot[TLS_BASE_TX].setsockopt	= tls_setsockopt;
-	prot[TLS_BASE_TX].getsockopt	= tls_getsockopt;
-	prot[TLS_BASE_TX].close		= tls_sk_proto_close;
+	*prot = *base;
+	prot->recvmsg = recvmsg;
+}
 
-	prot[TLS_SW_TX] = prot[TLS_BASE_TX];
-	prot[TLS_SW_TX].sendmsg		= tls_sw_sendmsg;
-	prot[TLS_SW_TX].sendpage	= tls_sw_sendpage;
+static void build_protos(struct proto prot[TLS_NUM_CONFIG][TLS_RX_CONFIGS],
+			 struct proto *base)
+{
+	int i;
+
+	prot[TLS_BASE][TLS_BASE] = *base;
+	prot[TLS_BASE][TLS_BASE].setsockopt = tls_setsockopt;
+	prot[TLS_BASE][TLS_BASE].getsockopt = tls_getsockopt;
+	prot[TLS_BASE][TLS_BASE].close	= tls_sk_proto_close;
+
+	prot[TLS_SW][TLS_BASE] = prot[TLS_BASE][TLS_BASE] ;
+	prot[TLS_SW][TLS_BASE].sendmsg	= tls_sw_sendmsg;
+	prot[TLS_SW][TLS_BASE].sendpage	= tls_sw_sendpage;
 
 #ifdef CONFIG_TLS_DEVICE
-	prot[TLS_HW_TX] = prot[TLS_SW_TX];
-	prot[TLS_HW_TX].sendmsg		= tls_device_sendmsg;
-	prot[TLS_HW_TX].sendpage	= tls_device_sendpage;
+	prot[TLS_HW][TLS_BASE] = prot[TLS_SW][TLS_BASE];
+	prot[TLS_HW][TLS_BASE].sendmsg	= tls_device_sendmsg;
+	prot[TLS_HW][TLS_BASE].sendpage	= tls_device_sendpage;
 #endif
+
+	for (i = TLS_BASE; i < TLS_NUM_CONFIG; i++) {
+		build_rx_protos(&prot[i][1], &prot[i][0],
+				tls_recvmsg);
+	}
 }
 
 static int __init tls_register(void)
