@@ -372,15 +372,16 @@ free_nskb:
 	goto free_buf;
 }
 
-static struct sk_buff *tls_validate_xmit_skb(struct sock *sk,
-					     struct net_device *dev,
-					     struct sk_buff *skb)
+struct sk_buff *tls_validate_xmit_skb(struct sock *sk,
+				      struct net_device *dev,
+				      struct sk_buff *skb)
 {
 	if (dev == tls_get_ctx(sk)->netdev)
 		return skb;
 
 	return tls_sw_fallback(sk, skb);
 }
+EXPORT_SYMBOL_GPL(tls_validate_xmit_skb);
 
 int tls_sw_fallback_init(struct sock *sk,
 			 struct tls_offload_context *offload_ctx,
