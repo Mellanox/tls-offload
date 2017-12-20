@@ -378,8 +378,8 @@ int tls_sw_fallback_init(struct sock *sk,
 	offload_ctx->aead_send =
 	    crypto_alloc_aead("gcm(aes)", 0, CRYPTO_ALG_ASYNC);
 	if (IS_ERR(offload_ctx->aead_send)) {
-		pr_err("crypto_alloc_aead failed\n");
 		rc = PTR_ERR(offload_ctx->aead_send);
+		pr_err_ratelimited("crypto_alloc_aead failed rc=%d\n", rc);
 		offload_ctx->aead_send = NULL;
 		goto err_out;
 	}

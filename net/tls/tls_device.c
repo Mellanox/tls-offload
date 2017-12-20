@@ -120,7 +120,7 @@ static int attach_sock_to_netdev(struct sock *sk, struct net_device *netdev,
 	rc = netdev->tlsdev_ops->tls_dev_add(netdev, sk, TLS_OFFLOAD_CTX_DIR_TX,
 					     &ctx->crypto_send);
 	if (rc) {
-		pr_err("The netdev has refused to offload this socket\n");
+		pr_err_ratelimited("The netdev has refused to offload this socket\n");
 		goto out;
 	}
 
@@ -572,7 +572,7 @@ int tls_set_device_offload(struct sock *sk, struct tls_context *ctx)
 	percpu_down_read(&device_offload_lock);
 	netdev = get_netdev_for_sock(sk);
 	if (!netdev) {
-		pr_err("%s: netdev not found\n", __func__);
+		pr_err_ratelimited("%s: netdev not found\n", __func__);
 		rc = -EINVAL;
 		goto release_lock;
 	}
