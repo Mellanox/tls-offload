@@ -154,11 +154,10 @@ static void delete_all_records(struct tls_offload_context *offload_ctx)
 	offload_ctx->retransmit_hint = NULL;
 }
 
-static void tls_icsk_clean_acked(struct sock *sk)
+static void tls_icsk_clean_acked(struct sock *sk, u32 acked_seq)
 {
 	struct tls_context *tls_ctx = tls_get_ctx(sk);
 	struct tls_offload_context *ctx;
-	struct tcp_sock *tp = tcp_sk(sk);
 	struct tls_record_info *info, *temp;
 	unsigned long flags;
 	u64 deleted_records = 0;
@@ -170,7 +169,7 @@ static void tls_icsk_clean_acked(struct sock *sk)
 
 	spin_lock_irqsave(&ctx->lock, flags);
 	info = ctx->retransmit_hint;
-	if (info && !before(tp->snd_una, info->end_seq)) {
+	if (info && !before(acked_seq, info->end_seq)) {
 		ctx->retransmit_hint = NULL;
 		list_del(&info->list);
 		destroy_record(info);
@@ -178,7 +177,7 @@ static void tls_icsk_clean_acked(struct sock *sk)
 	}
 
 	list_for_each_entry_safe(info, temp, &ctx->records_list, list) {
-		if (before(tp->snd_una, info->end_seq))
+		if (before(acked_seq, info->end_seq))
 			break;
 		list_del(&info->list);
 
