@@ -3535,6 +3535,8 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	if (after(ack, prior_snd_una)) {
 		flag |= FLAG_SND_UNA_ADVANCED;
 		icsk->icsk_retransmits = 0;
+		if (icsk->icsk_clean_acked)
+			icsk->icsk_clean_acked(sk, ack);
 	}
 
 	prior_fack = tcp_is_sack(tp) ? tcp_highest_sack_seq(tp) : tp->snd_una;
@@ -3591,9 +3593,6 @@ static int tcp_ack(struct sock *sk, const struct sk_buff *skb, int flag)
 	tp->rcv_tstamp = tcp_jiffies32;
 	if (!prior_packets)
 		goto no_queue;
-
-	if (icsk->icsk_clean_acked)
-		icsk->icsk_clean_acked(sk);
 
 	/* See if we can take anything off of the retransmit queue. */
 	flag |= tcp_clean_rtx_queue(sk, prior_fack, prior_snd_una, &sack_state);
