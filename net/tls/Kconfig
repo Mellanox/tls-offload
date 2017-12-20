@@ -17,6 +17,7 @@ config TLS
 config TLS_DEVICE
 	bool "Transport Layer Security HW offload"
 	depends on TLS
+	select SOCK_OFFLOAD
 	default n
 	---help---
 	Enable kernel support for HW offload of the TLS protocol.
