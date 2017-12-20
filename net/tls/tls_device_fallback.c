@@ -226,7 +226,7 @@ struct sk_buff *tls_sw_fallback(struct sock *sk, struct sk_buff *skb)
 	struct tls_offload_context *ctx = tls_offload_ctx(tls_ctx);
 	int remaining, buf_len, resync_sgs, rc, i = 0;
 	void *buf, *dummy_buf, *iv, *aad;
-	struct scatterlist sg_in[2 * (MAX_SKB_FRAGS + 1)];
+	struct scatterlist *sg_in;
 	struct scatterlist sg_out[3];
 	u32 tcp_seq = ntohl(tcp_hdr(skb)->seq);
 	struct aead_request *aead_req;
@@ -236,10 +236,20 @@ struct sk_buff *tls_sw_fallback(struct sock *sk, struct sk_buff *skb)
 	s32 sync_size;
 	u64 rcd_sn;
 
+	/* worst case is:
+	 * MAX_SKB_FRAGS in tls_record_info
+	 * MAX_SKB_FRAGS + 1 in SKB head an frags.
+	 */
+	int sg_in_max_elements = 2 * MAX_SKB_FRAGS + 1;
+
 	if (!payload_len)
 		return skb;
 
-	sg_init_table(sg_in, ARRAY_SIZE(sg_in));
+	sg_in = kmalloc_array(sg_in_max_elements, sizeof(*sg_in), GFP_ATOMIC);
+	if (!sg_in)
+		goto free_orig;
+
+	sg_init_table(sg_in, sg_in_max_elements);
 	sg_init_table(sg_out, ARRAY_SIZE(sg_out));
 
 	spin_lock_irqsave(&ctx->lock, flags);
@@ -247,7 +257,7 @@ struct sk_buff *tls_sw_fallback(struct sock *sk, struct sk_buff *skb)
 	if (!record) {
 		spin_unlock_irqrestore(&ctx->lock, flags);
 		WARN(1, "Record not found for seq %u\n", tcp_seq);
-		goto free_orig;
+		goto free_sg;
 	}
 
 	sync_size = tcp_seq - tls_record_start_seq(record);
@@ -270,7 +280,7 @@ struct sk_buff *tls_sw_fallback(struct sock *sk, struct sk_buff *skb)
 
 		if (payload_len > -sync_size) {
 			WARN(1, "Fallback of partially offloaded packets is not supported\n");
-			goto free_orig;
+			goto free_sg;
 		} else {
 			return skb;
 		}
@@ -350,6 +360,8 @@ free_req:
 put_sg:
 	for (i = 0; i < resync_sgs; i++)
 		put_page(sg_page(&sg_in[i]));
+free_sg:
+	kfree(sg_in);
 free_orig:
 	kfree_skb(skb);
 	return nskb;
