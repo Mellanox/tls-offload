@@ -424,6 +424,10 @@ config GRO_CELLS
 	bool
 	default n
 
+config SOCK_OFFLOAD
+	bool
+	default n
+
 config NET_DEVLINK
 	tristate "Network physical/parent device Netlink interface"
 	help

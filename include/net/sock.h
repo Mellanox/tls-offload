@@ -479,9 +479,11 @@ struct sock {
 	void			(*sk_error_report)(struct sock *sk);
 	int			(*sk_backlog_rcv)(struct sock *sk,
 						  struct sk_buff *skb);
+#ifdef CONFIG_SOCK_OFFLOAD
 	struct sk_buff*		(*sk_offload_check)(struct sock *sk,
 						    struct net_device *dev,
 						    struct sk_buff *skb);
+#endif
 	void                    (*sk_destruct)(struct sock *sk);
 	struct sock_reuseport __rcu	*sk_reuseport_cb;
 	struct rcu_head		sk_rcu;
@@ -2334,10 +2336,12 @@ static inline bool sk_fullsock(const struct sock *sk)
 static inline struct sk_buff *skb_offload_check(struct sk_buff *skb,
 						struct net_device *dev)
 {
+#ifdef CONFIG_SOCK_OFFLOAD
 	struct sock *sk = skb->sk;
 
 	if (sk && sk_fullsock(sk) && sk->sk_offload_check)
 		skb = sk->sk_offload_check(sk, dev, skb);
+#endif
 
 	return skb;
 }
