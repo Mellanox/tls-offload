@@ -30,48 +30,42 @@
  * SOFTWARE.
  *
  */
-#ifndef __MLX5E_TLS_H__
-#define __MLX5E_TLS_H__
+
+#ifndef __MLX5_FPGA_TLS_H__
+#define __MLX5_FPGA_TLS_H__
 
 #ifdef CONFIG_MLX5_EN_TLS
 
 #include <net/tls.h>
-#include "en.h"
+#include "en_accel/tls.h"
+#include "fpga/tls_cmds.h"
 
-struct mlx_tls_offload_context {
-	struct tls_offload_context context;
-	__be32 swid;
-};
+bool mlx5_fpga_is_tls_device(struct mlx5_core_dev *mdev);
+int mlx5_fpga_tls_init(struct mlx5_core_dev *mdev);
+void mlx5_fpga_tls_cleanup(struct mlx5_core_dev *mdev);
 
-struct mlx5e_tls {
-	struct ida tx_halloc;
-};
+int
+mlx5_fpga_tls_hw_start_tx_cmd(struct mlx5_core_dev *mdev, struct sock *sk,
+			      struct tls12_crypto_info_aes_gcm_128 *crypto_info,
+			      u32 expected_seq, u32 swid);
 
-#define MLX5_TLS_DEV(mdev) mlx5_fpga_is_tls_device(mdev)
+void mlx5_fpga_tls_hw_stop_tx_cmd(struct mlx5e_priv *priv,
+				  struct mlx_tls_offload_context *ctx);
 
-static inline struct mlx_tls_offload_context *
-mlx5e_get_tls_context(struct tls_context *tls_ctx)
-{
-	return container_of(tls_offload_ctx(tls_ctx),
-			    struct mlx_tls_offload_context,
-			    context);
-}
-
-int mlx5e_tls_init(struct mlx5e_priv *priv);
-void mlx5e_tls_cleanup(struct mlx5e_priv *priv);
-void mlx5e_tls_build_netdev(struct mlx5e_priv *priv);
+int mlx5_fpga_build_tls_ctx(struct tls12_crypto_info_aes_gcm_128 *crypto_info,
+			    enum tls_offload_ctx_dir direction,
+			    u32 expected_seq, char *rcd_sn,
+			    unsigned short skc_family, struct inet_sock *inet,
+			    struct tls_cntx *tls);
 
 #else
-
-static inline int mlx5e_tls_init(struct mlx5e_priv *priv)
+static inline int mlx5_fpga_tls_init(struct mlx5_core_dev *mdev)
 {
 	return 0;
 }
 
-static inline void mlx5e_tls_cleanup(struct mlx5e_priv *priv) { }
-
-static inline void mlx5e_tls_build_netdev(struct mlx5e_priv *priv) { }
+static inline void mlx5_fpga_tls_cleanup(struct mlx5_core_dev *mdev) { }
 
 #endif
 
-#endif /* __MLX5E_TLS_H__ */
+#endif /* __MLX5_FPGA_TLS_H__ */
