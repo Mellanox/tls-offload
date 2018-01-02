@@ -34,6 +34,10 @@
 #include "en_accel/tls.h"
 #include "en_accel/tls_rxtx.h"
 
+#define SYNDROM_DECRYPTED  0x30
+#define SYNDROM_SPECULATIVE 0x31
+#define SYNDROM_AUTH_FAILED 0x32
+
 #define SYNDROME_OFFLOAD_REQUIRED 32
 #define SYNDROME_SYNC 33
 
@@ -289,4 +293,77 @@ struct sk_buff *mlx5e_tls_handle_tx_skb(struct net_device *netdev,
 	context->context.expected_seq = skb_seq + datalen;
 out:
 	return skb;
+}
+
+static int tls_update_resync_sn(struct net_device *netdev,
+				struct sk_buff *skb,
+				struct mlx5e_tls_metadata *mdata)
+{
+	struct iphdr *iph;
+	struct tcphdr *th;
+	struct sock *sk;
+	__be32 seq;
+
+	if (mdata->ethertype != htons(ETH_P_IP))
+		return -EINVAL;
+
+	iph = (struct iphdr *)(mdata + 1);
+
+	th = ((void*)iph) + iph->ihl * 4;
+
+	sk = inet_lookup_established(dev_net(netdev), &tcp_hashinfo, iph->saddr,
+				     th->source, iph->daddr, th->dest,
+				     netdev->ifindex);
+	if (!sk)
+		goto out;
+
+	skb->sk = sk;
+	skb->destructor = sock_efree;
+
+	memcpy(&seq, mdata->content.raw + 1, sizeof(seq));
+	tls_device_rx_resync_request(sk, ntohl(seq));
+out:
+	return 0;
+}
+
+void mlx5e_tls_handle_rx_skb(struct net_device *netdev, struct sk_buff *skb,
+			     u32 *cqe_bcnt)
+{
+	struct mlx5e_tls_metadata *mdata;
+	struct ethhdr *old_eth;
+	struct ethhdr *new_eth;
+	__be16 *ethtype;
+
+	/* Detect inline metadata */
+	if (skb->len < ETH_HLEN + MLX5E_METADATA_ETHER_LEN)
+		return;
+	ethtype = (__be16 *)(skb->data + ETH_ALEN * 2);
+	if (*ethtype != cpu_to_be16(MLX5E_METADATA_ETHER_TYPE))
+		return;
+
+	/* Use the metadata */
+	mdata = (struct mlx5e_tls_metadata *)(skb->data + ETH_HLEN);
+	switch(mdata->syndrome) {
+		case SYNDROM_DECRYPTED:
+			skb->decrypted= 1;
+			break;
+		case SYNDROM_SPECULATIVE:
+			pr_err("got speculative\n");
+			tls_update_resync_sn(netdev, skb, mdata);
+			break;
+		case SYNDROM_AUTH_FAILED:
+			//break;
+		default:
+			pr_err("unexpected pet syndrome %d\n", mdata->syndrome);
+			return;
+
+	}
+
+	/* Remove the metadata from the buffer */
+	old_eth = (struct ethhdr *)skb->data;
+	new_eth = (struct ethhdr *)(skb->data + MLX5E_METADATA_ETHER_LEN);
+	memmove(new_eth, old_eth, 2 * ETH_ALEN);
+	/* Ethertype is already in its new place */
+	skb_pull_inline(skb, MLX5E_METADATA_ETHER_LEN);
+	*cqe_bcnt -= MLX5E_METADATA_ETHER_LEN;
 }

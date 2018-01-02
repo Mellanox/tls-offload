@@ -155,6 +155,13 @@ struct teardown_stream_cmd {
 	__be32 stream_id;
 } __packed;
 
+struct rx_sync_cmd {
+	u8 cmd;
+	__be32 stream_id;
+	__be32 record_sync_sn;
+	__be64 tls_record_sn;
+} __packed;
+
 struct generic_event {
 	__be32 opcode;
 	__be32 stream_id;

@@ -40,6 +40,10 @@
 #include "fpga/sdk.h"
 #include "fpga/core.h"
 
+/* The simulator requires unique SWID for each context
+ * Use this bit to create separate namespaces for TX and RX*/
+#define RX_SWID_BIT BIT(31)
+
 struct mlx5_fpga_tls {
 	struct mlx5_fpga_conn *conn;
 };
@@ -89,6 +93,17 @@ int mlx5_fpga_build_tls_ctx(struct tls12_crypto_info_aes_gcm_128 *crypto_info,
 	       crypto_info->key,
 	       TLS_CIPHER_AES_GCM_128_KEY_SIZE);
 
+	if (direction == TLS_OFFLOAD_CTX_DIR_RX) {
+		MLX5_SET(tls_cntx_tcp, tcp, ip_sa_31_0,
+			 ntohl(inet->inet_daddr));
+
+		MLX5_SET(tls_cntx_tcp, tcp, ip_da_31_0,
+			 ntohl(inet->inet_rcv_saddr));
+
+		MLX5_SET(tls_cntx_tcp, tcp, src_port, htons(inet->inet_dport));
+		MLX5_SET(tls_cntx_tcp, tcp, dst_port, htons(inet->inet_sport));
+	}
+
 	return 0;
 }
 
@@ -97,6 +112,39 @@ static void mlx_tls_kfree_complete(struct mlx5_fpga_conn *conn,
 				   struct mlx5_fpga_dma_buf *buf, u8 status)
 {
 	kfree(buf);
+}
+
+int mlx5_fpga_tls_rx_sync_cmd(struct tls_context *tls_ctx, u32 seq, u64 rcd_sn)
+{
+	struct mlx5_fpga_dma_buf *buf;
+	struct rx_sync_cmd *cmd;
+	int size = sizeof(*buf) + sizeof(*cmd);
+	struct tls_rx_offload_context *rx_context = tls_rx_offload_ctx(tls_ctx);
+	int ret;
+	struct mlx5e_priv *priv = netdev_priv(tls_ctx->netdev);
+
+	buf = kzalloc(size, GFP_KERNEL);
+	if (!buf)
+		return -ENOMEM;
+
+	pr_err("mlx5_fpga_tls_rx_sync_cmd\n");
+
+	cmd = (struct rx_sync_cmd *) (buf + 1);
+	cmd->cmd = CMD_RX_SYNC;
+	cmd->stream_id = rx_context->handle | htonl(RX_SWID_BIT);
+
+	buf->sg[0].data = cmd;
+	buf->sg[0].size = sizeof(*cmd);
+	buf->complete = mlx_tls_kfree_complete;
+
+	cmd->record_sync_sn = htonl(seq);
+	cmd->tls_record_sn = cpu_to_be64(rcd_sn);
+
+	ret = mlx5_fpga_sbu_conn_sendmsg(
+			 priv->mdev->fpga->tls->conn,
+			 buf);
+
+	return ret;
 }
 
 static int send_teardown_cmd(struct mlx5_core_dev *mdev, __be32 swid)
@@ -128,6 +176,15 @@ void mlx5_fpga_tls_hw_stop_tx_cmd(struct mlx5e_priv *priv,
 	send_teardown_cmd(priv->mdev, ctx->swid);
 
 	ida_simple_remove(&priv->tls->tx_halloc, ntohl(ctx->swid));
+}
+
+
+void mlx5_fpga_tls_hw_stop_rx_cmd(
+			struct mlx5e_priv *priv,
+			struct tls_rx_offload_context *ctx)
+{
+	send_teardown_cmd(priv->mdev, ctx->handle | htonl(RX_SWID_BIT));
+	ida_simple_remove(&priv->tls->rx_halloc, ntohl(ctx->handle));
 }
 
 static DEFINE_SPINLOCK(setup_stream_lock);
@@ -168,6 +225,10 @@ mlx5_fpga_tls_hw_start_cmd(struct mlx5_core_dev *mdev, struct sock *sk,
 	if (ret) {
 		kfree(buf);
 		return ret;
+	}
+
+	if (direction == TLS_OFFLOAD_CTX_DIR_RX) {
+		cmd->stream_id |= htonl(RX_SWID_BIT);
 	}
 
 	ss.swid = cmd->stream_id;
@@ -232,6 +293,22 @@ mlx5_fpga_tls_hw_start_tx_cmd(struct mlx5_core_dev *mdev, struct sock *sk,
 					  TLS_OFFLOAD_CTX_DIR_TX, expected_seq,
 					  crypto_info->rec_seq, swid);
 }
+
+int
+mlx5_fpga_tls_hw_start_rx_cmd(struct mlx5_core_dev *mdev, struct sock *sk,
+			      struct tls12_crypto_info_aes_gcm_128 *crypto_info,
+			      u32 expected_seq, u64 rcd_sn, u32 swid)
+{
+	char rec_seq[sizeof(rcd_sn)];
+
+	rcd_sn = cpu_to_be64(rcd_sn);
+	memcpy(rec_seq, &rcd_sn, sizeof(rec_seq));
+
+	return mlx5_fpga_tls_hw_start_cmd(mdev, sk, crypto_info,
+					  TLS_OFFLOAD_CTX_DIR_RX,
+					  expected_seq, rec_seq, swid);
+}
+
 
 bool mlx5_fpga_is_tls_device(struct mlx5_core_dev *mdev)
 {

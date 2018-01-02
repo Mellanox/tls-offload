@@ -45,6 +45,7 @@ struct mlx_tls_offload_context {
 
 struct mlx5e_tls {
 	struct ida tx_halloc;
+	struct ida rx_halloc;
 };
 
 #define MLX5_TLS_DEV(mdev) mlx5_fpga_is_tls_device(mdev)

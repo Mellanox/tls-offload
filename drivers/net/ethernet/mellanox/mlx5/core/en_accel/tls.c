@@ -82,6 +82,62 @@ out:
 	return ret;
 }
 
+static int mlx_tls_add_rx_ctx(struct mlx5e_priv *priv,
+			      struct sock *sk,
+			      struct tls12_crypto_info_aes_gcm_128 *crypto_info)
+{
+	struct tls_rx_offload_context *context;
+	int swid;
+	int ret;
+	u32 tcp_seq;
+	u64 rcd_sn;
+	__be64 start_sn;
+
+	pr_err("mlx_tls_add_rx_ctx\n");
+
+	ret = tls_get_start_sn(sk, &tcp_seq, &rcd_sn);
+	if (ret)
+		return ret;
+
+	swid = ida_simple_get(&priv->tls->rx_halloc, SWID_START, SWID_END,
+			GFP_KERNEL);
+	if (swid < 0) {
+		pr_err("mlx_tls_add(): Failed to allocate swid\n");
+		ret = swid;
+		goto out;
+	}
+
+	context = tls_alloc_rx_ctx(&crypto_info->info, 0, sk);
+	if (IS_ERR(context)) {
+		ret = PTR_ERR(context);
+		goto release_swid;
+	}
+
+	context->handle = htonl(swid);
+
+	memcpy(&start_sn, crypto_info->rec_seq, sizeof(rcd_sn));
+	rcd_sn += be64_to_cpu(start_sn);
+
+	ret = mlx5_fpga_tls_hw_start_rx_cmd(priv->mdev, sk, crypto_info,
+					    tcp_seq, rcd_sn, swid);
+	if (ret)
+		goto relese_context;
+
+	context->rx_sync_callback = mlx5_fpga_tls_rx_sync_cmd;
+
+	tls_get_ctx(sk)->rx_ctx = context;
+
+	return ret;
+
+relese_context:
+	tls_free_rx_ctx(context);
+release_swid:
+	ida_simple_remove(&priv->tls->rx_halloc, swid);
+out:
+	pr_err("rx_offload_failed\n");
+	return ret;
+}
+
 static int mlx_tls_add(struct net_device *netdev, struct sock *sk,
 		       enum tls_offload_ctx_dir direction,
 		       struct tls_crypto_info *crypto_info)
@@ -103,6 +159,8 @@ static int mlx_tls_add(struct net_device *netdev, struct sock *sk,
 
 	if (direction == TLS_OFFLOAD_CTX_DIR_TX)
 		return mlx_tls_add_tx_ctx(priv, sk, crypto_info_aes_gcm_128);
+	else if (direction == TLS_OFFLOAD_CTX_DIR_RX)
+		return mlx_tls_add_rx_ctx(priv, sk, crypto_info_aes_gcm_128);
 
 	netdev_err(netdev, "%s: invalid direction\n", __func__);
 out:
@@ -123,6 +181,7 @@ int mlx5e_tls_init(struct mlx5e_priv *priv)
 		return -ENOMEM;
 
 	ida_init(&tls->tx_halloc);
+	ida_init(&tls->rx_halloc);
 	priv->tls = tls;
 	netdev_dbg(priv->netdev, "TLS attached to netdevice\n");
 	return 0;
@@ -136,6 +195,7 @@ void mlx5e_tls_cleanup(struct mlx5e_priv *priv)
 		return;
 
 	ida_destroy(&tls->tx_halloc);
+	ida_destroy(&tls->rx_halloc);
 	kfree(tls);
 	priv->tls = NULL;
 }
@@ -145,7 +205,9 @@ static void mlx_tls_del(struct net_device *netdev, struct tls_context *tls_ctx,
 {
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 
-	if (direction == TLS_OFFLOAD_CTX_DIR_TX) {
+	if (direction == TLS_OFFLOAD_CTX_DIR_RX) {
+		mlx5_fpga_tls_hw_stop_rx_cmd(priv, tls_rx_offload_ctx(tls_ctx));
+	} else {
 		mlx5_fpga_tls_hw_stop_tx_cmd(priv,
 					     mlx5e_get_tls_context(tls_ctx));
 	}
@@ -163,7 +225,7 @@ void mlx5e_tls_build_netdev(struct mlx5e_priv *priv)
 	if (!priv->tls)
 		return;
 
-	netdev->features |= NETIF_F_HW_TLS_TX;
-	netdev->hw_features |= NETIF_F_HW_TLS_TX;
+	netdev->features |= NETIF_F_HW_TLS_TX | NETIF_F_HW_TLS_RX;
+	netdev->hw_features |= NETIF_F_HW_TLS_TX | NETIF_F_HW_TLS_RX;
 	netdev->tlsdev_ops = &mlx_tls_ops;
 }
