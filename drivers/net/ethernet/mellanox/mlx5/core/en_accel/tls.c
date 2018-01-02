@@ -105,9 +105,6 @@ static int mlx5e_tls_add(struct net_device *netdev, struct sock *sk,
 	int ret = -ENOMEM;
 	void *flow;
 
-	if (direction != TLS_OFFLOAD_CTX_DIR_TX)
-		return -EINVAL;
-
 	flow = kzalloc(MLX5_ST_SZ_BYTES(tls_flow), GFP_KERNEL);
 	if (!flow)
 		return ret;
@@ -121,13 +118,27 @@ static int mlx5e_tls_add(struct net_device *netdev, struct sock *sk,
 		    mlx5e_get_tls_tx_context(tls_ctx);
 		u32 swid;
 
-		ret = mlx5_accel_tls_add_tx_flow(mdev, flow, crypto_info,
-						 start_offload_tcp_sn, &swid);
+		ret = mlx5_accel_tls_add_flow(mdev, flow, crypto_info,
+						 start_offload_tcp_sn, &swid, 1);
 		if (ret < 0)
 			goto free_flow;
 
 		tx_ctx->swid = htonl(swid);
 		tx_ctx->expected_seq = start_offload_tcp_sn;
+	} else if (direction == TLS_OFFLOAD_CTX_DIR_RX) {
+		struct tls_rx_offload_context *rx_ctx = tls_rx_offload_ctx(tls_ctx);
+		u32 swid;
+
+		ret = mlx5_accel_tls_add_flow(mdev, flow, crypto_info,
+						 start_offload_tcp_sn, &swid, 0);
+		if (ret < 0)
+			goto free_flow;
+
+		rx_ctx->handle = htonl(swid);
+		rx_ctx->rx_sync_callback = mlx5_accel_tls_rx_sync;
+	} else {
+		ret = -ENOTSUPP;
+		goto free_flow;
 	}
 
 	return 0;
@@ -143,11 +154,12 @@ static void mlx5e_tls_del(struct net_device *netdev,
 	struct mlx5e_priv *priv = netdev_priv(netdev);
 
 	if (direction == TLS_OFFLOAD_CTX_DIR_TX) {
-		u32 swid = ntohl(mlx5e_get_tls_tx_context(tls_ctx)->swid);
-
-		mlx5_accel_tls_del_tx_flow(priv->mdev, swid);
-	} else {
-		netdev_err(netdev, "unsupported direction %d\n", direction);
+		mlx5_accel_tls_del_flow(
+		    priv->mdev, ntohl(mlx5e_get_tls_tx_context(tls_ctx)->swid),
+		    1);
+	} else if (direction == TLS_OFFLOAD_CTX_DIR_RX) {
+		mlx5_accel_tls_del_flow(
+		    priv->mdev, ntohl(tls_rx_offload_ctx(tls_ctx)->handle), 0);
 	}
 }
 
@@ -159,12 +171,20 @@ static const struct tlsdev_ops mlx5e_tls_ops = {
 void mlx5e_tls_build_netdev(struct mlx5e_priv *priv)
 {
 	struct net_device *netdev = priv->netdev;
+	u32 caps = mlx5_accel_tls_device_caps(priv->mdev);
 
 	if (!mlx5_accel_is_tls_device(priv->mdev))
 		return;
 
-	netdev->features |= NETIF_F_HW_TLS_TX;
-	netdev->hw_features |= NETIF_F_HW_TLS_TX;
+	if (caps & MLX5_ACCEL_TLS_TX) {
+		netdev->features |= NETIF_F_HW_TLS_TX;
+		netdev->hw_features |= NETIF_F_HW_TLS_TX;
+	}
+
+	if (caps & MLX5_ACCEL_TLS_RX) {
+		netdev->features |= NETIF_F_HW_TLS_RX;
+		netdev->hw_features |= NETIF_F_HW_TLS_RX;
+	}
 	netdev->tlsdev_ops = &mlx5e_tls_ops;
 }
 

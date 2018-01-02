@@ -470,6 +470,7 @@ struct mlx5_ifc_ipsec_counters_bits {
 enum fpga_cmds {
 	CMD_SETUP_STREAM		= 0x1001,
 	CMD_TEARDOWN_STREAM		= 0x1002,
+	CMD_RX_SYNC			= 0x1003,
 };
 
 #define MLX5_TLS_1_2 (0)

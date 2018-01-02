@@ -59,10 +59,13 @@ struct mlx5_ifc_tls_flow_bits {
 	u8         reserved_at_2[0x1e];
 };
 
-int mlx5_accel_tls_add_tx_flow(struct mlx5_core_dev *mdev, void *flow,
-			       struct tls_crypto_info *crypto_info,
-			       u32 start_offload_tcp_sn, u32 *p_swid);
-void mlx5_accel_tls_del_tx_flow(struct mlx5_core_dev *mdev, u32 swid);
+int mlx5_accel_tls_add_flow(struct mlx5_core_dev *mdev, void *flow,
+			    struct tls_crypto_info *crypto_info,
+			    u32 start_offload_tcp_sn, u32 *p_swid,
+			    int direction_sx);
+void mlx5_accel_tls_del_flow(struct mlx5_core_dev *mdev, u32 swid,
+			     int direction_sx);
+int mlx5_accel_tls_rx_sync(struct tls_context *tls_ctx, u32 seq, u64 rcd_sn);
 bool mlx5_accel_is_tls_device(struct mlx5_core_dev *mdev);
 u32 mlx5_accel_tls_device_caps(struct mlx5_core_dev *mdev);
 int mlx5_accel_tls_init(struct mlx5_core_dev *mdev);
