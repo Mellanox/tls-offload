@@ -166,8 +166,10 @@ struct tls_rx_offload_context {
 	u32 recv_record_end;
 	u8 header[TLS_HEADER_SIZE];
 	struct crypto_aead *rx_aead;
+	void (*sk_data_ready)(struct sock *sk);
 
 	__u8 record_ready:1;
+	__u8 record_header_proccessed:1;
 
 	int (*rx_sync_callback)(struct tls_context *context, u32 seq,
 				u64 rcd_sn);
@@ -386,4 +388,5 @@ void tls_free_rx_ctx(struct tls_rx_offload_context *ctx);
 
 int tls_sw_set_rx_offload(struct sock *sk, struct tls_context *ctx);
 
+void tls_data_ready(struct sock *sk);
 #endif /* _TLS_OFFLOAD_H */

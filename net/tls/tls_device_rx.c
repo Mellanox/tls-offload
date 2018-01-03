@@ -476,6 +476,23 @@ static void handle_resync(struct tls_rx_offload_context *ctx, struct sock *sk)
 
 }
 
+static int handle_record_header(struct tls_rx_offload_context *ctx,
+				struct sock *sk, u32 seq)
+{
+	int ret;
+
+	get_record_header(sk, seq, ctx->header, ctx);
+	ctx->record_header_proccessed = true;
+
+	ret = proccess_record_header(ctx->header);
+	if (ret < 0)
+		return ret;
+
+	ctx->recv_record_end += ret;
+	ctx->tls_record_sn++;
+	return 0;
+}
+
 static int wait_for_record(struct tls_rx_offload_context *ctx,
 			   struct sock *sk, u32 seq, long *timeo)
 {
@@ -486,14 +503,12 @@ static int wait_for_record(struct tls_rx_offload_context *ctx,
 		if (ret)
 			return ret;
 
-		handle_resync(ctx, sk);
-
-		get_record_header(sk, seq, ctx->header, ctx);
-
-		ret = proccess_record_header(ctx->header);
-		if (ret < 0)
-			return ret;
-		ctx->recv_record_end += ret;
+		/* We might have processed the record in data_ready */
+		if (seq == ctx->recv_record_end) {
+			ret = handle_record_header(ctx, sk, seq);
+			if (ret < 0)
+				return ret;
+		}
 	}
 
 	return wait_for_seq(sk, timeo, ctx->recv_record_end);
@@ -580,6 +595,26 @@ int tls_cmsg_set_record_type(struct msghdr *msg,
 	}
 
 	return rc;
+}
+
+void tls_data_ready(struct sock *sk)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_rx_offload_context *ctx = tls_rx_offload_ctx(tls_ctx);
+
+	handle_resync(ctx, sk);
+
+	if (!ctx->record_header_proccessed) {
+		u32 seq = ctx->recv_record_end;
+
+		if (before(tcp_sk(sk)->rcv_nxt, seq + (u32)TLS_HEADER_SIZE - 1))
+				return;
+
+		handle_record_header(ctx, sk, seq);
+	}
+
+	if (!before(tcp_sk(sk)->rcv_nxt, ctx->recv_record_end))
+		ctx->sk_data_ready(sk);
 }
 
 int tls_recvmsg(struct sock *sk, struct msghdr *msg, size_t user_len,
@@ -691,9 +726,9 @@ int tls_recvmsg(struct sock *sk, struct msghdr *msg, size_t user_len,
 		    TLS_CIPHER_AES_GCM_128_TAG_SIZE) {
 			seq = ctx->recv_record_end;
 			ctx->record_ready = 0;
+			ctx->record_header_proccessed = 0;
 			pr_debug("record %llu completed\n",
 				 ctx->tls_record_sn);
-			ctx->tls_record_sn++;
 
 			if (orig_user_len - user_len > target) {
 				/* we read enough data so

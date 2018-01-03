@@ -431,6 +431,8 @@ static int do_tls_setsockopt_rx(struct sock *sk, char __user *optval,
 			goto err_crypto_info;
 	}
 
+	tls_rx_offload_ctx(ctx)->sk_data_ready = sk->sk_data_ready;
+	sk->sk_data_ready = tls_data_ready;
 	ctx->rx_conf = rx_conf;
 	update_sk_prot(sk, ctx);
 	goto out;
@@ -596,7 +598,12 @@ struct tls_rx_offload_context *tls_alloc_rx_ctx(struct tls_crypto_info *info,
 	memcpy(ctx->salt, gcm_128_info->salt, sizeof(gcm_128_info->salt));
 	memcpy(&ctx->tls_record_sn, gcm_128_info->rec_seq,
 			sizeof(gcm_128_info->rec_seq));
-	ctx->tls_record_sn = be64_to_cpu(ctx->tls_record_sn);
+
+	/* tls_record_sn is incremented after the tls header is processed
+	 * so we need to start at -1 to have the correct sn
+	 * when we process the record
+	 */
+	ctx->tls_record_sn = be64_to_cpu(ctx->tls_record_sn) - 1;
 
 	return ctx;
 }
