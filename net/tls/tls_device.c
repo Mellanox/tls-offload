@@ -94,6 +94,7 @@ void tls_device_attach(struct tls_context *ctx, struct sock *sk,
 {
 	if (sk->sk_destruct != tls_device_sk_destruct) {
 		refcount_set(&ctx->refcount, 1);
+		dev_hold(netdev);
 		ctx->netdev = netdev;
 		spin_lock_irq(&tls_device_lock);
 		list_add_tail(&ctx->list, &tls_device_list);
@@ -734,6 +735,11 @@ void tls_device_rx_offload_cleanup(struct sock *sk)
 
 	netdev->tlsdev_ops->tls_dev_del(netdev, tls_ctx,
 					TLS_OFFLOAD_CTX_DIR_RX);
+
+	if (tls_ctx->tx_conf != TLS_HW) {
+		dev_put(netdev);
+		tls_ctx->netdev = NULL;
+	}
 	percpu_up_read(&device_offload_lock);
 }
 
