@@ -599,7 +599,7 @@ int tls_recvmsg(struct sock *sk, struct msghdr *msg, size_t user_len,
 	pr_debug("%s started\n", __func__);
 
 	if (sk->sk_err)
-		return sk->sk_err;
+		return -sk->sk_err;
 
 	/* Set record type to TLS_RECORD_TYPE_DATA
 	 * This is overwritten later in case it is wrong
@@ -636,7 +636,7 @@ int tls_recvmsg(struct sock *sk, struct msghdr *msg, size_t user_len,
 				ret = decrypt_record(sk, seq);
 				if (ret) {
 					if (ret != -ENOMEM) {
-						sk->sk_err = ret;
+						sk->sk_err = -ret;
 					}
 					break;
 				}
