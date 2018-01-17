@@ -3992,16 +3992,20 @@ static int mlx5e_get_pci_bw(struct mlx5_core_dev *mdev, u32 *pci_bw)
 	return 0;
 }
 
-static bool cqe_compress_heuristic(u32 link_speed, u32 pci_bw)
+static bool slow_pci_heuristic(struct mlx5_core_dev *mdev)
 {
-	return (link_speed && pci_bw &&
-		(pci_bw < 40000) && (pci_bw < link_speed));
-}
+	u32 link_speed = 0;
+	u32 pci_bw = 0;
 
-static bool hw_lro_heuristic(u32 link_speed, u32 pci_bw)
-{
-	return !(link_speed && pci_bw &&
-		 (pci_bw <= 16000) && (pci_bw < link_speed));
+	mlx5e_get_max_linkspeed(mdev, &link_speed);
+	mlx5e_get_pci_bw(mdev, &pci_bw);
+	mlx5_core_dbg_once(mdev, "Max link speed = %d, PCI BW = %d\n",
+			   link_speed, pci_bw);
+
+#define MLX5E_SLOW_PCI_THOLD (16000)
+
+	return link_speed && pci_bw &&
+		(pci_bw <= MLX5E_SLOW_PCI_THOLD) && (pci_bw < link_speed);
 }
 
 void mlx5e_set_tx_cq_mode_params(struct mlx5e_params *params, u8 cq_period_mode)
@@ -4070,16 +4074,9 @@ void mlx5e_build_nic_params(struct mlx5_core_dev *mdev,
 			    u16 max_channels)
 {
 	u8 cq_period_mode = 0;
-	u32 link_speed = 0;
-	u32 pci_bw = 0;
 
 	params->num_channels = max_channels;
 	params->num_tc       = 1;
-
-	mlx5e_get_max_linkspeed(mdev, &link_speed);
-	mlx5e_get_pci_bw(mdev, &pci_bw);
-	mlx5_core_dbg(mdev, "Max link speed = %d, PCI BW = %d\n",
-		      link_speed, pci_bw);
 
 	/* SQ */
 	params->log_sq_size = is_kdump_kernel() ?
@@ -4090,7 +4087,7 @@ void mlx5e_build_nic_params(struct mlx5_core_dev *mdev,
 	params->rx_cqe_compress_def = false;
 	if (MLX5_CAP_GEN(mdev, cqe_compression) &&
 	    MLX5_CAP_GEN(mdev, vport_group_manager))
-		params->rx_cqe_compress_def = cqe_compress_heuristic(link_speed, pci_bw);
+		params->rx_cqe_compress_def = slow_pci_heuristic(mdev);
 
 	MLX5E_SET_PFLAG(params, MLX5E_PFLAG_RX_CQE_COMPRESS, params->rx_cqe_compress_def);
 
@@ -4101,7 +4098,7 @@ void mlx5e_build_nic_params(struct mlx5_core_dev *mdev,
 
 	/* TODO: && MLX5_CAP_ETH(mdev, lro_cap) */
 	if (params->rq_wq_type == MLX5_WQ_TYPE_LINKED_LIST_STRIDING_RQ)
-		params->lro_en = hw_lro_heuristic(link_speed, pci_bw);
+		params->lro_en = !slow_pci_heuristic(mdev);
 	params->lro_timeout = mlx5e_choose_lro_timeout(mdev, MLX5E_DEFAULT_LRO_TIMEOUT);
 
 	/* CQ moderation params */
