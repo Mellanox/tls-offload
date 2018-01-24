@@ -309,6 +309,10 @@ extern struct proto tcp_prot;
 #define TCP_DEC_STATS(net, field)	SNMP_DEC_STATS((net)->mib.tcp_statistics, field)
 #define TCP_ADD_STATS(net, field, val)	SNMP_ADD_STATS((net)->mib.tcp_statistics, field, val)
 
+void tcp_default_collapse(struct sock *sk, struct sk_buff_head *list,
+			  struct rb_root *root, struct sk_buff *head,
+			  struct sk_buff *tail, u32 start, u32 end);
+
 void tcp_tasklet_init(void);
 
 void tcp_v4_err(struct sk_buff *skb, u32);
@@ -1991,7 +1995,12 @@ struct tcp_ulp_ops {
 	/* cleanup ulp */
 	void (*release)(struct sock *sk);
 
-	char		name[TCP_ULP_NAME_MAX];
+	/* collapse SKB list */
+	void (*collapse)(struct sock *sk, struct sk_buff_head *list,
+			 struct rb_root *root, struct sk_buff *head,
+			 struct sk_buff *tail, u32 start, u32 end);
+
+	char name[TCP_ULP_NAME_MAX];
 	struct module	*owner;
 };
 int tcp_register_ulp(struct tcp_ulp_ops *type);

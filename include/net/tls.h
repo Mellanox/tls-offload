@@ -389,4 +389,8 @@ void tls_free_rx_ctx(struct tls_rx_offload_context *ctx);
 int tls_sw_set_rx_offload(struct sock *sk, struct tls_context *ctx);
 
 void tls_data_ready(struct sock *sk);
+void tls_collapse(struct sock *sk, struct sk_buff_head *list,
+		  struct rb_root *root, struct sk_buff *head,
+		  struct sk_buff *tail, u32 start, u32 end);
+
 #endif /* _TLS_OFFLOAD_H */
