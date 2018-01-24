@@ -4745,16 +4745,13 @@ void tcp_rbtree_insert(struct rb_root *root, struct sk_buff *skb)
  * Segments with FIN/SYN are not collapsed (only because this
  * simplifies code)
  */
-static void
-tcp_collapse(struct sock *sk, struct sk_buff_head *list, struct rb_root *root,
-	     struct sk_buff *head, struct sk_buff *tail, u32 start, u32 end)
+void tcp_default_collapse(struct sock *sk, struct sk_buff_head *list,
+			  struct rb_root *root, struct sk_buff *head,
+			  struct sk_buff *tail, u32 start, u32 end)
 {
 	struct sk_buff *skb = head, *n;
 	struct sk_buff_head tmp;
 	bool end_of_skbs;
-
-	if (inet_csk(sk)->icsk_ulp_data)
-		return;
 
 	/* First, check that queue is collapsible and find
 	 * the point where collapsing can be useful.
@@ -4841,6 +4838,19 @@ end:
 	skb_queue_walk_safe(&tmp, skb, n)
 		tcp_rbtree_insert(root, skb);
 }
+EXPORT_SYMBOL(tcp_default_collapse);
+
+static void
+tcp_collapse(struct sock *sk, struct sk_buff_head *list, struct rb_root *root,
+	     struct sk_buff *head, struct sk_buff *tail, u32 start, u32 end) {
+
+	if (inet_csk(sk)->icsk_ulp_ops && inet_csk(sk)->icsk_ulp_ops->collapse)
+		inet_csk(sk)->icsk_ulp_ops->collapse(sk, list, root, head, tail,
+						     start, end);
+	else
+		tcp_default_collapse(sk, list, root, head, tail, start, end);
+}
+
 
 /* Collapse ofo queue. Algorithm: select contiguous sequence of skbs
  * and tcp_collapse() them until all the queue is collapsed.
