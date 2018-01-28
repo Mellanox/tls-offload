@@ -619,6 +619,9 @@ static struct fs_fte *alloc_fte(struct mlx5_flow_table *ft,
 	fte->action = flow_act->action;
 	fte->encap_id = flow_act->encap_id;
 	fte->modify_id = flow_act->modify_id;
+	fte->vlan.ethtype = flow_act->vlan.ethtype;
+	fte->vlan.vid = flow_act->vlan.vid;
+	fte->vlan.prio = flow_act->vlan.prio;
 
 	tree_init_node(&fte->node, del_hw_fte, del_sw_fte);
 
@@ -1430,7 +1433,9 @@ static bool check_conflicting_actions(u32 action1, u32 action2)
 	if (xored_actions & (MLX5_FLOW_CONTEXT_ACTION_DROP  |
 			     MLX5_FLOW_CONTEXT_ACTION_ENCAP |
 			     MLX5_FLOW_CONTEXT_ACTION_DECAP |
-			     MLX5_FLOW_CONTEXT_ACTION_MOD_HDR))
+			     MLX5_FLOW_CONTEXT_ACTION_MOD_HDR  |
+			     MLX5_FLOW_CONTEXT_ACTION_VLAN_POP |
+			     MLX5_FLOW_CONTEXT_ACTION_VLAN_PUSH))
 		return true;
 
 	return false;

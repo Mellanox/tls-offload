@@ -170,6 +170,12 @@ struct mlx5_ft_underlay_qp {
 					 MLX5_FTE_MATCH_PARAM_RESERVED)))
 
 /* Type of children is mlx5_flow_rule */
+struct fs_fte_vlan {
+	u16 ethtype;
+	u16 vid;
+	u8  prio;
+};
+
 struct fs_fte {
 	struct fs_node			node;
 	u32				val[MLX5_ST_SZ_DW_MATCH_PARAM];
@@ -179,6 +185,7 @@ struct fs_fte {
 	u32				action;
 	u32				encap_id;
 	u32				modify_id;
+	struct fs_fte_vlan		vlan;
 	enum fs_fte_status		status;
 	struct mlx5_fc			*counter;
 	struct rhash_head		hash;
