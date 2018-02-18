@@ -162,7 +162,8 @@ static void mlx5e_tls_complete_sync_skb(struct sk_buff *skb,
 
 static struct sk_buff *
 mlx5e_tls_handle_ooo(struct mlx5e_tls_offload_context *context,
-		     struct mlx5e_txqsq *sq, struct sk_buff *skb)
+		     struct mlx5e_txqsq *sq, struct sk_buff *skb,
+		     struct mlx5e_tls *tls)
 {
 	u32 tcp_seq = ntohl(tcp_hdr(skb)->seq);
 	struct sync_info info;
@@ -173,12 +174,14 @@ mlx5e_tls_handle_ooo(struct mlx5e_tls_offload_context *context,
 
 	sq->stats.tls_ooo++;
 
-	if (mlx5e_tls_get_sync_data(context, tcp_seq, &info))
+	if (mlx5e_tls_get_sync_data(context, tcp_seq, &info)) {
 		/* We might get here if a retransmission reaches the driver
 		 * after the relevant record is acked.
 		 * It should be safe to drop the packet in this case
 		 */
+		atomic64_inc(&tls->sw_stats.tx_tls_drop_no_sync_data);
 		goto err_out;
+	}
 
 	if (unlikely(info.sync_len < 0)) {
 		u32 payload;
@@ -190,21 +193,22 @@ mlx5e_tls_handle_ooo(struct mlx5e_tls_offload_context *context,
 			 */
 			return skb;
 
-		netdev_err(skb->dev,
-			   "Can't offload from the middle of an SKB [seq: %X, offload_seq: %X, end_seq: %X]\n",
-			   tcp_seq, tcp_seq + payload + info.sync_len,
-			   tcp_seq + payload);
+		atomic64_inc(&tls->sw_stats.tx_tls_drop_bypass_required);
 		goto err_out;
 	}
 
-	if (unlikely(mlx5e_tls_add_metadata(skb, context->swid)))
+	if (unlikely(mlx5e_tls_add_metadata(skb, context->swid))) {
+		atomic64_inc(&tls->sw_stats.tx_tls_drop_metadata);
 		goto err_out;
+	}
 
 	headln = skb_transport_offset(skb) + tcp_hdrlen(skb);
 	linear_len += headln + sizeof(info.rcd_sn);
 	nskb = alloc_skb(linear_len, GFP_ATOMIC);
-	if (unlikely(!nskb))
+	if (unlikely(!nskb)) {
+		atomic64_inc(&tls->sw_stats.tx_tls_drop_resync_alloc);
 		goto err_out;
+	}
 
 	context->expected_seq = tcp_seq + skb->len - headln;
 	skb_put(nskb, linear_len);
@@ -229,6 +233,7 @@ struct sk_buff *mlx5e_tls_handle_tx_skb(struct net_device *netdev,
 					struct mlx5e_txqsq *sq,
 					struct sk_buff *skb)
 {
+	struct mlx5e_priv *priv = netdev_priv(netdev);
 	struct mlx5e_tls_offload_context *context;
 	struct tls_context *tls_ctx;
 	u32 expected_seq;
@@ -251,11 +256,12 @@ struct sk_buff *mlx5e_tls_handle_tx_skb(struct net_device *netdev,
 	expected_seq = context->expected_seq;
 
 	if (unlikely(expected_seq != skb_seq)) {
-		skb = mlx5e_tls_handle_ooo(context, sq, skb);
+		skb = mlx5e_tls_handle_ooo(context, sq, skb, priv->tls);
 		goto out;
 	}
 
 	if (unlikely(mlx5e_tls_add_metadata(skb, context->swid))) {
+		atomic64_inc(&priv->tls->sw_stats.tx_tls_drop_metadata);
 		dev_kfree_skb_any(skb);
 		skb = NULL;
 		goto out;
