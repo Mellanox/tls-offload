@@ -658,6 +658,7 @@ static struct tcp_ulp_ops tcp_tls_ulp_ops __read_mostly = {
 	.user_visible		= true,
 	.owner			= THIS_MODULE,
 	.init			= tls_init,
+	.collapse		= tls_collapse
 };
 
 static void build_rx_protos(struct proto *prot,

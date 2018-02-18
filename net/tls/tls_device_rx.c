@@ -784,4 +784,38 @@ skip_copy:
 	return ret;
 }
 EXPORT_SYMBOL(tls_recvmsg);
+
+void tls_collapse(struct sock *sk, struct sk_buff_head *list,
+		  struct rb_root *root, struct sk_buff *head,
+		  struct sk_buff *tail, u32 start, u32 end)
+{
+	struct tls_context *tls_ctx = tls_get_ctx(sk);
+	struct tls_rx_offload_context *ctx = tls_rx_offload_ctx(tls_ctx);
+	struct sk_buff *skb;
+	u32 total = 0;
+
+	if (tls_ctx->rx_conf != TLS_HW)
+		tcp_default_collapse(sk, list, root, head, tail, start, end);
+
+	if (atomic_read(&sk->sk_rmem_alloc) <= sk->sk_rcvbuf ||
+	    !before(end, ctx->recv_record_end) || !list)
+		return;
+
+	/* If the sk recvbuf is full but we didn't get a complete record
+	 * yet, uncharge sk_rmem_alloc to allow reception of more SKBs
+	 */
+
+	skb_queue_reverse_walk(list, skb)
+	{
+		if (!skb->truesize)
+			break;
+
+		total += skb->truesize;
+		skb->truesize = 0;;
+	}
+	atomic_sub(total, &sk->sk_rmem_alloc);
+	sk_mem_uncharge(sk, total);
+}
+EXPORT_SYMBOL(tls_collapse);
+
 MODULE_LICENSE("GPL");
