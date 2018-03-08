@@ -32,6 +32,7 @@
  */
 
 #include <linux/netdevice.h>
+#include <net/ipv6.h>
 #include "en_accel/tls.h"
 #include "accel/tls.h"
 
@@ -77,6 +78,11 @@ static int mlx5e_tls_set_flow(void *flow, struct sock *sk, u32 caps)
 		break;
 #if IS_ENABLED(CONFIG_IPV6)
 	case AF_INET6:
+		if (!sk->sk_ipv6only &&
+		    ipv6_addr_type(&(sk->sk_v6_daddr)) == IPV6_ADDR_MAPPED) {
+			mlx5e_tls_set_ipv4_flow(flow, sk);
+			break;
+		}
 		if (!(caps & MLX5_ACCEL_TLS_IPV6))
 			goto error_out;
 
